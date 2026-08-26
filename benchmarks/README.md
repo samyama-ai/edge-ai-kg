@@ -1,12 +1,12 @@
 # Benchmarks
 
-12 queries covering the questions an edge-AI team asks while landing a model on
+16 queries covering the questions an edge-AI team asks while landing a model on
 custom silicon. Each entry in [`queries.py`](queries.py) carries the plain
 question, the Cypher, and a `why_graph` note explaining why the question is
 awkward in a relational or document store.
 
 ```bash
-python -m benchmarks.run_benchmark --url http://127.0.0.1:8080   # all 12
+python -m benchmarks.run_benchmark --url http://127.0.0.1:8080   # all 16
 python -m benchmarks.run_benchmark --only EA01 --rows 20         # one
 python -m benchmarks.run_benchmark --json-out results.json       # machine-readable
 ```
@@ -14,6 +14,14 @@ python -m benchmarks.run_benchmark --json-out results.json       # machine-reada
 Omit `--url` to run against an in-process embedded engine.
 
 ## Current results
+
+> **Stale — measured on the 12-query catalog, before EA13-EA16 were added.**
+> Re-running it needs the `samyama` server binary, which lives in the engine
+> repo, not here; the embedded engine is in-process and cannot be loaded by one
+> command and queried by the next. The figures below are kept as the last
+> recorded run rather than silently restated for 16 queries.
+> `README.md` quotes a later 16-query run: all 16 return rows, median 14 ms,
+> slowest 73 ms, on 25,145 nodes / 76,291 edges.
 
 Samyama Graph v1.7.0 OSS, 24,115 nodes / 73,825 edges, server on localhost:
 

@@ -1,0 +1,181 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A knowledge graph of edge-AI deployment — boards, SoCs, accelerators, runtimes,
+ONNX operators, kernels, quantized model variants and biosignal pipelines — built
+on the **Samyama Graph** engine (OSS v1.7.0). The repo holds the loader, the
+synthetic generator and the query catalog; the engine itself lives in
+`samyama-ai/samyama-graph`.
+
+The hero question it exists to answer: *which operators in this model have no
+kernel on this accelerator, and therefore silently fall back to the CPU?*
+
+## Setup
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+python -m etl.download_data      # REQUIRED first — builds ./data (gitignored)
+```
+
+`etl.download_data` fetches three public sources and generates the fleet into
+`data/`. **Nothing else works until it has run** — the demos and
+`tests/test_correctness.py` call `load_cached()` and skip or fail without it.
+Add `--force` to re-fetch upstreams, `--seed` / `--scale` to change the fleet.
+
+### Installing `samyama` on Linux
+
+`samyama` publishes only a **macOS x86_64 wheel** plus an sdist, so Linux builds
+the Rust extension from source. maturin auto-downloads a Rust toolchain, but the
+host must supply a C compiler and clang's builtin headers. On a bare Ubuntu box
+the build fails twice — first on a missing linker, then on `zstd-sys` bindgen not
+finding `stddef.h`. Fix:
+
+```bash
+sudo apt install -y build-essential python3-dev
+export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/13/include"
+export LIBCLANG_PATH=/usr/lib/llvm-18/lib     # only if libclang isn't found
+pip install -e ".[dev]"                        # ~3 min of cargo build
+```
+
+(Installing `clang`/`libclang-common-*-dev` is the cleaner fix if you have sudo;
+`BINDGEN_EXTRA_CLANG_ARGS` is the workaround when you only have gcc.)
+
+## Commands
+
+```bash
+pytest                                  # 50 tests, all against an embedded engine
+pytest tests/test_correctness.py -x     # the ones that matter most
+pytest tests/test_correctness.py::test_ea01_fallback_audit_matches_ground_truth
+ruff check .                            # no config; defaults only
+
+python -m demo.demo --fast              # 6-beat story, self-contained
+python -m demo.questions --only EA01 EA06 --fast
+python -m benchmarks.run_benchmark --only EA01 --rows 20
+python -m etl.loader --layers real      # load only the public-source subgraph
+python -m mcp_server.server             # 7 MCP tools over the graph
+```
+
+### Embedded vs server — the thing that trips people up
+
+`SamyamaClient.embedded()` runs the engine **in-process and in-memory**. It does
+**not** persist: a second Python process sees an empty graph (verified). So:
+
+- `python -m etl.loader` with no `--url` loads a graph and then throws it away —
+  it is only a timing/verification exercise. A following
+  `python -m benchmarks.run_benchmark` (embedded) will find nothing.
+- `demo/demo.py`, `demo/questions.py` and `tests/test_correctness.py` each build
+  the graph **inside their own process**, which is why they are self-contained.
+- To load once and query repeatedly, run the engine over HTTP and pass `--url`
+  to both commands:
+
+  ```bash
+  ./target/release/samyama --http-port 8080   # from a samyama-graph checkout
+  python -m etl.loader --url http://127.0.0.1:8080
+  python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
+  ```
+
+`--graph` looks like tenant isolation but is ignored on OSS (engine note 7 below);
+everything lands in `default`. `run_benchmark` defaults to `--graph edge_ai` while
+the loader defaults to `default` — harmless only *because* the argument is ignored.
+
+## Architecture
+
+### The `Fleet` intermediate representation
+
+Nothing writes Cypher directly from source data. Every path funnels through
+`etl.generate.Fleet` — a dataclass holding `nodes: dict[label, list[dict]]` and
+`edges: list[tuple]` — which `etl/helpers.py` then renders into batched `CREATE`
+statements. Two independent producers fill the same Fleet:
+
+- **`etl/generate.py`** (synthetic): deterministic from `--seed` (default
+  `20260814`); `--scale` multiplies fleet size. Same seed → same graph, always.
+  Vendor/board names are deliberately fictional so no generated number can be
+  read as a claim about a real product.
+- **`etl/real_layer.py`** (real): stitches `onnx_catalog.py` (ONNX operator
+  catalog), `ort_kernels.py` (ONNX Runtime kernel registrations) and
+  `mlperf_tiny.py` (MLPerf Tiny v1.2 measurements) onto an existing — possibly
+  empty — Fleet.
+
+Each `etl/*.py` source module follows the same shape: `download()` → `parse_*()`
+→ `build()` writes `data/<source>/*.json` → `load_cached()` reads it back.
+Parsers are tested against fixture text, so they can be edited without network.
+
+`Fleet.add_nodes()` does two load-bearing things: it **copies** each row (the
+generator keeps mutating the originals afterward, attaching `_`-prefixed
+internals) and stamps `provenance` (`"real"` | `"synthetic"`) plus `source` on
+every node. `_`-prefixed keys are stripped and never reach the graph. The
+real/synthetic split is therefore *queryable* (see EA16), not a README claim.
+
+### The query catalog is the single source of truth
+
+`benchmarks/queries.py` holds 16 entries (`EA01`–`EA16`), each with
+`question` / `why_graph` / `cypher`, exported as `QUERIES` and `BY_ID`. It is
+consumed by `benchmarks/run_benchmark.py`, `demo/questions.py` and
+`tests/test_correctness.py`. Editing a query changes the benchmark, the demo and
+the tests at once. `EA13`–`EA16` run entirely on the real layer, so the
+`test_correctness.py` fixture must load **both** layers or they come back empty.
+
+`mcp_server/server.py` deliberately re-states rather than imports these queries —
+its tools take typed parameters and interpolate them, so they are parameterized
+variants, not the catalog verbatim. Keep the two in sync by hand when the graph
+shape changes.
+
+## Engine constraints — read `docs/engine-notes.md` before writing Cypher
+
+Samyama v1.7.0 has nine documented behaviours, several of which **return wrong
+rows rather than erroring**. The loader and every catalog query work around them,
+so these are not trivia — breaking one of these rules produces confident,
+plausible, wrong output. The rules that follow from them:
+
+- **Project through `WITH` before `RETURN`, and sort on the `WITH` alias.**
+  `ORDER BY` on a `RETURN`-introduced alias is silently dropped. With `LIMIT`
+  that yields an arbitrary N rows dressed up as a top-N.
+- **One `ORDER BY` key only.** Later keys are ignored.
+  `test_order_by_is_actually_applied` enforces this across the whole catalog.
+- **Aggregate a property, never a bare node variable.** `count(DISTINCT op)` over
+  a multi-variable `MATCH` returns N rows of `1`; `count(DISTINCT op.id)` is
+  correct. Every catalog aggregate is written the second way.
+- **Never re-bind a variable in a trailing position of a second `MATCH`.** The
+  join isn't enforced and you get a cartesian product — at scale, even the
+  comma-separated single-`MATCH` form breaks. Use one linear pattern plus
+  `sum(CASE WHEN ...)` conditional aggregation instead (this is why EA04 looks
+  the way it does).
+- **`RETURN DISTINCT` is a no-op.** `DISTINCT` inside an aggregate works. Group
+  with `WITH` + an aggregate to deduplicate.
+- **No negated pattern predicates.** Anti-joins are
+  `OPTIONAL MATCH ... WITH ... count(k) AS n ... WHERE n = 0`.
+- **Keep numeric literal types matching the stored property type.** `WHERE x > 0.5`
+  against an int-typed property returns nothing; `min(CASE ... ELSE 999999 END)`
+  returns the int sentinel while `999999.0` works.
+- **`DETACH DELETE` is not a reset.** The columnar property store survives it, so
+  a property removed from the source data resurrects onto newly created nodes.
+  A genuine reset means stopping the server and deleting its data directory.
+- **`<>` matches null properties.** Use `IS NULL` / `IS NOT NULL`.
+- **No `CREATE CONSTRAINT`.** Only `CREATE INDEX ON :Label(prop)`, as in
+  `schema/edge_ai_kg.cypher`. `id` uniqueness is a loader invariant, guaranteed by
+  deterministic id minting in `etl/generate.py`.
+
+`etl/helpers.py` encodes the write-side equivalents: strings are double-quoted
+with quotes/newlines *stripped* (the parser has no escape syntax), floats are
+forced to fixed notation (`1e-05` is a parse error), and edge endpoints are
+matched with `WHERE id = ...` rather than inline map properties, because inline
+properties don't trigger an index scan on this build.
+
+## Testing philosophy
+
+`tests/test_correctness.py` recomputes expected answers **in Python from the
+Fleet** and asserts the engine agrees. This exists because a query that runs and
+returns plausible rows is not evidence it is right — EA04 once returned 12
+confident rows pairing one model's fp32 variant with another model's int8. The
+canary there is that int8 size is by construction exactly ¼ of fp32 size, so a
+cartesian product is detectable; `test_ea04_shape_is_not_a_cartesian_product`
+pins it on a purpose-built 4-deployment fixture.
+
+When adding a query to the catalog, add a ground-truth test alongside it. When a
+result looks suspicious, check `docs/engine-notes.md` before assuming the data is
+wrong — and validate any proposed workaround on a full-size graph, since at least
+one bug only appears once cardinalities are real.
