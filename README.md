@@ -216,7 +216,7 @@ returns plausible rows is not evidence that it is right.
 etl/          onnx_catalog.py, ort_kernels.py, mlperf_tiny.py, real_layer.py (real)
               generate.py (synthetic) + loader.py
 schema/       edge_ai_kg.cypher — indexes and documented relationship shapes
-benchmarks/   the 12-query catalog + runner
+benchmarks/   the 16-query catalog + runner
 mcp_server/   7 MCP tools shaped around deployment questions
 demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
