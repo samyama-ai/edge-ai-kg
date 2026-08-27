@@ -15,13 +15,17 @@ Omit `--url` to run against an in-process embedded engine.
 
 ## Current results
 
+> **Stale — measured on the 12-query catalog, before EA13-EA16 were added.**
+> Re-running it needs the `samyama` server binary, which lives in the engine
+> repo, not here; the embedded engine is in-process and cannot be loaded by one
+> command and queried by the next. The figures below are kept as the last
+> recorded run rather than silently restated for 16 queries.
+> `README.md` quotes a later 16-query run: all 16 return rows, median 14 ms,
+> slowest 73 ms, on 25,145 nodes / 76,291 edges.
+
 Samyama Graph v1.7.0 OSS, 24,115 nodes / 73,825 edges, server on localhost:
 
-**16/16 queries return rows, 0 empty, 0 failed. Median 15 ms, slowest 71 ms.**
-
-*Timings were recorded when the catalog held 12 queries and have not been
-re-measured since EA13-EA16 were added. Nothing in the repo checks them — see
-issue #17.*
+**12/12 queries return rows, 0 empty, 0 failed. Median 15 ms, slowest 71 ms.**
 
 The slow end are the queries that touch all 21,844 kernels (EA08, EA11); the
 anti-joins that anchor on a single model run in 30-40 ms.
