@@ -117,30 +117,6 @@ python -m etl.download_data     # fetch 3 public sources + generate the fleet
 python -m demo.demo             # narrated walkthrough, in-process, no server
 ```
 
-### On Linux, install these first
-
-`samyama` publishes a macOS wheel and an sdist, so on Linux `pip` builds the
-Rust extension from source. maturin fetches its own Rust toolchain, but the
-system still has to supply venv support, a C compiler and clang's builtin
-headers — a stock Ubuntu 24.04 image has none of the three:
-
-```bash
-sudo apt install -y python3-venv build-essential python3-dev
-export BINDGEN_EXTRA_CLANG_ARGS="-I$(gcc -print-file-name=include)"
-pip install -e ".[dev]"         # ~3 min of cargo build
-```
-
-Without them the install fails three times, and no message names its real cause:
-
-| Failure | Actually missing |
-|---|---|
-| `ensurepip is not available` from `python -m venv` | `python3-venv` |
-| `could not compile 'proc-macro2' (build script)` … `No such file or directory (os error 2)` | a C linker (`cc`) |
-| `zstd.h:16:10: fatal error: 'stddef.h' file not found` | clang's builtin headers |
-
-Installing `clang` and `libclang-dev` supplies those headers directly and should
-remove the need for `BINDGEN_EXTRA_CLANG_ARGS`.
-
 `demo.demo` runs the engine **embedded** — no server, no Docker, nothing to
 start. To use a running server instead:
 
