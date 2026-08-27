@@ -1,4 +1,4 @@
-"""Question-driven walkthrough: the 12 catalog questions, asked and answered.
+"""Question-driven walkthrough: the 16 catalog questions, asked and answered.
 
     python -m demo.questions                          # embedded, self-contained
     python -m demo.questions --url http://127.0.0.1:8080
@@ -121,7 +121,7 @@ def main() -> None:
     console.print()
     console.print(Panel.fit(
         "[bold]Edge AI Deployment Knowledge Graph[/bold]\n"
-        "[dim]12 questions an edge-AI team actually asks,\n"
+        f"[dim]{len(QUERIES)} questions an edge-AI team actually asks,\n"
         "answered against boards, kernels and models in one graph.[/dim]",
         border_style="bold cyan", padding=(1, 3)))
     pause(1.2)
