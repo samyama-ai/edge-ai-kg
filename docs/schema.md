@@ -1,6 +1,6 @@
 # Edge AI KG -- schema
 
-15 node labels, 21 edge types. At `--scale 1.0`: **24,115 nodes, 73,825 edges**
+16 node labels, 21 edge types. At `--scale 1.0`: **24,115 nodes, 73,825 edges**
 (seed `20260814`). See [`data-provenance.md`](data-provenance.md) for what is
 real and what is synthetic, and [`engine-notes.md`](engine-notes.md) for the
 v1.7.0 behaviours the queries work around.
@@ -27,10 +27,19 @@ and what does it cost me when it can't?**
 | `Vendor` | 8 | id, name, country |
 | `Runtime` | 7 | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
+| `BenchmarkTask` | 0 (4 real) | id, name, code, dataset, metric, quality_target |
 
 Every node carries a unique `id`; `schema/edge_ai_kg.cypher` indexes it per
 label. Uniqueness is a loader invariant -- this engine does not parse
 `CREATE CONSTRAINT`.
+
+`BenchmarkTask` is the one label the generator does not produce. Its four nodes
+-- Anomaly Detection, Image Classification, Keyword Spotting, Visual Wake Words
+-- come from MLPerf Tiny v1.2 and are stamped `provenance: "real"`, so a
+generated-only load holds none of them and they fall outside the 24,115 total
+above. That is why the label was absent from this table until now; the counts
+here describe the generated layer, which is itself worth stating more plainly
+(see #14).
 
 ## Edge types
 
