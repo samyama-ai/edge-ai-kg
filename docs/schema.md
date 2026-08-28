@@ -27,11 +27,15 @@ and what does it cost me when it can't?**
 | `Vendor` | 8 | id, name, country |
 | `Runtime` | 7 | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
-| `BenchmarkTask` | 0 (4 real) | id, name, code, dataset, metric, quality_target |
+| `BenchmarkTask` | 0 (+4 real) | id, name, code, dataset, metric, quality_target |
 
 Every node carries a unique `id`; `schema/edge_ai_kg.cypher` indexes it per
 label. Uniqueness is a loader invariant -- this engine does not parse
 `CREATE CONSTRAINT`.
+
+A count written `N (+M real)` is N from the generated layer plus M more once the
+real layer is loaded. Only N is inside the totals stated above, which are
+generated-layer figures.
 
 `BenchmarkTask` is the one label the generator does not produce. Its four nodes
 -- Anomaly Detection, Image Classification, Keyword Spotting, Visual Wake Words
@@ -66,7 +70,7 @@ here describe the generated layer, which is itself worth stating more plainly
 | `NEXT_STAGE` | SignalStage -> SignalStage | 40 | DSP chain |
 | `GOVERNED_BY` | ClinicalTask -> Certification | 22 | regulatory requirement |
 | `FEEDS` | Sensor -> SignalStage | 14 | front of the pipeline |
-| `MEASURES` | Deployment -> Model | 0 (73 real) | a measured MLPerf Tiny submission against its reference model |
+| `MEASURES` | Deployment -> Model | 0 (+73 real) | a measured MLPerf Tiny submission against its reference model |
 
 Counts are the generated layer, so the column sums to the 73,825 above.
 `MEASURES` is real-only for the same reason `BenchmarkTask` is -- the generator

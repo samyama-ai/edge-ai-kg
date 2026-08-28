@@ -19,13 +19,20 @@ SCHEMA = ROOT / "schema" / "edge_ai_kg.cypher"
 SCHEMA_DOC = ROOT / "docs" / "schema.md"
 
 
-def declared_in_schema(heading: str) -> set[str]:
-    """A `// <heading>: A, B, C` block, which wraps over several lines."""
+def declared_in_schema(heading: str) -> list[str]:
+    """A `// <heading>: A, B, C` block, which wraps over several lines.
+
+    Returns a list, not a set, so callers can also see duplicates.
+    """
     text = SCHEMA.read_text(encoding="utf-8")
     match = re.search(rf"^// {heading}:(.*?)^//\s*$", text, re.DOTALL | re.MULTILINE)
     assert match, f"no `// {heading}:` block in schema/edge_ai_kg.cypher"
     body = re.sub(r"^//", "", match.group(1), flags=re.MULTILINE)
-    return {name.strip() for name in body.split(",") if name.strip()}
+    return [name.strip() for name in body.split(",") if name.strip()]
+
+
+def duplicates(names) -> list[str]:
+    return sorted({name for name in names if list(names).count(name) > 1})
 
 
 def first_column_of(section: str) -> set[str]:
@@ -42,7 +49,7 @@ def first_column_of(section: str) -> set[str]:
 
 
 def labels_declared_in_schema() -> set[str]:
-    return declared_in_schema("Node labels")
+    return set(declared_in_schema("Node labels"))
 
 
 def labels_in_the_node_table() -> set[str]:
@@ -50,7 +57,7 @@ def labels_in_the_node_table() -> set[str]:
 
 
 def edges_declared_in_schema() -> set[str]:
-    return declared_in_schema("Edge types")
+    return set(declared_in_schema("Edge types"))
 
 
 def edges_in_the_edge_table() -> set[str]:
@@ -68,10 +75,18 @@ def test_node_labels_has_no_duplicate_entries():
     constraint, so a duplicate would load a label's rows twice without anything
     rejecting the repeated ids.
     """
-    assert len(NODE_LABELS) == len(set(NODE_LABELS)), (
-        f"duplicated in NODE_LABELS: "
-        f"{sorted({x for x in NODE_LABELS if NODE_LABELS.count(x) > 1})}"
-    )
+    assert not duplicates(NODE_LABELS), \
+        f"duplicated in NODE_LABELS: {duplicates(NODE_LABELS)}"
+
+
+def test_the_schema_header_lists_nothing_twice():
+    """The set comparisons above would hide a name repeated in either block."""
+    for heading in ("Node labels", "Edge types"):
+        listed = declared_in_schema(heading)
+        assert not duplicates(listed), (
+            f"`// {heading}:` in schema/edge_ai_kg.cypher lists "
+            f"{duplicates(listed)} more than once"
+        )
 
 
 def test_every_declared_label_has_a_row_in_the_schema_doc():
@@ -110,17 +125,26 @@ def test_the_schema_doc_documents_no_edge_type_that_does_not_exist():
     )
 
 
-def stated_count(noun: str) -> int:
-    """The `N node labels, M edge types` sentence docs/schema.md opens with."""
+def stated_counts() -> tuple[int, int]:
+    """The `N node labels, M edge types` sentence docs/schema.md opens with.
+
+    Matched as one whole sentence at the start of a line rather than as two
+    loose `(\\d+) node labels` searches: a later paragraph mentioning either
+    phrase would otherwise capture the count and let the opening line drift
+    without failing anything.
+    """
     text = SCHEMA_DOC.read_text(encoding="utf-8")
-    match = re.search(rf"(\d+) {noun}", text)
-    assert match, f"docs/schema.md no longer states a count of {noun}"
-    return int(match.group(1))
+    match = re.search(r"^(\d+) node labels, (\d+) edge types\.", text, re.MULTILINE)
+    assert match, (
+        "docs/schema.md no longer opens with an `N node labels, M edge types.` "
+        "sentence; update this test alongside the rewording"
+    )
+    return int(match.group(1)), int(match.group(2))
 
 
 def test_the_stated_label_count_matches_the_table():
-    assert stated_count("node labels") == len(labels_in_the_node_table())
+    assert stated_counts()[0] == len(labels_in_the_node_table())
 
 
 def test_the_stated_edge_type_count_matches_the_table():
-    assert stated_count("edge types") == len(edges_in_the_edge_table())
+    assert stated_counts()[1] == len(edges_in_the_edge_table())
