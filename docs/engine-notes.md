@@ -1,12 +1,17 @@
 # Engine notes -- Samyama Graph v1.7.0
 
 Behaviour observed while building this KG, on the OSS engine at v1.7.0.
-**All nine are filed upstream** — see the tracking issue
+**Notes 1-9 are filed upstream** — see the tracking issue
 [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-Observed on the OSS engine at v1.7.0
-(`target/release/samyama --http-port 8080`). Every item here is load-bearing:
+Notes 1-9 were observed on the OSS engine at v1.7.0
+(`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
+
+**Note 10 is a different kind of entry.** It is not a behaviour of the server
+but a disagreement between the server and the in-process embedded build, it is
+not filed upstream, and nothing works around it yet — it is the reason three
+tests fail. Verified 2026-08-28, tracked at #56.
 
 ---
 
@@ -273,10 +278,59 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ---
 
+## 10. The embedded build does not register an alias introduced by a second `WITH`
+
+> Not filed upstream. Tracked here as #56 — unlike notes 1-9 this is a
+> disagreement between two builds, not a behaviour of the server.
+
+`SamyamaClient.embedded()` (`samyama` 0.6.1 from pip) and the HTTP server
+(`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0) do not answer the same
+question. A second `WITH` that introduces a **new** alias from a property
+expression is not registered on the embedded build:
+
+| Statement | embedded | HTTP |
+|---|---|---|
+| `WITH n.name AS a RETURN a` | ok | ok |
+| `WITH n, count(n.id) AS c RETURN n.name, c` | ok | ok |
+| `WITH n WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WHERE c > 0 WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WITH n, c RETURN n.name, c` | ok | ok |
+
+Carrying existing variables through a second `WITH` is fine. It is introducing a
+new one that fails, so the last row is what makes this narrow rather than
+"chained `WITH` is broken".
+
+Minimal reproduction against an otherwise empty graph:
+
+```python
+from samyama import SamyamaClient
+c = SamyamaClient.embedded()
+c.query('CREATE (:Probe {id: "p1", name: "a"})', "default")
+c.query("MATCH (n:Probe) WITH n WITH n.name AS a RETURN a", "default")
+# RuntimeError: Query error: Variable not found: a
+```
+
+The same three lines against `SamyamaClient.connect("http://127.0.0.1:8080")`
+return one row.
+
+**Why it bites here:** the workaround for note 3 is to project through a `WITH`
+before `RETURN` so `ORDER BY` is honoured. EA01 and EA02 already need a `WITH`
+for their anti-join aggregation, so that projection is a *second* one — the
+workaround for one note is what triggers this one. Both queries return rows
+against the server (`run_benchmark` reports 16/16, 0 failed) and both fail under
+`pytest`, which uses the embedded build.
+
+**No workaround adopted.** Which engine the test suite should treat as
+authoritative is an open decision — see #56.
+
+---
+
 ## What works well
 
 Everything the catalog depends on, other than the above:
-`OPTIONAL MATCH`, `WITH` + aggregation (`count`/`sum`/`avg`/`min`/`max`/`collect`),
+`OPTIONAL MATCH`, `WITH` + aggregation (`count`/`sum`/`avg`/`min`/`max`/`collect`)
+— though see note 10 on chaining two of them against the embedded build —
 variable-length paths (`-[:R*0..3]->`), `shortestPath`, `CASE`, `IN`, `SKIP` / `LIMIT`, string functions, `EXPLAIN`, and `CREATE INDEX`.
 
 Load throughput on this box (RTX 4050 laptop, server on localhost):
