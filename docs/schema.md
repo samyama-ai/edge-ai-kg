@@ -1,6 +1,6 @@
 # Edge AI KG -- schema
 
-15 node labels, 21 edge types. At `--scale 1.0`: **24,115 nodes, 73,825 edges**
+16 node labels, 22 edge types. At `--scale 1.0`: **24,115 nodes, 73,825 edges**
 (seed `20260814`). See [`data-provenance.md`](data-provenance.md) for what is
 real and what is synthetic, and [`engine-notes.md`](engine-notes.md) for the
 v1.7.0 behaviours the queries work around.
@@ -27,10 +27,23 @@ and what does it cost me when it can't?**
 | `Vendor` | 8 | id, name, country |
 | `Runtime` | 7 | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
+| `BenchmarkTask` | 0 (+4 real) | id, name, code, dataset, metric, quality_target |
 
 Every node carries a unique `id`; `schema/edge_ai_kg.cypher` indexes it per
 label. Uniqueness is a loader invariant -- this engine does not parse
 `CREATE CONSTRAINT`.
+
+A count written `N (+M real)` is N from the generated layer plus M more once the
+real layer is loaded. Only N is inside the totals stated above, which are
+generated-layer figures.
+
+`BenchmarkTask` is the one label the generator does not produce. Its four nodes
+-- Anomaly Detection, Image Classification, Keyword Spotting, Visual Wake Words
+-- come from MLPerf Tiny v1.2 and are stamped `provenance: "real"`, so a
+generated-only load holds none of them and they fall outside the 24,115 total
+above. That is why the label was absent from this table until now; the counts
+here describe the generated layer, which is itself worth stating more plainly
+(see #14).
 
 ## Edge types
 
@@ -51,12 +64,19 @@ label. Uniqueness is a loader invariant -- this engine does not parse
 | `CERTIFIED_FOR` | Board -> Certification | 104 | regulatory posture |
 | `HAS_ACCELERATOR` | SoC -> Accelerator | 85 | chip's compute units |
 | `TRAINED_ON` | Model -> Dataset | 82 | provenance |
-| `SOLVES` | Model -> ClinicalTask | 60 | clinical purpose |
+| `SOLVES` | Model -> ClinicalTask; Model -> BenchmarkTask | 60 (+4 real) | clinical purpose; MLPerf Tiny task |
 | `PRECEDES` | SignalStage -> Model | 60 | pipeline feeds model |
 | `REQUIRES_SENSOR` | ClinicalTask -> Sensor | 51 | required modality |
 | `NEXT_STAGE` | SignalStage -> SignalStage | 40 | DSP chain |
 | `GOVERNED_BY` | ClinicalTask -> Certification | 22 | regulatory requirement |
 | `FEEDS` | Sensor -> SignalStage | 14 | front of the pipeline |
+| `MEASURES` | Deployment -> Model | 0 (+73 real) | a measured MLPerf Tiny submission against its reference model |
+
+Counts are the generated layer, so the column sums to the 73,825 above.
+`MEASURES` is real-only for the same reason `BenchmarkTask` is -- the generator
+does not emit it -- and carries one edge per real MLPerf Tiny submission.
+`SOLVES` gains its second target, `Model -> BenchmarkTask`, only when the real
+layer is loaded.
 
 ## The two spines
 
