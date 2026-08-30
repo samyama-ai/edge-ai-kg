@@ -8,6 +8,23 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 > This repo holds the loader, the generator and the query catalog for the KG.
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue" alt="License"></a>
+<a href="https://huggingface.co/datasets/VaidhyaMegha/edge-ai-kg"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20dataset-VaidhyaMegha%2Fedge--ai--kg-yellow" alt="HuggingFace dataset"></a>
+
+**The graph is published as a dataset** — you do not have to run the loader:
+**[huggingface.co/datasets/VaidhyaMegha/edge-ai-kg](https://huggingface.co/datasets/VaidhyaMegha/edge-ai-kg)**
+(`v1.0`). All 25,152 nodes and 76,306 edges as node/edge CSVs, plus `edge-ai.sgsnap`.
+
+```python
+from datasets import load_dataset
+kernels = load_dataset("VaidhyaMegha/edge-ai-kg", "kernel", revision="v1.0")
+```
+
+> Everything is published — nothing is held back. All three real sources permit
+> redistribution (ONNX Apache-2.0, ONNX Runtime MIT, MLPerf Tiny Apache-2.0), and the
+> `provenance` stamp is carried through: **1,242 real, 23,910 synthetic, none unstamped**.
+> The dataset is a point-in-time build (**2026-08-29**) giving 25,152 / 76,306 against the
+> 25,145 / 76,291 recorded here, because ONNX Runtime's kernel docs gained registrations
+> in between.
 
 ![Edge AI KG — 16 questions answered](demo/edgeai-questions.gif)
 
