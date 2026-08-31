@@ -13,10 +13,48 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.1.0"]
+dev = ["pytest>=7.0", "ruff>=0.16,<0.17"]
 
 [tool.setuptools.packages.find]
 include = ["etl*", "mcp_server*", "benchmarks*", "demo*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+# Pinned explicitly rather than left to ruff's defaults: `ruff>=0.1.0` spans
+# versions whose default rule set differs, so without this CI would start
+# failing on a ruff release rather than on a change to this repo. This is the
+# set that was already firing, minus the rules this repo has decided against.
+select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE", "S",
+          "PLR0124"]  # comparison-with-itself, for the NaN check in helpers.py
+
+[tool.ruff.lint.per-file-ignores]
+# Scoped per file rather than ignored globally: each exemption below is a
+# property of that module, not of the repo, and a broad `except Exception` added
+# somewhere new -- `mcp_server/server.py`, say, where a narrower class may exist
+# and swallowing is likelier to be a bug -- should still be reported.
+#
+# BLE001 is exempted in three places -- the two modules directly below, and
+# tests/ further down. In all of them the broad catch sits on a call into the
+# engine, which raises untyped errors (`RuntimeError("Query error: ...")`) for
+# anything from unsupported Cypher to an unreachable server. There is no
+# narrower class to catch, and each caller deliberately continues: the loader
+# reports a skipped schema statement, the benchmark records a per-query
+# failure, the tests skip.
+"etl/loader.py" = ["BLE001"]
+"benchmarks/run_benchmark.py" = ["BLE001"]
+
+# S311: the generator's `random` is seeded reproducibility -- same seed, same
+# graph -- not a weak RNG standing in for a secure one.
+"etl/generate.py" = ["S311"]
+
+# S101: asserts are what a test is. S110: cleanup between fixtures is
+# best-effort by design -- failing to delete leftover nodes must not mask the
+# assertion the test exists to make. PERF203: the catalog sweep catches
+# per-query so it can report every failure rather than stopping at the first.
+"tests/*" = ["S101", "S110", "PERF203", "BLE001"]

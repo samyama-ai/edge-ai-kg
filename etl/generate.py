@@ -20,9 +20,9 @@ cost model and its stated limits.
 from __future__ import annotations
 
 import json
-import math
 import random
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 from etl.onnx_catalog import Operator, load_cached
@@ -219,7 +219,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
     fleet = Fleet(seed=seed, scale=scale)
 
     def n(base: int) -> int:
-        return max(1, int(round(base * scale)))
+        return max(1, round(base * scale))
 
     # ---------------- Vendors ----------------
     vendors = []
@@ -419,7 +419,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
     for s in sensors:
         chain = rng.sample(stages, rng.choice([3, 4, 4, 5]))
         fleet.add_edge("Sensor", s["id"], "FEEDS", "SignalStage", chain[0]["id"], None)
-        for a, b in zip(chain, chain[1:]):
+        for a, b in pairwise(chain):
             fleet.add_edge("SignalStage", a["id"], "NEXT_STAGE", "SignalStage", b["id"], None)
         s["_chain"] = chain
 
@@ -446,8 +446,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             pool = ops_by_cat.get(cat, [])
             if not pool:
                 continue
-            for o in rng.sample(pool, min(len(pool), rng.choice([2, 3, 3, 4]))):
-                used.append(o)
+            used.extend(rng.sample(pool, min(len(pool), rng.choice([2, 3, 3, 4]))))
         for o in dict.fromkeys(used):
             fleet.add_edge("Model", mid, "USES_OPERATOR", "Operator", o.id,
                            {"count": rng.randint(1, 24)})
@@ -487,9 +486,6 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
     # A Deployment is a measured (variant, board, runtime) triple. Metrics are
     # derived from the cost model in docs/data-provenance.md.
     models_by_id = {m["id"]: m for m in models}
-    accel_by_id = {a["id"]: a for a in accelerators}
-    boards_by_id = {b["id"]: b for b in boards}
-    soc_by_id = {s["id"]: s for s in socs}
 
     # kernel coverage lookup: (accel_id, runtime_id) -> set(op_id)
     coverage: dict[tuple[str, str], set[str]] = {}
@@ -497,7 +493,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
         coverage.setdefault((k["_accel"], k["_rt"]), set()).add(k["_op"])
 
     deployments = []
-    per_variant = max(1, int(round(6 * scale)))
+    per_variant = max(1, round(6 * scale))
     for v in variants:
         model = models_by_id[v["_model"]]
         for b in rng.sample(boards, min(len(boards), per_variant)):
