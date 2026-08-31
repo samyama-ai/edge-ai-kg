@@ -1,7 +1,7 @@
 """Run every catalog query against a loaded Edge AI KG and report timings.
 
 Usage:
-    python -m benchmarks.run_benchmark --url http://127.0.0.1:8080 --graph edge_ai
+    python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
     python -m benchmarks.run_benchmark --only EA01 --rows 20
 """
 from __future__ import annotations
@@ -48,7 +48,8 @@ def run_one(client, graph: str, query: dict, repeats: int) -> dict:
 
 @click.command()
 @click.option("--url", default=None, help="Samyama server URL. Omit for embedded.")
-@click.option("--graph", default="edge_ai", show_default=True)
+@click.option("--graph", default="default", show_default=True,
+              help="Target graph / tenant. Matches the loader's default.")
 @click.option("--repeats", default=3, show_default=True)
 @click.option("--rows", default=5, show_default=True, help="Result rows to print.")
 @click.option("--only", default=None, help="Run a single query id, e.g. EA01.")
