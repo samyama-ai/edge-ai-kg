@@ -201,23 +201,39 @@ def main(url, graph, seed, scale, limit, regenerate, reset, layers, verify):
         except Exception as exc:
             click.echo(f"  ! edge verification query failed: {exc}", err=True)
             sys.exit(1)
-        short = [r for r in rows if r[2] != r[1]]
-        click.echo(f"  verified: {sum(r[2] for r in rows):,} edges "
-                   f"across {len(rows)} types")
-        if short:
+        missing = [r for r in rows if r[2] < r[1]]
+        surplus = [r for r in rows if r[2] > r[1]]
+        intended = sum(r[1] for r in rows)
+        click.echo(f"  verified: {sum(r[2] for r in rows):,} of {intended:,} "
+                   f"intended edges across {len(rows)} types")
+
+        def table(heading: str, entries, note: str) -> None:
             click.echo("")
-            click.echo("  ! edges missing -- the load reported success and did not "
-                       "create these:", err=True)
-            click.echo(f"    {'edge type':22} {'intended':>10} {'actual':>10} {'short':>8}",
-                       err=True)
-            for rel, want, have in short:
-                click.echo(f"    {rel:22} {want:>10,} {have:>10,} {want - have:>8,}",
+            click.echo(f"  ! {heading}", err=True)
+            click.echo(f"    {'edge type':22} {'intended':>10} {'actual':>10} "
+                       f"{'delta':>8}", err=True)
+            for rel, want, have in entries:
+                click.echo(f"    {rel:22} {want:>10,} {have:>10,} {have - want:>+8,}",
                            err=True)
             click.echo("")
-            click.echo("    An endpoint id did not resolve. Edges are created in "
-                       "batches sharing one MATCH,", err=True)
-            click.echo("    so one unresolvable id drops its whole batch. See issue "
-                       "#23.", err=True)
+            click.echo(f"    {note}", err=True)
+
+        if missing:
+            table("edges missing -- the load reported success and did not create these:",
+                  missing,
+                  "An endpoint id did not resolve. Edges are created in batches "
+                  "sharing one MATCH,\n    so one unresolvable id drops its whole "
+                  "batch. See issue #23.")
+        if surplus:
+            table("more edges than intended -- the graph holds edges this load did "
+                  "not submit:",
+                  surplus,
+                  "Either the graph was not empty (--no-reset, a failed reset, or a "
+                  "second load\n    on top of a first), or two nodes share an `id`: "
+                  "endpoints are matched by\n    id and this engine parses no "
+                  "uniqueness constraint (engine note 6), so a\n    duplicate id "
+                  "binds twice and one submitted edge is created twice.")
+        if missing or surplus:
             sys.exit(1)
 
 

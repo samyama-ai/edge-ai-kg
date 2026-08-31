@@ -19,6 +19,16 @@ from etl.loader import verify_edges
 GRAPH = "default"
 
 
+EDGE_TYPES = ("VLINK", "VDROP", "VOK", "VBAD")
+
+
+def count(c, cypher: str) -> int:
+    """A count over a relationship type with no instances returns no rows here,
+    not a row holding 0 -- the same guard `count_edges_by_type` carries."""
+    result = c.query(cypher, GRAPH)
+    return result.records[0][0] if result.records else 0
+
+
 @pytest.fixture
 def client():
     try:
@@ -26,6 +36,7 @@ def client():
         c = SamyamaClient.embedded()
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+
     for label in ("VA", "VB"):
         try:
             c.query(f"MATCH (n:{label}) DETACH DELETE n", GRAPH)
@@ -33,6 +44,18 @@ def client():
             pass
     create_nodes(c, GRAPH, "VA", [{"id": f"va{i}"} for i in range(5)])
     create_nodes(c, GRAPH, "VB", [{"id": f"vb{i}"} for i in range(5)])
+
+    # Assert the fixture's own post-condition. The cleanup above swallows its
+    # error, and this engine parses no uniqueness constraint, so a failed
+    # DETACH DELETE would leave a second node sharing each id -- every `WHERE
+    # v.id = ...` would then bind twice and the assertions below would report
+    # ("VLINK", 5, 10), indicting verify_edges instead of the leftover state.
+    for label in ("VA", "VB"):
+        got = count(c, f"MATCH (n:{label}) RETURN count(n.id) AS n")
+        assert got == 5, f"dirty fixture: {got} {label} nodes, expected 5"
+    for rel in EDGE_TYPES:
+        got = count(c, f"MATCH (a)-[:{rel}]->(b) RETURN count(a.id) AS n")
+        assert got == 0, f"dirty fixture: {got} leftover {rel} edges from a prior test"
     return c
 
 

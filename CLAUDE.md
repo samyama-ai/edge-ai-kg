@@ -47,7 +47,7 @@ pip install -e ".[dev]"                        # ~3 min of cargo build
 ## Commands
 
 ```bash
-pytest                                  # 50 tests, all against an embedded engine
+pytest                                  # the whole suite, against an embedded engine
 pytest tests/test_correctness.py -x     # the ones that matter most
 pytest tests/test_correctness.py::test_ea01_fallback_audit_matches_ground_truth
 ruff check .                            # no config; defaults only
@@ -56,6 +56,7 @@ python -m demo.demo --fast              # 6-beat story, self-contained
 python -m demo.questions --only EA01 EA06 --fast
 python -m benchmarks.run_benchmark --only EA01 --rows 20
 python -m etl.loader --layers real      # load only the public-source subgraph
+python -m etl.loader --no-verify        # skip the post-load edge count
 python -m mcp_server.server             # 7 MCP tools over the graph
 ```
 
