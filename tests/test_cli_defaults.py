@@ -39,8 +39,10 @@ def option_default(command, name: str):
 def graph_constant(relative: str) -> str:
     """The `GRAPH = "..."` module constant, read rather than imported.
 
-    Importing these would pull in rich and the whole ETL package for a
-    one-line assertion.
+    This module already imports `etl.loader` and `benchmarks.run_benchmark`, so
+    the ETL package is in the import graph regardless. Reading the source keeps
+    `demo/*` out of it -- importing those pulls in `rich` and runs their
+    module-level setup for a one-line assertion.
     """
     text = (ROOT / relative).read_text(encoding="utf-8")
     match = re.search(r'^GRAPH = "([^"]+)"', text, re.MULTILINE)
@@ -67,8 +69,8 @@ def test_mcp_server_targets_the_same_graph():
 
 def test_every_graph_constant_matches_the_loader():
     loader = option_default(loader_cli, "graph")
-    wrong = {f: graph_constant(f) for f in GRAPH_CONSTANT_FILES
-             if graph_constant(f) != loader}
+    found = {f: graph_constant(f) for f in GRAPH_CONSTANT_FILES}
+    wrong = {f: g for f, g in found.items() if g != loader}
     assert not wrong, (
         f"these name a different graph than the loader writes to ({loader!r}): {wrong}"
     )
