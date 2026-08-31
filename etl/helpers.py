@@ -15,7 +15,8 @@ Engine notes baked in here (learned the hard way, keep them):
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 
 def norm_id(prefix: str, value: str) -> str:
@@ -36,7 +37,9 @@ def cypher_literal(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
+        # `value != value` is the NaN test -- NaN is the only value
+        # unequal to itself. Deliberate, hence the suppression.
+        if value != value or value in (float("inf"), float("-inf")):  # noqa: PLR0124
             return "0.0"
         # Fixed notation only -- the parser rejects 1e-05.
         text = f"{value:.6f}".rstrip("0")

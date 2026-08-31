@@ -95,7 +95,7 @@ def parse_kernels(markdown: str) -> list[OrtKernel]:
         cells = [c.strip() for c in line.strip("|").split("|")]
         if len(cells) < 3 or set(cells[0]) <= {"-"}:
             continue
-        if cells[0] in ("Op Name",):
+        if cells[0] == "Op Name":
             continue
 
         op_name = cells[0]

@@ -277,7 +277,7 @@ def test_order_by_is_actually_applied(loaded):
     broken = []
     for qid, q in BY_ID.items():
         cypher = q["cypher"].strip()
-        match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.S)
+        match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.DOTALL)
         if not match:
             continue
         keys = [k.strip() for k in match.group(1).split(",")]
