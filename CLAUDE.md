@@ -47,7 +47,7 @@ pip install -e ".[dev]"                        # ~3 min of cargo build
 ## Commands
 
 ```bash
-pytest                                  # 50 tests, all against an embedded engine
+pytest                                  # the whole suite, against an embedded engine
 pytest tests/test_correctness.py -x     # the ones that matter most
 pytest tests/test_correctness.py::test_ea01_fallback_audit_matches_ground_truth
 ruff check .                            # clean; config in pyproject.toml

@@ -33,23 +33,26 @@ exclude = [".venv", "data"]
 select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE", "S",
           "PLR0124"]  # comparison-with-itself, for the NaN check in helpers.py
 
-ignore = [
-    # Every broad catch here sits on a call into the engine, which raises
-    # untyped errors -- `RuntimeError("Query error: ...")` -- for anything from
-    # unsupported Cypher to an unreachable server. There is no narrower class to
-    # catch, and the callers deliberately continue: the loader reports a skipped
-    # schema statement, the benchmark records a per-query failure, the tests
-    # skip. See docs/engine-notes.md.
-    "BLE001",
-    # The generator is seeded and reproducible by design; `random` is the point,
-    # not a security weakness. Same seed, same graph.
-    "S311",
-]
-
 [tool.ruff.lint.per-file-ignores]
-# Asserts are the test suite's job, and its cleanup between fixtures is
-# best-effort by design -- a failure to delete leftover nodes must not mask the
-# assertion the test exists to make.
-# PERF203: the catalog sweep catches per-query so it can report every
-# failure at once rather than stopping at the first.
-"tests/*" = ["S101", "S110", "PERF203"]
+# Scoped per file rather than ignored globally: each exemption below is a
+# property of that module, not of the repo, and a broad `except Exception` added
+# somewhere new -- `mcp_server/server.py`, say, where a narrower class may exist
+# and swallowing is likelier to be a bug -- should still be reported.
+#
+# BLE001: every broad catch in these three sits on a call into the engine, which
+# raises untyped errors (`RuntimeError("Query error: ...")`) for anything from
+# unsupported Cypher to an unreachable server. There is no narrower class to
+# catch, and each caller deliberately continues: the loader reports a skipped
+# schema statement, the benchmark records a per-query failure, the tests skip.
+"etl/loader.py" = ["BLE001"]
+"benchmarks/run_benchmark.py" = ["BLE001"]
+
+# S311: the generator's `random` is seeded reproducibility -- same seed, same
+# graph -- not a weak RNG standing in for a secure one.
+"etl/generate.py" = ["S311"]
+
+# S101: asserts are what a test is. S110: cleanup between fixtures is
+# best-effort by design -- failing to delete leftover nodes must not mask the
+# assertion the test exists to make. PERF203: the catalog sweep catches
+# per-query so it can report every failure rather than stopping at the first.
+"tests/*" = ["S101", "S110", "PERF203", "BLE001"]
