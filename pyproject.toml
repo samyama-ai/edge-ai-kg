@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.1.0"]
+dev = ["pytest>=7.0", "ruff>=0.16,<0.17"]
 
 [tool.setuptools.packages.find]
 include = ["etl*", "mcp_server*", "benchmarks*", "demo*"]
@@ -39,11 +39,13 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # somewhere new -- `mcp_server/server.py`, say, where a narrower class may exist
 # and swallowing is likelier to be a bug -- should still be reported.
 #
-# BLE001: every broad catch in these three sits on a call into the engine, which
-# raises untyped errors (`RuntimeError("Query error: ...")`) for anything from
-# unsupported Cypher to an unreachable server. There is no narrower class to
-# catch, and each caller deliberately continues: the loader reports a skipped
-# schema statement, the benchmark records a per-query failure, the tests skip.
+# BLE001 is exempted in three places -- the two modules directly below, and
+# tests/ further down. In all of them the broad catch sits on a call into the
+# engine, which raises untyped errors (`RuntimeError("Query error: ...")`) for
+# anything from unsupported Cypher to an unreachable server. There is no
+# narrower class to catch, and each caller deliberately continues: the loader
+# reports a skipped schema statement, the benchmark records a per-query
+# failure, the tests skip.
 "etl/loader.py" = ["BLE001"]
 "benchmarks/run_benchmark.py" = ["BLE001"]
 
