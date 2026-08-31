@@ -1,6 +1,6 @@
-# Engine notes -- Samyama Graph v1.7.0
+# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, note 10)
 
-Behaviour observed while building this KG, on the OSS engine at v1.7.0.
+Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
 [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
@@ -11,7 +11,8 @@ the loader or the query catalog works around it. Verified 2026-08-14.
 **Note 10 is a different kind of entry.** It is not a behaviour of the server
 but a disagreement between the server and the in-process embedded build, it is
 not filed upstream, and nothing works around it yet — it is the reason three
-tests fail. Verified 2026-08-28, tracked at #56.
+tests in `tests/test_correctness.py` are marked `xfail`. Verified 2026-08-28,
+tracked at #56.
 
 ---
 
@@ -321,8 +322,15 @@ workaround for one note is what triggers this one. Both queries return rows
 against the server (`run_benchmark` reports 16/16, 0 failed) and both fail under
 `pytest`, which uses the embedded build.
 
-**No workaround adopted.** Which engine the test suite should treat as
-authoritative is an open decision — see #56.
+**No workaround adopted** — the queries are not rewritten to avoid the shape,
+because which engine the suite should treat as authoritative is an open
+decision (#56), and rewriting them now would encode a guess as a fix.
+
+What *was* decided: the three affected tests carry `xfail(strict=False)`
+naming this note, so `pytest` stays green and the divergence stays visible in
+every run rather than as three red lines nobody reads. `strict=False` means an
+XPASS is not a failure — if the embedded build starts agreeing, the run says so
+and the marks should come off.
 
 ---
 

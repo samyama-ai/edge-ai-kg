@@ -132,7 +132,16 @@ shape changes.
 Samyama v1.7.0 has nine documented behaviours, several of which **return wrong
 rows rather than erroring**. The loader and every catalog query work around them,
 so these are not trivia — breaking one of these rules produces confident,
-plausible, wrong output. The rules that follow from them:
+plausible, wrong output.
+
+**Note 10 is not one of these.** It is a disagreement between the embedded build
+and the HTTP server rather than a behaviour of either, and **nothing works
+around it**: a second `WITH` introducing a new alias is fine over HTTP and fails
+embedded, which is why `EA01`/`EA02` pass under `run_benchmark` and fail under
+`pytest`. Cypher that obeys every rule below still runs differently on the two
+builds. See #56 — which engine is authoritative is undecided.
+
+The rules that follow from notes 1-9:
 
 - **Project through `WITH` before `RETURN`, and sort on the `WITH` alias.**
   `ORDER BY` on a `RETURN`-introduced alias is silently dropped. With `LIMIT`
