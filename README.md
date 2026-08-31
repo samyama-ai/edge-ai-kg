@@ -157,6 +157,13 @@ pytest                                                  # 50 tests
 Scale the fleet with `--scale` (`1.0` ≈ 24K nodes) and change the world with
 `--seed`. Same seed, same graph, every time.
 
+After loading, the loader counts edges per type against what it intended and
+reports `verified: N of N intended edges across 22 types`. It exits non-zero if
+the graph holds fewer (an endpoint id did not resolve -- edges are created in
+batches sharing one `MATCH`, so one bad id drops its whole batch) or more (the
+graph was not empty, or two nodes share an `id`). `--no-verify` skips the
+check.
+
 ## Load it without building it
 
 A prebuilt `.sgsnap` snapshot of the full graph (25,145 nodes / 76,291 edges,

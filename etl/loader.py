@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import click
@@ -60,6 +61,38 @@ def reset_graph(client, graph: str) -> None:
             click.echo(f"  ! could not reset graph: {exc}", err=True)
 
 
+def count_edges_by_type(client, graph: str, rel_types) -> dict[str, int]:
+    """How many edges of each type the graph actually holds.
+
+    Counts a property rather than the relationship variable: `count(r)` over a
+    multi-variable MATCH does not aggregate on this engine (engine note 9).
+    """
+    counts = {}
+    for rel in rel_types:
+        result = client.query(
+            f"MATCH (a)-[:{rel}]->(b) RETURN count(a.id) AS n", graph)
+        counts[rel] = result.records[0][0] if result.records else 0
+    return counts
+
+
+def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
+    """Compare edges the loader intended to create against what the graph holds.
+
+    `create_edges` reports the number of edges it *submitted*, not the number
+    created. Endpoints are matched by id, and a whole batch shares one `MATCH`,
+    so a single unresolvable id silently drops every edge in that batch -- with
+    no error, and with the node counts still correct.
+
+    Returns one `(rel_type, intended, actual)` row per type, worst shortfall
+    first.
+    """
+    intended = Counter(e[2] for e in edges)
+    actual = count_edges_by_type(client, graph, sorted(intended))
+    rows = [(rel, intended[rel], actual[rel]) for rel in intended]
+    rows.sort(key=lambda r: (r[2] - r[1], r[0]))
+    return rows
+
+
 @click.command()
 @click.option("--url", default=None,
               help="Samyama server URL, e.g. http://127.0.0.1:8080. Omit for embedded.")
@@ -76,7 +109,9 @@ def reset_graph(client, graph: str) -> None:
 @click.option("--layers", type=click.Choice(["all", "real", "synthetic"]),
               default="all", show_default=True,
               help="Load the real public-source subgraph, the generated fleet, or both.")
-def main(url, graph, seed, scale, limit, regenerate, reset, layers):
+@click.option("--verify/--no-verify", default=True, show_default=True,
+              help="After loading, count edges per type against what was intended.")
+def main(url, graph, seed, scale, limit, regenerate, reset, layers, verify):
     started = time.time()
 
     if regenerate:
@@ -159,6 +194,47 @@ def main(url, graph, seed, scale, limit, regenerate, reset, layers):
     except Exception as exc:
         click.echo(f"  ! verification query failed: {exc}", err=True)
         sys.exit(1)
+
+    if verify:
+        try:
+            rows = verify_edges(client, graph, edges)
+        except Exception as exc:
+            click.echo(f"  ! edge verification query failed: {exc}", err=True)
+            sys.exit(1)
+        missing = [r for r in rows if r[2] < r[1]]
+        surplus = [r for r in rows if r[2] > r[1]]
+        intended = sum(r[1] for r in rows)
+        click.echo(f"  verified: {sum(r[2] for r in rows):,} of {intended:,} "
+                   f"intended edges across {len(rows)} types")
+
+        def table(heading: str, entries, note: str) -> None:
+            click.echo("")
+            click.echo(f"  ! {heading}", err=True)
+            click.echo(f"    {'edge type':22} {'intended':>10} {'actual':>10} "
+                       f"{'delta':>8}", err=True)
+            for rel, want, have in entries:
+                click.echo(f"    {rel:22} {want:>10,} {have:>10,} {have - want:>+8,}",
+                           err=True)
+            click.echo("")
+            click.echo(f"    {note}", err=True)
+
+        if missing:
+            table("edges missing -- the load reported success and did not create these:",
+                  missing,
+                  "An endpoint id did not resolve. Edges are created in batches "
+                  "sharing one MATCH,\n    so one unresolvable id drops its whole "
+                  "batch. See issue #23.")
+        if surplus:
+            table("more edges than intended -- the graph holds edges this load did "
+                  "not submit:",
+                  surplus,
+                  "Either the graph was not empty (--no-reset, a failed reset, or a "
+                  "second load\n    on top of a first), or two nodes share an `id`: "
+                  "endpoints are matched by\n    id and this engine parses no "
+                  "uniqueness constraint (engine note 6), so a\n    duplicate id "
+                  "binds twice and one submitted edge is created twice.")
+        if missing or surplus:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
