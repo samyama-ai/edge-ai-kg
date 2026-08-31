@@ -24,10 +24,12 @@ OPERATORS_URL = "https://raw.githubusercontent.com/onnx/onnx/main/docs/Operators
 # implement which operator, and to make the graph readable in a demo.
 # Anything unmatched falls into "tensor".
 #
-# Three entries below suppress ISC004. Their pattern is ONE regex wrapped
-# across lines, not two list items with a missing comma. That ambiguity is
-# exactly what the rule exists to catch, so each case is marked individually
-# rather than the rule disabled -- a real missing comma is still reported.
+# Three entries wrap one regex across several lines. The extra parentheses
+# around those are load-bearing, not style: inside a collection literal an
+# implicit concatenation is indistinguishable from a missing comma between
+# two entries, which is what ISC004 exists to catch. Parenthesised, the
+# intent is explicit, no suppression is needed, and a real missing comma
+# anywhere in this table is still reported.
 _CATEGORY_RULES: list[tuple[str, str]] = [
     (r"^(Conv|ConvTranspose|ConvInteger|QLinearConv|DeformConv|Col2Im)", "convolution"),
     (r"^(Gemm|MatMul|MatMulInteger|QLinearMatMul|Einsum)", "matmul"),
@@ -35,16 +37,16 @@ _CATEGORY_RULES: list[tuple[str, str]] = [
     (r"^(LSTM|GRU|RNN|Scan|Loop)", "recurrent"),
     (r"^(Attention|RotaryEmbedding|MultiHeadAttention)", "attention"),
     (r"(Normalization|LpNormalization|MeanVarianceNormalization)", "normalization"),
-    (r"^(Relu|LeakyRelu|PRelu|Elu|Selu|Celu|Gelu|Sigmoid|Tanh|HardSigmoid|HardSwish|"  # noqa: ISC004
-     r"Softmax|LogSoftmax|Hardmax|Softplus|Softsign|Mish|ThresholdedRelu|Swish|Shrink)", "activation"),
-    (r"^(Add|Sub|Mul|Div|Pow|Mod|Neg|Abs|Sqrt|Exp|Log|Sum|Mean|Max|Min|Clip|Sign|"  # noqa: ISC004
-     r"Reciprocal|Ceil|Floor|Round|Sin|Cos|Tan|Asin|Acos|Atan|Sinh|Cosh|Tanh|"
-     r"Asinh|Acosh|Atanh|Erf|Bitwise|And|Or|Xor|Not|Equal|Greater|Less)", "elementwise"),
+    ((r"^(Relu|LeakyRelu|PRelu|Elu|Selu|Celu|Gelu|Sigmoid|Tanh|HardSigmoid|HardSwish|"
+      r"Softmax|LogSoftmax|Hardmax|Softplus|Softsign|Mish|ThresholdedRelu|Swish|Shrink)"), "activation"),
+    ((r"^(Add|Sub|Mul|Div|Pow|Mod|Neg|Abs|Sqrt|Exp|Log|Sum|Mean|Max|Min|Clip|Sign|"
+      r"Reciprocal|Ceil|Floor|Round|Sin|Cos|Tan|Asin|Acos|Atan|Sinh|Cosh|Tanh|"
+      r"Asinh|Acosh|Atanh|Erf|Bitwise|And|Or|Xor|Not|Equal|Greater|Less)"), "elementwise"),
     (r"^Reduce", "reduction"),
     (r"^(QuantizeLinear|DequantizeLinear|DynamicQuantizeLinear|QLinear|Cast|CastLike|BitCast)", "quantization"),
-    (r"^(Reshape|Transpose|Concat|Split|Slice|Gather|Scatter|Squeeze|Unsqueeze|Pad|Tile|"  # noqa: ISC004
-     r"Flatten|Expand|SpaceToDepth|DepthToSpace|Identity|Shape|Size|Compress|"
-     r"ReverseSequence|OneHot|Range|Trilu|TopK|Sort|NonZero|Where)", "shape"),
+    ((r"^(Reshape|Transpose|Concat|Split|Slice|Gather|Scatter|Squeeze|Unsqueeze|Pad|Tile|"
+      r"Flatten|Expand|SpaceToDepth|DepthToSpace|Identity|Shape|Size|Compress|"
+      r"ReverseSequence|OneHot|Range|Trilu|TopK|Sort|NonZero|Where)"), "shape"),
     (r"(RandomNormal|RandomUniform|Multinomial|Bernoulli|Dropout)", "stochastic"),
     (r"(STFT|DFT|MelWeightMatrix|BlackmanWindow|HammingWindow|HannWindow)", "signal"),
 ]
