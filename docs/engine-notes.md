@@ -1,4 +1,4 @@
-# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, note 10)
+# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-11)
 
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
@@ -8,11 +8,18 @@ Notes 1-9 were observed on the OSS engine at v1.7.0
 (`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
 
-**Note 10 is a different kind of entry.** It is not a behaviour of the server
-but a disagreement between the server and the in-process embedded build, it is
-not filed upstream, and nothing works around it yet — it is the reason three
-tests in `tests/test_correctness.py` are marked `xfail`. Verified 2026-08-28,
-tracked at #56.
+**Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
+server: both are disagreements between the server and the in-process embedded
+build, neither is filed upstream, and nothing works around either. Between them
+they are why three tests in `tests/test_correctness.py` are marked `xfail`:
+
+| Test | Note |
+|---|---|
+| `test_every_catalog_query_runs_and_returns_rows` | 10 |
+| `test_order_by_is_actually_applied` | 10 |
+| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | **11** |
+
+Verified 2026-08-28 and 2026-08-31, both tracked at #56.
 
 ---
 
@@ -326,11 +333,59 @@ against the server (`run_benchmark` reports 16/16, 0 failed) and both fail under
 because which engine the suite should treat as authoritative is an open
 decision (#56), and rewriting them now would encode a guess as a fix.
 
-What *was* decided: the three affected tests carry `xfail(strict=False)`
-naming this note, so `pytest` stays green and the divergence stays visible in
-every run rather than as three red lines nobody reads. `strict=False` means an
-XPASS is not a failure — if the embedded build starts agreeing, the run says so
-and the marks should come off.
+What *was* decided: `test_every_catalog_query_runs_and_returns_rows` and
+`test_order_by_is_actually_applied` carry `xfail(strict=False)` naming this
+note. Both sweep the whole catalog and so hit EA01 and EA02. `pytest` stays
+green and the divergence stays visible in every run rather than as red lines
+nobody reads; `strict=False` means an XPASS is not a failure, so if the embedded
+build starts agreeing the run says so and the marks come off.
+
+The third failing test, `test_ea04_quantization_unlock_is_not_a_cartesian_product`,
+is **not** this note — EA04 has a single `WITH`. See note 11.
+
+---
+
+## 11. The embedded build stops aggregating when a `WITH` carries more than one conditional aggregate
+
+> Not filed upstream. Tracked with note 10 under #56 — a second instance of the
+> same embedded/HTTP divergence, a different shape. Verified 2026-08-31.
+
+`EA04` is written as conditional aggregation — `max(CASE WHEN ... THEN ... ELSE
+0 END)` — specifically to avoid the self-join in note 1. On the embedded build
+that rewrite silently returns the `ELSE` sentinel:
+
+```
+EA04 on the HTTP server        EA04 on the embedded build
+fp32_kb    int8_kb             fp32_kb    int8_kb
+ 3347.6      836.9              18125.6         0
+  558.0      139.5              10224.4         0
+  305.6       76.4               9929.2         0
+```
+
+The server's answer is right — `int8_kb` is exactly `fp32_kb / 4`, which is what
+makes a cartesian product detectable. The embedded answer passes EA04's own
+`WHERE int8_hits > 0`, so the group *does* contain an int8 variant, and then
+reports `max(int8 size) = 0` for it.
+
+Narrowed on the fixture graph (`seed=4242, scale=0.3`), embedded:
+
+| Shape | `int8_kb` |
+|---|---|
+| 1 grouping key, 1 conditional aggregate | **4531.4** — correct |
+| 2 grouping keys, 1 conditional aggregate | **4531.4** — correct |
+| 2 grouping keys, **2** conditional aggregates | **0** — wrong |
+| same, with the two aggregates swapped | **0** — wrong, so it is not positional |
+
+Adding `count(v.id)` to that last shape returns **1** for every group, so the
+engine is not aggregating across the group at all: each group is evaluated from
+a single row, and whichever precision that row is not yields its `ELSE`.
+
+**No workaround adopted**, for the same reason as note 10 — #56 has not decided
+which engine is authoritative, and rewriting EA04 now would encode a guess as a
+fix. `tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`
+carries `xfail(strict=True)`. Strict, unlike note 10's two: that test is the only
+canary for note 1, and a non-strict mark on it could outlive the divergence and
+hide a real self-join regression permanently.
 
 ---
 

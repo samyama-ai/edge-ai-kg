@@ -235,13 +235,14 @@ two that **silently return wrong rows** rather than erroring:
 
 All nine are filed upstream — tracking issue [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-A tenth is recorded but **not** filed, because it is not a behaviour of the
+Two more are recorded but **not** filed, because they are not behaviours of the
 server: the embedded build and the HTTP server disagree about a second `WITH`
-that introduces a new alias, so `EA01` and `EA02` return rows against the server
-and fail against the engine `pytest` uses. Three tests in
-`tests/test_correctness.py` are marked `xfail` for it. See
-[engine note 10](docs/engine-notes.md) and #56 — which engine the suite should
-treat as authoritative is an open decision.
+that introduces a new alias ([note 10](docs/engine-notes.md)), and about a
+`WITH` carrying more than one conditional aggregate ([note 11](docs/engine-notes.md)).
+So `EA01`, `EA02` and `EA04` return correct rows against the server and fail
+against the engine `pytest` uses; three tests in `tests/test_correctness.py` are
+marked `xfail` for them. See #56 — which engine the suite should treat as
+authoritative is an open decision.
 
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,

@@ -105,11 +105,14 @@ RETURN op.name AS operator
 
 
 @pytest.mark.xfail(
-    reason="engine note 10 / #56: the embedded build does not register an alias "
-           "introduced by a second WITH, which EA01 and EA02 both use. Passes "
-           "against the HTTP server. Not strict -- an XPASS here means the "
-           "divergence is gone and the mark should be removed.",
-    strict=False,
+    reason="engine note 11 / #56: EA04 has a single WITH, so note 10 is NOT its "
+           "cause. On the embedded build a WITH carrying more than one conditional "
+           "aggregate stops aggregating across the group -- count(v.id) comes back "
+           "as 1 -- so int8_kb returns its ELSE sentinel of 0 while fp32_kb is "
+           "correct. Against the HTTP server this query is right, and int8_kb is "
+           "exactly fp32_kb/4. Strict, because this test is the only canary for the "
+           "note 1 self-join bug and the mark must not outlive the divergence.",
+    strict=True,
 )
 def test_ea04_quantization_unlock_is_not_a_cartesian_product(loaded):
     """int8 size must be exactly a quarter of fp32 size for the SAME model.
@@ -202,9 +205,10 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
 
 @pytest.mark.xfail(
     reason="engine note 10 / #56: the embedded build does not register an alias "
-           "introduced by a second WITH, which EA01 and EA02 both use. Passes "
-           "against the HTTP server. Not strict -- an XPASS here means the "
-           "divergence is gone and the mark should be removed.",
+           "introduced by a second WITH. This test sweeps the whole catalog and so "
+           "hits EA01 and EA02, which are both written that way. Both return rows "
+           "against the HTTP server. Not strict -- an XPASS means the divergence is "
+           "gone and the mark should come off.",
     strict=False,
 )
 def test_every_catalog_query_runs_and_returns_rows(loaded):
@@ -283,9 +287,10 @@ ORDER BY model
 
 @pytest.mark.xfail(
     reason="engine note 10 / #56: the embedded build does not register an alias "
-           "introduced by a second WITH, which EA01 and EA02 both use. Passes "
-           "against the HTTP server. Not strict -- an XPASS here means the "
-           "divergence is gone and the mark should be removed.",
+           "introduced by a second WITH. This test sweeps the whole catalog and so "
+           "hits EA01 and EA02, which are both written that way. Both return rows "
+           "against the HTTP server. Not strict -- an XPASS means the divergence is "
+           "gone and the mark should come off.",
     strict=False,
 )
 def test_order_by_is_actually_applied(loaded):
