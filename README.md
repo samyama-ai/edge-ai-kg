@@ -151,7 +151,7 @@ start. To use a running server instead:
 python -m etl.loader --url http://127.0.0.1:8080        # ~13s for 25K/76K
 python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
 python -m mcp_server.server                             # expose over MCP
-pytest                                                  # 50 tests
+pytest                                                  # the whole suite
 ```
 
 Scale the fleet with `--scale` (`1.0` ≈ 24K nodes) and change the world with
@@ -237,12 +237,12 @@ All nine are filed upstream — tracking issue [samyama-graph#368](https://githu
 
 Two more are recorded but **not** filed, because they are not behaviours of the
 server: the embedded build and the HTTP server disagree about a second `WITH`
-that introduces a new alias ([note 10](docs/engine-notes.md)), and about a
-`WITH` carrying more than one conditional aggregate ([note 11](docs/engine-notes.md)).
-So `EA01`, `EA02` and `EA04` return correct rows against the server and fail
-against the engine `pytest` uses; three tests in `tests/test_correctness.py` are
-marked `xfail` for them. See #56 — which engine the suite should treat as
-authoritative is an open decision.
+that introduces a new alias ([note 10](docs/engine-notes.md)), and about the
+type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
+([note 11](docs/engine-notes.md)). So `EA01`, `EA02` and `EA04` are correct
+against the server and wrong against the engine `pytest` uses; three tests in
+`tests/test_correctness.py` are marked `xfail` for them. See #56 — which engine
+the suite should treat as authoritative is an open decision.
 
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,
@@ -262,7 +262,7 @@ demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
 docs/         schema, data provenance, engine notes
 DATASET_CARD.md  HF-style card: structure, provenance, intended + out-of-scope uses
-tests/        50 tests: parsing, fleet + real-layer invariants, query correctness
+tests/        parsing, fleet + real-layer invariants, query correctness
 ```
 
 ## License

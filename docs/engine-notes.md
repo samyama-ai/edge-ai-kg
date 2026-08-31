@@ -345,47 +345,62 @@ is **not** this note — EA04 has a single `WITH`. See note 11.
 
 ---
 
-## 11. The embedded build stops aggregating when a `WITH` carries more than one conditional aggregate
+## 11. The two builds disagree on the type of `sum(CASE ... THEN <int> ... END)`, so a `WHERE` on it is dropped
 
-> Not filed upstream. Tracked with note 10 under #56 — a second instance of the
-> same embedded/HTTP divergence, a different shape. Verified 2026-08-31.
+> Not filed upstream. Tracked with note 10 under #56 — a second embedded/HTTP
+> divergence, different shape. Verified 2026-08-31.
 
-`EA04` is written as conditional aggregation — `max(CASE WHEN ... THEN ... ELSE
-0 END)` — specifically to avoid the self-join in note 1. On the embedded build
-that rewrite silently returns the `ELSE` sentinel:
+Four nodes, two groups, one of which should be filtered out:
+
+```cypher
+MATCH (g:WGrp)
+WITH g.k AS k, sum(CASE WHEN g.k = "A" THEN 1 ELSE 0 END) AS hits
+WHERE hits > 0
+RETURN k, hits ORDER BY k
+```
+
+| | embedded (`samyama` 0.6.1) | HTTP (v1.7.0) |
+|---|---|---|
+| `sum(CASE ... THEN 1 ELSE 0 END)` returns | **float** — `2.0`, `0.0` | **int** — `2`, `0` |
+| `WHERE hits > 0` (int literal) | **not applied** — both groups | applied — `A` only |
+| `WHERE hits > 0.0` (float literal) | applied — `A` only | **not applied** — no rows at all |
+| no `WHERE` | both groups | both groups |
+
+The aggregate's *type* is what differs. Note 4 already records that this engine
+mis-compares across int and float, so the predicate is silently dropped on
+whichever build the literal does not match — and **no literal is correct on
+both**: `> 0` filters on the server only, `> 0.0` on the embedded build only.
+Nothing errors either way.
+
+**What it costs.** `EA04` uses `WHERE fp32_misses > 0 AND int8_hits > 0`, so on
+the server it filters and on the embedded build it does not. The unfiltered
+groups are single-deployment ones where the only variant is `fp32`, so they
+carry `int8_hits = 0.0` and `max(CASE WHEN v.precision = "int8" ... ELSE 0 END)`
+correctly returns the `ELSE` sentinel:
 
 ```
 EA04 on the HTTP server        EA04 on the embedded build
-fp32_kb    int8_kb             fp32_kb    int8_kb
- 3347.6      836.9              18125.6         0
-  558.0      139.5              10224.4         0
-  305.6       76.4               9929.2         0
+fp32_kb    int8_kb             fp32_kb    int8_kb   int8_hits
+ 3347.6      836.9              18125.6         0        0.0
+  558.0      139.5              10224.4         0        0.0
+  305.6       76.4               9929.2         0        0.0
 ```
 
-The server's answer is right — `int8_kb` is exactly `fp32_kb / 4`, which is what
-makes a cartesian product detectable. The embedded answer passes EA04's own
-`WHERE int8_hits > 0`, so the group *does* contain an int8 variant, and then
-reports `max(int8 size) = 0` for it.
+The server's rows are right — `int8_kb` is exactly `fp32_kb / 4`. The embedded
+rows are groups that should never have reached `RETURN`.
 
-Narrowed on the fixture graph (`seed=4242, scale=0.3`), embedded:
+**Why `test_ea04_shape_is_not_a_cartesian_product` still passes** on the same
+embedded build, despite the same four conditional aggregates and the same
+`WHERE`: its purpose-built fixture is four deployments in two groups, and *every*
+group satisfies `fp32_misses > 0 AND int8_hits > 0`. Whether the predicate is
+applied or not, the same two rows come back. The divergence is invisible to any
+query whose groups all pass — which is why it surfaces on the generated graph
+and not on the fixture.
 
-| Shape | `int8_kb` |
-|---|---|
-| 1 grouping key, 1 conditional aggregate | **4531.4** — correct |
-| 2 grouping keys, 1 conditional aggregate | **4531.4** — correct |
-| 2 grouping keys, **2** conditional aggregates | **0** — wrong |
-| same, with the two aggregates swapped | **0** — wrong, so it is not positional |
-
-Adding `count(v.id)` to that last shape returns **1** for every group, so the
-engine is not aggregating across the group at all: each group is evaluated from
-a single row, and whichever precision that row is not yields its `ELSE`.
-
-**No workaround adopted**, for the same reason as note 10 — #56 has not decided
-which engine is authoritative, and rewriting EA04 now would encode a guess as a
-fix. `tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`
-carries `xfail(strict=True)`. Strict, unlike note 10's two: that test is the only
-canary for note 1, and a non-strict mark on it could outlive the divergence and
-hide a real self-join regression permanently.
+**No workaround adopted**, for the same reason as note 10: #56 has not decided
+which build is authoritative, and there is no literal that would be correct on
+both anyway, so any rewrite would be choosing an engine. See the mark on
+`tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`.
 
 ---
 

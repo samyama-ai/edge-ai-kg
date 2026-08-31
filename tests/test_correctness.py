@@ -106,12 +106,15 @@ RETURN op.name AS operator
 
 @pytest.mark.xfail(
     reason="engine note 11 / #56: EA04 has a single WITH, so note 10 is NOT its "
-           "cause. On the embedded build a WITH carrying more than one conditional "
-           "aggregate stops aggregating across the group -- count(v.id) comes back "
-           "as 1 -- so int8_kb returns its ELSE sentinel of 0 while fp32_kb is "
-           "correct. Against the HTTP server this query is right, and int8_kb is "
-           "exactly fp32_kb/4. Strict, because this test is the only canary for the "
-           "note 1 self-join bug and the mark must not outlive the divergence.",
+           "cause. sum(CASE ... THEN 1 ELSE 0 END) returns float on the embedded "
+           "build and int on the server, so EA04's `WHERE int8_hits > 0` filters on "
+           "the server and is silently dropped embedded. The groups that leak "
+           "through are fp32-only, so int8_kb is correctly the ELSE sentinel and "
+           "this assertion fails. Strict: the failure is a filter not running, so a "
+           "non-strict mark could outlive the fix and leave EA04's answer on the "
+           "generated graph unchecked. test_ea04_shape_is_not_a_cartesian_product "
+           "covers note 1 on its fixture and is unaffected -- every group there "
+           "satisfies the WHERE, so dropping it changes nothing.",
     strict=True,
 )
 def test_ea04_quantization_unlock_is_not_a_cartesian_product(loaded):
