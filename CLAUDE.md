@@ -80,8 +80,10 @@ python -m mcp_server.server             # 7 MCP tools over the graph
   ```
 
 `--graph` looks like tenant isolation but is ignored on OSS (engine note 7 below);
-everything lands in `default`. `run_benchmark` defaults to `--graph edge_ai` while
-the loader defaults to `default` — harmless only *because* the argument is ignored.
+everything lands in `default`. Every entry point — both CLIs, `mcp_server/config.yaml`
+and the four `GRAPH` constants — now defaults to `default`, pinned by
+`tests/test_cli_defaults.py`. They did not always agree, and nothing noticed,
+because the argument being ignored made the disagreement invisible.
 
 ## Architecture
 

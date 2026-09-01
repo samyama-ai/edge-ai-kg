@@ -3,7 +3,7 @@
 Usage:
     python -m etl.loader                          # embedded engine, default scale
     python -m etl.loader --url http://127.0.0.1:8080
-    python -m etl.loader --scale 4 --graph edge_ai
+    python -m etl.loader --scale 4
 """
 from __future__ import annotations
 

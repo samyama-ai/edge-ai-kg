@@ -6,7 +6,7 @@ server:
     biosignal pipelines.
 graph:
   # NOTE: on OSS v1.7.0 the tenant argument is ignored and everything lives in
-  # `default`. See docs/engine-notes.md, item 5.
+  # `default`. See docs/engine-notes.md, item 7.
   host: 127.0.0.1
   port: 8080
   graph: default
