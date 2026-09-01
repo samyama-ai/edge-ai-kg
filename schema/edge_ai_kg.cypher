@@ -15,6 +15,13 @@
 // This engine accepts `CREATE INDEX ON :Label(prop)`. It does NOT parse
 // `CREATE CONSTRAINT ... REQUIRE ... IS UNIQUE`; uniqueness of `id` is
 // guaranteed by the loader, which mints ids deterministically.
+//
+// That guarantee is per load, not per graph. The loader resets the graph first
+// unless told not to; `--no-reset` against a populated graph mints every id a
+// second time and nothing rejects the write. The run does not survive it: with
+// one id bound to two nodes, an edge batch's MATCH binds both ends more than
+// once -- one submitted edge becomes four -- and the engine is OOM-killed
+// during edge creation. See tests/test_id_uniqueness.py.
 
 // --- id indexes (one per label; drives edge-creation lookups) ---
 CREATE INDEX ON :Vendor(id);
