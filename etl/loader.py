@@ -105,9 +105,11 @@ def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
 @click.option("--regenerate/--use-cached", default=False,
               help="Regenerate the fleet instead of loading data/fleet/fleet.json.")
 @click.option("--reset/--no-reset", default=True, show_default=True,
-              help="Delete existing nodes in the target graph first. "
-                   "--no-reset against a populated graph duplicates every node: "
-                   "ids are not unique-constrained, so nothing rejects them.")
+              help="Delete existing nodes in the target graph first. Against a "
+                   "populated graph --no-reset mints every id twice; ids are not "
+                   "unique-constrained so the write is accepted, but the "
+                   "duplicates then multiply edges and the load does not "
+                   "complete.")
 @click.option("--layers", type=click.Choice(["all", "real", "synthetic"]),
               default="all", show_default=True,
               help="Load the real public-source subgraph, the generated fleet, or both.")

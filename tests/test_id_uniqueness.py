@@ -7,16 +7,26 @@ that. A generator change that reused an id, or a second load against a live
 graph, produces duplicate nodes and every published count goes quietly wrong
 (#19).
 
-Measured, and it is worth knowing which way round it is:
+Checked at two levels. `test_generator_mints_distinct_ids` needs no engine and
+pins the claim the schema comment actually makes -- deterministic minting. The
+rest load a graph, because what the README publishes is what the graph holds.
 
-    1st load                8,463 nodes   8,463 distinct ids
-    2nd load, --no-reset   16,926 nodes   8,463 distinct ids   <- every id twice
-    after reset + reload     8,463 nodes   8,463 distinct ids
+**Scope: `SCALE = 0.3`, `SEED = 4242`.** The automated check is small-scale.
+A full load (25,150 nodes, all 16 labels) was verified by hand and holds, but a
+collision that only appears once the generator's ranges widen would not be
+caught here.
 
-So the loader is idempotent on its default path (`--reset` is on) and is not
-with `--no-reset`. The duplication is invisible to a node count -- the count
-simply doubles and looks like more data -- but `count(DISTINCT x.id)` catches
-it, which is why that is the invariant asserted here rather than any count.
+**On `--no-reset`.** Loading twice into the same graph mints every id a second
+time, and nothing rejects it at write time. The run does not survive, though,
+and not via the loader's own node-count check: duplicated ids make each edge
+batch's `MATCH` bind more than one node per endpoint -- one submitted edge
+becomes four when both endpoints are duplicated -- and on a real batch the
+engine is OOM-killed during edge creation, before that check runs. Verified
+twice against v1.7.0 (`OOMKilled=true`, exit 137).
+
+That is why the CLI path is not exercised here: a test of
+`python -m etl.loader --no-reset` run twice reliably kills the server. What the
+mutating tests below assert is the node-level duplication itself.
 """
 import pytest
 
@@ -48,6 +58,11 @@ def counts(client, label: str | None = None) -> tuple[int, int]:
             scalar(client, f"MATCH {match} RETURN count(DISTINCT x.id) AS n"))
 
 
+def id_set(client) -> set[str]:
+    result = client.query("MATCH (x) RETURN x.id AS id", GRAPH)
+    return {rec[0] for rec in result.records}
+
+
 @pytest.fixture(scope="module")
 def fleet():
     try:
@@ -60,22 +75,58 @@ def fleet():
     return built
 
 
-@pytest.fixture
-def client(fleet):
+def embedded_with(fleet):
     try:
         from samyama import SamyamaClient
-        c = SamyamaClient.embedded()
+        client = SamyamaClient.embedded()
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
-    reset_graph(c, GRAPH)
-    load_nodes(c, fleet)
-    return c
+    reset_graph(client, GRAPH)
+    load_nodes(client, fleet)
+
+    # The fixture's own post-condition. `(0, 0)` compares equal, so a label that
+    # loaded nothing would satisfy every distinctness assertion below without
+    # ever being looked at.
+    for label, rows in fleet.nodes.items():
+        if rows and label in NODE_LABELS:
+            loaded = scalar(client, f"MATCH (x:{label}) RETURN count(x) AS n")
+            assert loaded == len(rows), (
+                f"fixture loaded {loaded} {label} nodes, fleet holds {len(rows)}"
+            )
+    return client
 
 
-def test_every_label_has_distinct_ids(client):
+@pytest.fixture(scope="module")
+def loaded(fleet):
+    """Shared by the read-only assertions -- loading this fleet is not cheap."""
+    return embedded_with(fleet)
+
+
+@pytest.fixture
+def fresh(fleet):
+    """A private graph for the tests that mutate it."""
+    return embedded_with(fleet)
+
+
+def test_generator_mints_distinct_ids(fleet):
+    """The schema comment's actual claim, checked without an engine."""
+    collisions = {}
+    for label, rows in fleet.nodes.items():
+        ids = [r["id"] for r in rows]
+        if len(ids) != len(set(ids)):
+            collisions[label] = len(ids) - len(set(ids))
+    assert not collisions, f"the generator reused ids: {collisions}"
+
+    everything = [r["id"] for rows in fleet.nodes.values() for r in rows]
+    assert len(everything) == len(set(everything)), (
+        f"{len(everything) - len(set(everything))} ids collide across labels"
+    )
+
+
+def test_every_label_has_distinct_ids(loaded):
     duplicated = {}
     for label in NODE_LABELS:
-        total, distinct = counts(client, label)
+        total, distinct = counts(loaded, label)
         if total != distinct:
             duplicated[label] = (total, distinct)
     assert not duplicated, (
@@ -85,24 +136,21 @@ def test_every_label_has_distinct_ids(client):
     )
 
 
-def test_ids_are_distinct_graph_wide(client):
+def test_ids_are_distinct_graph_wide(loaded):
     """Not just per label -- every id carries its label as a prefix."""
-    total, distinct = counts(client)
+    total, distinct = counts(loaded)
     assert total == distinct, (
         f"{total} nodes but {distinct} distinct ids: {total - distinct} "
         f"collisions across labels"
     )
 
 
-def test_loading_twice_without_a_reset_duplicates_every_id(client, fleet):
-    """The documented behaviour, pinned. `--no-reset` is not idempotent.
-
-    Asserted rather than merely written down because the failure is invisible to
-    a node count -- the count doubles and reads as more data.
-    """
-    before, before_ids = counts(client)
-    load_nodes(client, fleet)                      # second load, no reset
-    after, after_ids = counts(client)
+def test_loading_twice_without_a_reset_duplicates_every_id(fresh, fleet):
+    """Nothing rejects the second write. See the module docstring for what then
+    happens to a real load."""
+    before, before_ids = counts(fresh)
+    load_nodes(fresh, fleet)                       # second load, no reset
+    after, after_ids = counts(fresh)
 
     assert after == before * 2, f"expected the node count to double, {before} -> {after}"
     assert after_ids == before_ids, (
@@ -111,10 +159,15 @@ def test_loading_twice_without_a_reset_duplicates_every_id(client, fleet):
     assert after != after_ids, "the uniqueness assertions above must catch this"
 
 
-def test_reloading_after_a_reset_is_idempotent(client, fleet):
-    """The default path -- `--reset` is on unless asked otherwise."""
-    before = counts(client)
-    reset_graph(client, GRAPH)
-    assert counts(client) == (0, 0), "reset_graph left nodes behind"
-    load_nodes(client, fleet)
-    assert counts(client) == before, "reload after reset did not reproduce the graph"
+def test_reloading_after_a_reset_reproduces_the_same_ids(fresh, fleet):
+    """The default path -- `--reset` is on unless asked otherwise.
+
+    Compares the id *set*, not counts. `docs/engine-notes.md` item 8 records
+    that `DETACH DELETE` is not a true reset -- the property store survives it --
+    so this asserts identity of ids and makes no claim about property values.
+    """
+    before = id_set(fresh)
+    reset_graph(fresh, GRAPH)
+    assert counts(fresh) == (0, 0), "reset_graph left nodes behind"
+    load_nodes(fresh, fleet)
+    assert id_set(fresh) == before, "reload after reset did not reproduce the same ids"

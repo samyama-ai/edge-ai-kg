@@ -31,9 +31,10 @@ and what does it cost me when it can't?**
 
 Every node carries a unique `id`; `schema/edge_ai_kg.cypher` indexes it per
 label. Uniqueness is a loader invariant -- this engine does not parse
-`CREATE CONSTRAINT` -- and it holds per load: `--no-reset` against a populated
-graph duplicates every node rather than being rejected. `tests/test_id_uniqueness.py`
-asserts it.
+`CREATE CONSTRAINT` -- and it holds per load, not per graph. Loading twice into
+the same graph with `--no-reset` mints every id again; nothing rejects the
+write, and the duplicate ids then multiply edges rather than merely doubling
+nodes. `tests/test_id_uniqueness.py` asserts the invariant.
 
 A count written `N (+M real)` is N from the generated layer plus M more once the
 real layer is loaded. Only N is inside the totals stated above, which are
