@@ -10,13 +10,14 @@ back to:
 
     t_acc = (macs * 2 * (1 - frac_fb)) / (gops_accel * 1e9 * thr)
     t_cpu = (macs * 2 * frac_fb)       / (gops_cpu   * 1e9 * thr)
-    latency_ms = (t_acc + t_cpu) * 1000 * rng.uniform(1.05, 1.45)
+    latency_ms = round((t_acc + t_cpu) * 1000 * uniform(*LATENCY_JITTER), 3)
 
 ## Why this is not a correlation test
 
 A plain correlation does not work: `macs` and the accelerator's speed dominate,
 and measured across the whole graph Spearman(`fallback_fraction`, `latency_ms`)
-is only **0.166**. A test built on that would be too loose to catch anything.
+is only **0.166**. An assertion loose enough to pass on that would not catch a
+broken derivation.
 
 The formula is recoverable instead. `thr` and `macs` are per-variant constants,
 so within one `ModelVariant` they cancel:
@@ -24,12 +25,34 @@ so within one `ModelVariant` they cancel:
     latency / shape  =  macs * 2 * 1000 * jitter / thr     where
     shape            =  (1 - f) / gops_accel + f / gops_cpu
 
-Every deployment of a variant therefore has the same `latency / shape` up to the
-jitter, so the spread within a variant cannot exceed `1.45 / 1.05`. That bound is
-the generator's own, not a threshold picked to fit.
+Every deployment of a variant therefore shares that ratio up to the jitter, so
+its spread within a variant cannot exceed `max(JITTER) / min(JITTER)`. That
+bound is imported from the generator rather than restated here, so a change to
+the spread cannot leave this test passing against a stale number.
 
-`gops_cpu` is the `MCU-CPU` accelerator on the deployment's board's SoC, which
-is how `etl/generate.py:511` chooses it, and is reachable from the graph.
+`gops_cpu` is the `MCU-CPU` accelerator on the deployment's board's SoC, which is
+how `etl/generate.py` chooses it, and is reachable from the graph.
+
+## Rounding
+
+`latency_ms` is rounded to `LATENCY_DECIMALS`, so a stored value carries up to
+half a unit in the last place of absolute error -- 1.4% of the smallest latency
+in the graph today. That is larger than the headroom between the observed worst
+spread and the bound, so the bound is widened per variant by what rounding can
+actually do at that variant's smallest latency, rather than being applied flat.
+
+A latency that rounds to zero cannot be normalised at all. None occur at the
+seed and scale used here, and the test asserts that rather than filtering them
+away silently -- a quiet `min(values) > 0` guard would let a generator change
+shrink the checked population without anyone noticing.
+
+## A note on MCU-CPU deployments
+
+`etl/generate.py` picks the fallback CPU as `next((a for a in accels if
+a["kind"] == "MCU-CPU"), accel)`. On a deployment whose accelerator *is* the
+MCU-CPU, the two are the same unit, `shape` does not vary with `f`, and falling
+back costs nothing. That is correct rather than a defect: there is nothing
+faster to fall back from.
 
 ## Measured
 
@@ -39,8 +62,8 @@ against the **1.3810** bound, nothing over. At this fixture's scale, **1.3451**.
 The assertion has teeth -- recomputed against the same graph with the derivation
 broken:
 
-    derivation reversed (f -> 1-f)   worst spread   5.56   37 of 72 variants over
-    latencies shuffled               worst spread 588.46   65 of 72 variants over
+    derivation reversed (f -> 1-f)   37 of 72 variants over the bound
+    latencies shuffled               65 of 72 variants over the bound
 """
 from collections import defaultdict
 
@@ -55,9 +78,10 @@ GRAPH = "default"
 SCALE = 0.3
 SEED = 4242
 
-# etl/generate.py: latency_ms = (t_acc + t_cpu) * 1000 * rng.uniform(1.05, 1.45)
-JITTER_MIN, JITTER_MAX = 1.05, 1.45
-SPREAD_BOUND = JITTER_MAX / JITTER_MIN
+# Imported, not restated: a change to the generator's spread must reach here.
+SPREAD_BOUND = max(gen.LATENCY_JITTER) / min(gen.LATENCY_JITTER)
+# round(x, n) moves a value by at most half a unit in the last place.
+ROUNDING_ERROR_MS = 0.5 * 10 ** -gen.LATENCY_DECIMALS
 
 
 @pytest.fixture(scope="module")
@@ -119,16 +143,20 @@ def deployments_with_cost_model_inputs(client) -> list[dict]:
     return [d for d in found.values() if needed <= set(d)]
 
 
-def spread_per_variant(deployments) -> dict[str, float]:
-    """max/min of `latency / shape` within each variant. 1.0 would be no jitter."""
+def normalised_by_variant(deployments) -> dict[str, list[tuple[float, float]]]:
+    """(latency / shape, latency) per variant. The ratio is constant but for jitter."""
     grouped = defaultdict(list)
     for d in deployments:
         shape = ((1 - d["fallback"]) / d["gops_accel"]
                  + d["fallback"] / d["gops_cpu"])
-        grouped[d["variant"]].append(d["latency"] / shape)
-    return {variant: max(values) / min(values)
-            for variant, values in grouped.items()
-            if len(values) > 1 and min(values) > 0}
+        grouped[d["variant"]].append((d["latency"] / shape, d["latency"]))
+    return grouped
+
+
+def rounding_slack(smallest_latency: float) -> float:
+    """How much of the observed spread `round(latency, 3)` alone can explain."""
+    relative = ROUNDING_ERROR_MS / smallest_latency
+    return (1 + relative) / (1 - relative)
 
 
 def test_every_generated_deployment_has_the_cost_model_terms(loaded):
@@ -144,36 +172,40 @@ def test_every_generated_deployment_has_the_cost_model_terms(loaded):
     assert total > 50, f"only {total} deployments to check"
 
 
-def test_latency_matches_the_documented_cost_model(loaded):
-    spreads = spread_per_variant(deployments_with_cost_model_inputs(loaded))
-    assert len(spreads) > 20, f"only {len(spreads)} variants have >1 deployment"
+def test_no_latency_rounds_away_to_zero(loaded):
+    """A zeroed latency cannot be normalised, so it would leave the check.
 
-    over = {v: round(s, 4) for v, s in spreads.items() if s > SPREAD_BOUND}
-    assert not over, (
-        f"{len(over)} variants whose latency does not follow "
-        f"macs * ((1-f)/gops_accel + f/gops_cpu): within one variant that ratio "
-        f"may only vary by the generator's jitter, {SPREAD_BOUND:.4f}. "
-        f"Worst: {sorted(over.items(), key=lambda kv: -kv[1])[:5]}"
+    Asserted rather than filtered: `latency_ms` is rounded, and a faster
+    generated fleet -- bigger GOPS ranges, smaller models -- would push the
+    fastest deployments under half a millisecond's last place. If that happens
+    this fails and names it, instead of the population quietly shrinking.
+    """
+    deployments = deployments_with_cost_model_inputs(loaded)
+    zeroed = [d for d in deployments if d["latency"] <= 0]
+    assert not zeroed, (
+        f"{len(zeroed)} deployments have a latency of 0 after rounding to "
+        f"{gen.LATENCY_DECIMALS} decimals; they cannot be normalised against "
+        f"the cost model and would silently leave the assertion"
     )
 
 
-def test_falling_back_to_a_slower_cpu_is_what_costs_time(loaded):
-    """The README's "really does pay for it", stated as the graph holds it.
+def test_latency_matches_the_documented_cost_model(loaded):
+    grouped = normalised_by_variant(deployments_with_cost_model_inputs(loaded))
+    checkable = {v: vals for v, vals in grouped.items() if len(vals) > 1}
+    assert len(checkable) > 20, f"only {len(checkable)} variants have >1 deployment"
 
-    The penalty is only real where the CPU is slower than the accelerator; on an
-    `MCU-CPU` deployment the two are the same unit and falling back costs
-    nothing, which is correct rather than a defect.
-    """
-    deployments = deployments_with_cost_model_inputs(loaded)
-    penalised = [d for d in deployments
-                 if d["gops_cpu"] < d["gops_accel"] and d["fallback"] > 0]
-    assert penalised, "no deployment falls back from a faster unit to a slower one"
+    over = {}
+    for variant, values in checkable.items():
+        ratios = [r for r, _ in values]
+        allowed = SPREAD_BOUND * rounding_slack(min(lat for _, lat in values))
+        spread = max(ratios) / min(ratios)
+        if spread > allowed:
+            over[variant] = (round(spread, 4), round(allowed, 4))
 
-    for d in penalised:
-        no_fallback = 1 / d["gops_accel"]
-        actual = (1 - d["fallback"]) / d["gops_accel"] + d["fallback"] / d["gops_cpu"]
-        assert actual > no_fallback, (
-            f"a deployment with fallback {d['fallback']} on a {d['gops_accel']} "
-            f"GOPS unit falling back to {d['gops_cpu']} GOPS is not costed higher "
-            f"than no fallback at all"
-        )
+    assert not over, (
+        f"{len(over)} of {len(checkable)} variants whose latency does not follow "
+        f"macs * ((1-f)/gops_accel + f/gops_cpu). Within one variant that ratio "
+        f"may only vary by the generator's jitter ({SPREAD_BOUND:.4f}), widened "
+        f"by what rounding can explain. Worst (spread, allowed): "
+        f"{sorted(over.items(), key=lambda kv: -kv[1][0])[:5]}"
+    )

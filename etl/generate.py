@@ -31,6 +31,11 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLEET_PATH = DATA_DIR / "fleet" / "fleet.json"
 DEFAULT_SEED = 20260814
 
+# Deployment latency is the cost model's output times a spread, rounded.
+# Named so tests can assert against the generator rather than restate it.
+LATENCY_JITTER = (1.05, 1.45)
+LATENCY_DECIMALS = 3
+
 # --------------------------------------------------------------------------
 # Fictional vendors. Not real companies.
 # --------------------------------------------------------------------------
@@ -522,7 +527,8 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             cpu_ops = cpu["gops_int8"] * 1e9 * thr
             t_acc = (macs * 2 * (1 - frac_fb)) / max(acc_ops, 1.0)
             t_cpu = (macs * 2 * frac_fb) / max(cpu_ops, 1.0)
-            latency_ms = round((t_acc + t_cpu) * 1000 * rng.uniform(1.05, 1.45), 3)
+            latency_ms = round((t_acc + t_cpu) * 1000
+                               * rng.uniform(*LATENCY_JITTER), LATENCY_DECIMALS)
 
             energy_mj = ((t_acc * accel["energy_factor"] + t_cpu * cpu["energy_factor"])
                          * b["power_budget_mw"])
