@@ -31,6 +31,15 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLEET_PATH = DATA_DIR / "fleet" / "fleet.json"
 DEFAULT_SEED = 20260814
 
+# Deployment latency is the cost model's output times a spread, rounded.
+# Named so tests can assert against the generator rather than restate it.
+LATENCY_JITTER = (1.05, 1.45)
+LATENCY_DECIMALS = 3
+# `fallback_fraction` is stored rounded while `latency_ms` is computed from the
+# unrounded value, so a test recomputing the cost model from the graph carries
+# this error too. Named for the same reason as the two above.
+FALLBACK_FRACTION_DECIMALS = 4
+
 # --------------------------------------------------------------------------
 # Fictional vendors. Not real companies.
 # --------------------------------------------------------------------------
@@ -522,7 +531,8 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             cpu_ops = cpu["gops_int8"] * 1e9 * thr
             t_acc = (macs * 2 * (1 - frac_fb)) / max(acc_ops, 1.0)
             t_cpu = (macs * 2 * frac_fb) / max(cpu_ops, 1.0)
-            latency_ms = round((t_acc + t_cpu) * 1000 * rng.uniform(1.05, 1.45), 3)
+            latency_ms = round((t_acc + t_cpu) * 1000
+                               * rng.uniform(*LATENCY_JITTER), LATENCY_DECIMALS)
 
             energy_mj = ((t_acc * accel["energy_factor"] + t_cpu * cpu["energy_factor"])
                          * b["power_budget_mw"])
@@ -539,7 +549,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
                 "energy_mj": round(energy_mj, 4),
                 "memory_kb": memory_kb,
                 "fallback_op_count": len(fallback_ops),
-                "fallback_fraction": round(frac_fb, 4),
+                "fallback_fraction": round(frac_fb, FALLBACK_FRACTION_DECIMALS),
                 "accelerator_kind": accel["kind"],
                 "fits": fits,
                 "_variant": v["id"], "_board": b["id"], "_rt": rt["id"],
