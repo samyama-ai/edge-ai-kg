@@ -8,6 +8,14 @@ Notes 1-9 were observed on the OSS engine at v1.7.0
 (`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
 
+**Versions these describe.** The server is
+`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0; the embedded build is
+`samyama` 0.6.1 from pip. `pyproject.toml` asks for `samyama>=0.6.0` unpinned,
+so a fresh install can resolve a different embedded build than notes 10 and 11
+were measured against. Whether to pin it belongs with #56, which has not yet
+decided which build the suite treats as authoritative -- pinning now would be
+choosing that by the back door.
+
 **Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
 server: both are disagreements between the server and the in-process embedded
 build, neither is filed upstream, and nothing works around either. Between them
@@ -154,6 +162,8 @@ catalog query uses a single sort key *and* that the result really is sorted.
 
 > Filed upstream: [samyama-graph#365](https://github.com/samyama-ai/samyama-graph/issues/365)
 
+**Severity: correctness. Returns the sentinel instead of the minimum.**
+
 ```cypher
 RETURN min(CASE WHEN v.precision = "int8" THEN v.size_kb ELSE 999999   END)  -- 999999  (wrong)
 RETURN min(CASE WHEN v.precision = "int8" THEN v.size_kb ELSE 999999.0 END)  -- 6.9     (right)
@@ -170,6 +180,8 @@ stored property type.**
 ## 5. Negated pattern predicates do not parse
 
 > Filed upstream: [samyama-graph#367](https://github.com/samyama-ai/samyama-graph/issues/367)
+
+**Severity: parse error. Fails loudly rather than silently.**
 
 `WHERE NOT (:Acc)-[:SUPPORTS]->(op)` is a parse error.
 
@@ -189,6 +201,8 @@ RETURN op.name
 
 > Filed upstream: [samyama-graph#367](https://github.com/samyama-ai/samyama-graph/issues/367)
 
+**Severity: parse error. Uniqueness becomes a loader invariant instead.**
+
 Only `CREATE INDEX ON :Label(prop)` is accepted. Uniqueness of `id` is therefore
 a loader invariant, not an engine-enforced one -- ids are minted deterministically
 in `etl/generate.py`.
@@ -198,6 +212,8 @@ in `etl/generate.py`.
 ## 7. The tenant / graph argument is ignored on the OSS HTTP path
 
 > Filed upstream: [samyama-graph#366](https://github.com/samyama-ai/samyama-graph/issues/366)
+
+**Severity: isolation. Two datasets loaded into different graphs merge silently.**
 
 `client.query(cypher, "some_graph")` writes to, and reads from, the single
 `default` graph regardless of the name passed. Writing to `graph_a` is visible
@@ -291,23 +307,29 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 > Not filed upstream. Tracked here as #56 — unlike notes 1-9 this is a
 > disagreement between two builds, not a behaviour of the server.
 
+**Severity: correctness. Raises on the embedded build, correct on the server.**
+
 `SamyamaClient.embedded()` (`samyama` 0.6.1 from pip) and the HTTP server
 (`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0) do not answer the same
-question. A second `WITH` that introduces a **new** alias from a property
-expression is not registered on the embedded build:
+question. A second `WITH` that introduces a **new** alias is not registered on
+the embedded build. Where the alias comes from does not matter -- a property
+expression and an aggregate both fail:
 
 | Statement | embedded | HTTP |
 |---|---|---|
 | `WITH n.name AS a RETURN a` | ok | ok |
+| `WITH count(n.id) AS c RETURN c` | ok | ok |
 | `WITH n, count(n.id) AS c RETURN n.name, c` | ok | ok |
 | `WITH n WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
 | `WITH n, count(n.id) AS c WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
 | `WITH n, count(n.id) AS c WHERE c > 0 WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WITH n, c, count(n.id) AS d RETURN d` | **`Variable not found: d`** | ok |
 | `WITH n, count(n.id) AS c WITH n, c RETURN n.name, c` | ok | ok |
 
 Carrying existing variables through a second `WITH` is fine. It is introducing a
 new one that fails, so the last row is what makes this narrow rather than
-"chained `WITH` is broken".
+"chained `WITH` is broken" -- and the row above it is why the rule is about
+*new aliases*, not about property expressions.
 
 Minimal reproduction against an otherwise empty graph:
 
@@ -322,12 +344,26 @@ c.query("MATCH (n:Probe) WITH n WITH n.name AS a RETURN a", "default")
 The same three lines against `SamyamaClient.connect("http://127.0.0.1:8080")`
 return one row.
 
-**Why it bites here:** the workaround for note 3 is to project through a `WITH`
-before `RETURN` so `ORDER BY` is honoured. EA01 and EA02 already need a `WITH`
-for their anti-join aggregation, so that projection is a *second* one — the
-workaround for one note is what triggers this one. Both queries return rows
-against the server (`run_benchmark` reports 16/16, 0 failed) and both fail under
-`pytest`, which uses the embedded build.
+**Why it bites here.** Two catalog queries hit it, and for different reasons —
+worth separating, because a reader fixing one should not assume the other has
+the same shape:
+
+| | second `WITH` | the alias it introduces | error |
+|---|---|---|---|
+| `EA01` | the note-3 projection: `WITH op.name AS operator, ...` | a **property expression** | `Variable not found: operator` |
+| `EA02` | an aggregation step: `WITH op, models_using, count(k) AS kernel_count` | an **aggregate** | `Variable not found: kernel_count` |
+
+`EA01` is the case where the workaround for one note triggers another: note 3
+says project through a `WITH` before `RETURN` so `ORDER BY` is honoured, and
+EA01 already needs a `WITH` for its anti-join, so the projection is a second one.
+
+`EA02` is not that. Its second `WITH` carries `op` and `models_using` forward
+*and* introduces `kernel_count` from `count(k)` — it is a genuine aggregation
+step, not a projection, and nothing about note 3 is involved. It fails because
+the alias is new, which is the rule above.
+
+Both return rows against the server (`run_benchmark` reports 16/16, 0 failed)
+and both fail under `pytest`, which uses the embedded build.
 
 **No workaround adopted** — the queries are not rewritten to avoid the shape,
 because which engine the suite should treat as authoritative is an open
@@ -349,6 +385,8 @@ is **not** this note — EA04 has a single `WITH`. See note 11.
 
 > Not filed upstream. Tracked with note 10 under #56 — a second embedded/HTTP
 > divergence, different shape. Verified 2026-08-31.
+
+**Severity: correctness. Silently returns rows a WHERE should have removed.**
 
 Four nodes, two groups, one of which should be filtered out:
 
