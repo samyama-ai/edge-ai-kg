@@ -1,12 +1,43 @@
-# Engine notes -- Samyama Graph v1.7.0
+# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-11)
 
-Behaviour observed while building this KG, on the OSS engine at v1.7.0.
-**All nine are filed upstream** — see the tracking issue
+Behaviour observed while building this KG.
+**Notes 1-9 are filed upstream** — see the tracking issue
 [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-Observed on the OSS engine at v1.7.0
-(`target/release/samyama --http-port 8080`). Every item here is load-bearing:
+Notes 1-9 were observed on the OSS engine at v1.7.0
+(`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
+
+**Versions these describe.** The server is
+`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0; the embedded build is
+`samyama` 0.6.1 from pip. `pyproject.toml` asks for `samyama>=0.6.0` unpinned,
+so a fresh install can resolve a different embedded build than notes 10 and 11
+were measured against. Whether to pin it belongs with #56, which has not yet
+decided which build the suite treats as authoritative -- pinning now would be
+choosing that by the back door.
+
+**Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
+server: both are disagreements between the server and the in-process embedded
+build, neither is filed upstream, and neither is worked around in the catalog
+today -- note 11 has a known workaround that is deliberately deferred to #56,
+note 10 has none established. Between them
+they are why three tests in `tests/test_correctness.py` are marked `xfail`:
+
+| Test | Excused | Note |
+|---|---|---|
+| `test_every_catalog_query_runs_and_returns_rows` | `[EA01]`, `[EA02]` only | 10 |
+| `test_order_by_is_actually_applied` | `[EA01]`, `[EA02]` only | 10 |
+| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | whole test | **11** |
+
+Three test functions, **five xfailed parameters** in the run output. The two
+sweeps are parametrised over the catalog so only the affected queries are
+excused: marking either whole would excuse the other fourteen, and those two are
+what `CLAUDE.md` calls the catalog-wide invariant enforcers. The marks are
+applied with `request.applymarker`, not `pytest.xfail()` -- the imperative form
+never runs the body, so a parameter could only ever report XFAIL and the XPASS
+that says "the divergence is gone, remove the mark" would never arrive.
+
+Verified 2026-08-28 and 2026-08-31, both tracked at #56.
 
 ---
 
@@ -141,6 +172,8 @@ catalog query uses a single sort key *and* that the result really is sorted.
 
 > Filed upstream: [samyama-graph#365](https://github.com/samyama-ai/samyama-graph/issues/365)
 
+**Severity: correctness. Returns the sentinel instead of the minimum.**
+
 ```cypher
 RETURN min(CASE WHEN v.precision = "int8" THEN v.size_kb ELSE 999999   END)  -- 999999  (wrong)
 RETURN min(CASE WHEN v.precision = "int8" THEN v.size_kb ELSE 999999.0 END)  -- 6.9     (right)
@@ -157,6 +190,8 @@ stored property type.**
 ## 5. Negated pattern predicates do not parse
 
 > Filed upstream: [samyama-graph#367](https://github.com/samyama-ai/samyama-graph/issues/367)
+
+**Severity: parse error. Fails loudly rather than silently.**
 
 `WHERE NOT (:Acc)-[:SUPPORTS]->(op)` is a parse error.
 
@@ -176,6 +211,8 @@ RETURN op.name
 
 > Filed upstream: [samyama-graph#367](https://github.com/samyama-ai/samyama-graph/issues/367)
 
+**Severity: parse error. Uniqueness becomes a loader invariant instead.**
+
 Only `CREATE INDEX ON :Label(prop)` is accepted. Uniqueness of `id` is therefore
 a loader invariant, not an engine-enforced one -- ids are minted deterministically
 in `etl/generate.py`.
@@ -185,6 +222,8 @@ in `etl/generate.py`.
 ## 7. The tenant / graph argument is ignored on the OSS HTTP path
 
 > Filed upstream: [samyama-graph#366](https://github.com/samyama-ai/samyama-graph/issues/366)
+
+**Severity: isolation. Two datasets loaded into different graphs merge silently.**
 
 `client.query(cypher, "some_graph")` writes to, and reads from, the single
 `default` graph regardless of the name passed. Writing to `graph_a` is visible
@@ -273,10 +312,174 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ---
 
+## 10. The embedded build does not register an alias introduced by a second `WITH`
+
+> Not filed upstream. Tracked here as #56 — unlike notes 1-9 this is a
+> disagreement between two builds, not a behaviour of the server.
+
+**Severity: correctness. Raises on the embedded build, correct on the server.**
+
+`SamyamaClient.embedded()` (`samyama` 0.6.1 from pip) and the HTTP server
+(`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0) do not answer the same
+question. A second `WITH` that introduces a **new** alias is not registered on
+the embedded build. Where the alias comes from does not matter -- a property
+expression and an aggregate both fail:
+
+| Statement | embedded | HTTP |
+|---|---|---|
+| `WITH n.name AS a RETURN a` | ok | ok |
+| `WITH count(n.id) AS c RETURN c` | ok | ok |
+| `WITH n, count(n.id) AS c RETURN n.name, c` | ok | ok |
+| `WITH n WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WHERE c > 0 WITH n.name AS a RETURN a` | **`Variable not found: a`** | ok |
+| `WITH n, count(n.id) AS c WITH n, c, count(n.id) AS d RETURN d` | **`Variable not found: d`** | ok |
+| `WITH n, count(n.id) AS c WITH n, c RETURN n.name, c` | ok | ok |
+
+Carrying existing variables through a second `WITH` is fine. It is introducing a
+new one that fails, so the last row is what makes this narrow rather than
+"chained `WITH` is broken" -- and the row above it is why the rule is about
+*new aliases*, not about property expressions.
+
+Minimal reproduction against an otherwise empty graph:
+
+```python
+from samyama import SamyamaClient
+c = SamyamaClient.embedded()
+c.query('CREATE (:Probe {id: "p1", name: "a"})', "default")
+c.query("MATCH (n:Probe) WITH n WITH n.name AS a RETURN a", "default")
+# RuntimeError: Query error: Variable not found: a
+```
+
+The same three lines against `SamyamaClient.connect("http://127.0.0.1:8080")`
+return one row.
+
+**Why it bites here.** Two catalog queries hit it, and for different reasons —
+worth separating, because a reader fixing one should not assume the other has
+the same shape:
+
+| | second `WITH` | the alias it introduces | error |
+|---|---|---|---|
+| `EA01` | the note-3 projection: `WITH op.name AS operator, ...` | a **property expression** | `Variable not found: operator` |
+| `EA02` | an aggregation step: `WITH op, models_using, count(k) AS kernel_count` | an **aggregate** | `Variable not found: kernel_count` |
+
+`EA01` is the case where the workaround for one note triggers another: note 3
+says project through a `WITH` before `RETURN` so `ORDER BY` is honoured, and
+EA01 already needs a `WITH` for its anti-join, so the projection is a second one.
+
+`EA02` is not that. Its second `WITH` carries `op` and `models_using` forward
+*and* introduces `kernel_count` from `count(k)` — it is a genuine aggregation
+step, not a projection, and nothing about note 3 is involved. It fails because
+the alias is new, which is the rule above.
+
+Both return rows against the server (`run_benchmark` reports 16/16, 0 failed)
+and both fail under `pytest`, which uses the embedded build.
+
+**No workaround adopted** — the queries are not rewritten to avoid the shape,
+because which engine the suite should treat as authoritative is an open
+decision (#56), and rewriting them now would encode a guess as a fix.
+
+What *was* decided: `test_every_catalog_query_runs_and_returns_rows` and
+`test_order_by_is_actually_applied` carry `xfail(strict=False)` naming this
+note. Both sweep the whole catalog and so hit EA01 and EA02. `pytest` stays
+green and the divergence stays visible in every run rather than as red lines
+nobody reads; `strict=False` means an XPASS is not a failure, so if the embedded
+build starts agreeing the run says so and the marks come off.
+
+The third failing test, `test_ea04_quantization_unlock_is_not_a_cartesian_product`,
+is **not** this note — EA04 has a single `WITH`. See note 11.
+
+---
+
+## 11. The two builds disagree on the type of `sum(CASE ... THEN <int> ... END)`, so a `WHERE` on it is dropped
+
+> Not filed upstream. Tracked with note 10 under #56 — a second embedded/HTTP
+> divergence, different shape. Verified 2026-08-31.
+
+**Severity: correctness. Silently returns rows a WHERE should have removed.**
+
+Four nodes, two groups, one of which should be filtered out:
+
+```cypher
+MATCH (g:WGrp)
+WITH g.k AS k, sum(CASE WHEN g.k = "A" THEN 1 ELSE 0 END) AS hits
+WHERE hits > 0
+RETURN k, hits ORDER BY k
+```
+
+| | embedded (`samyama` 0.6.1) | HTTP (v1.7.0) |
+|---|---|---|
+| `sum(CASE ... THEN 1 ELSE 0 END)` returns | **float** — `2.0`, `0.0` | **int** — `2`, `0` |
+| `WHERE hits > 0` (int literal) | **not applied** — both groups | applied — `A` only |
+| `WHERE hits > 0.0` (float literal) | applied — `A` only | **not applied** — no rows at all |
+| no `WHERE` | both groups | both groups |
+
+The aggregate's *type* is what differs. Note 4 already records that this engine
+mis-compares across int and float, so the predicate is silently dropped on
+whichever build the literal does not match. Nothing errors either way.
+
+**No bare literal is correct on both**, and that includes the obvious
+rephrasings:
+
+| Predicate | embedded | HTTP |
+|---|---|---|
+| `WHERE hits > 0` | **wrong** — not applied | correct |
+| `WHERE hits >= 1` | **wrong** — not applied | correct |
+| `WHERE hits <> 0` | **wrong** — not applied | correct |
+| `WHERE hits > 0.0` | correct | **wrong** — returns nothing |
+| **`WHERE toFloat(hits) > 0.0`** | **correct** | **correct** |
+
+**A workaround does exist**, and it was tried rather than assumed: coercing the
+aggregate with `toFloat()` before comparing is right on both builds, because it
+removes the type disagreement rather than guessing which side of it the literal
+should sit on.
+
+It is not adopted here. Rewriting `EA04` changes the catalog, and #56 has not
+decided which build is authoritative — but the decision there is now "adopt
+`toFloat()`, or reconcile the builds", rather than "there is no way to write
+this".
+
+**What it costs.** `EA04` uses `WHERE fp32_misses > 0 AND int8_hits > 0`, so on
+the server it filters and on the embedded build it does not. The unfiltered
+groups are single-deployment ones where the only variant is `fp32`, so they
+carry `int8_hits = 0.0` and `max(CASE WHEN v.precision = "int8" ... ELSE 0 END)`
+correctly returns the `ELSE` sentinel:
+
+```
+EA04 on the HTTP server        EA04 on the embedded build
+fp32_kb    int8_kb             fp32_kb    int8_kb   int8_hits
+ 3347.6      836.9              18125.6         0        0.0
+  558.0      139.5              10224.4         0        0.0
+  305.6       76.4               9929.2         0        0.0
+```
+
+The server's rows are right — `int8_kb` is exactly `fp32_kb / 4`. The embedded
+rows are groups that should never have reached `RETURN`.
+
+**Why `test_ea04_shape_is_not_a_cartesian_product` still passes** on the same
+embedded build, despite the same four conditional aggregates and the same
+`WHERE`: its purpose-built fixture is four deployments in two groups, and *every*
+group satisfies `fp32_misses > 0 AND int8_hits > 0`. Whether the predicate is
+applied or not, the same two rows come back. The divergence is invisible to any
+query whose groups all pass — which is why it surfaces on the generated graph
+and not on the fixture.
+
+**A workaround is known and deliberately not adopted.** `toFloat()` on the
+aggregate, above, is correct on both builds -- so unlike note 10 this is not
+"there is no way to write this". It is not applied because rewriting `EA04`
+changes the catalog, and #56 has not decided which build is authoritative;
+adopting it now would settle that question by the back door. The distinction
+matters: *fix deferred* and *no fix known* are different states, and someone
+reading #56 should not re-derive `toFloat()` from scratch. See the mark on
+`tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`.
+
+---
+
 ## What works well
 
 Everything the catalog depends on, other than the above:
-`OPTIONAL MATCH`, `WITH` + aggregation (`count`/`sum`/`avg`/`min`/`max`/`collect`),
+`OPTIONAL MATCH`, `WITH` + aggregation (`count`/`sum`/`avg`/`min`/`max`/`collect`)
+— though see note 10 on chaining two of them against the embedded build —
 variable-length paths (`-[:R*0..3]->`), `shortestPath`, `CASE`, `IN`, `SKIP` / `LIMIT`, string functions, `EXPLAIN`, and `CREATE INDEX`.
 
 Load throughput on this box (RTX 4050 laptop, server on localhost):

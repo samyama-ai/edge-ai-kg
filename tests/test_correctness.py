@@ -104,6 +104,19 @@ RETURN op.name AS operator
     assert {r[0] for r in recs} == expected
 
 
+@pytest.mark.xfail(
+    reason="engine note 11 / #56: EA04 has a single WITH, so note 10 is NOT its "
+           "cause. sum(CASE ... THEN 1 ELSE 0 END) returns float on the embedded "
+           "build and int on the server, so EA04's `WHERE int8_hits > 0` filters on "
+           "the server and is silently dropped embedded. The groups that leak "
+           "through are fp32-only, so int8_kb is correctly the ELSE sentinel and "
+           "this assertion fails. Strict: the failure is a filter not running, so a "
+           "non-strict mark could outlive the fix and leave EA04's answer on the "
+           "generated graph unchecked. test_ea04_shape_is_not_a_cartesian_product "
+           "covers note 1 on its fixture and is unaffected -- every group there "
+           "satisfies the WHERE, so dropping it changes nothing.",
+    strict=True,
+)
 def test_ea04_quantization_unlock_is_not_a_cartesian_product(loaded):
     """int8 size must be exactly a quarter of fp32 size for the SAME model.
 
@@ -193,21 +206,44 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
     assert got == expected
 
 
-def test_every_catalog_query_runs_and_returns_rows(loaded):
+# EA01 and EA02 each introduce a new alias in a second WITH -- EA01 from a
+# property expression (`op.name AS operator`), EA02 from an aggregate
+# (`count(k) AS kernel_count`) -- which the embedded build does not register.
+# Both are correct against the HTTP server. See engine note 10 and #56.
+NOTE_10_QUERIES = {"EA01", "EA02"}
+NOTE_10_REASON = ("engine note 10 / #56: the embedded build does not register an "
+                  "alias introduced by a second WITH. Correct against the HTTP "
+                  "server. Remove this mark when #56 is resolved.")
+
+
+def excused_by_note_10():
+    """A marker, not `pytest.xfail()`.
+
+    The imperative call raises at once, so the query never runs and the
+    parameter can only ever report XFAIL. Applying a marker lets the body run,
+    so if a future `samyama` release fixes note 10 the run says XPASS and the
+    mark can come off -- which is the signal the engine notes promise. With
+    `pytest.xfail()` that promise could never be kept.
+    """
+    return pytest.mark.xfail(reason=NOTE_10_REASON, strict=False)
+
+
+@pytest.mark.parametrize("qid", list(BY_ID))
+def test_every_catalog_query_runs_and_returns_rows(loaded, qid, request):
+    """Parametrised so the two note-10 queries can be excused individually.
+
+    Marking the whole sweep `xfail` would excuse the other fourteen too: EA07
+    could stop returning rows and the run would still be green.
+    """
+    if qid in NOTE_10_QUERIES:
+        request.applymarker(excused_by_note_10())
     client, _ = loaded
-    empty, failed = [], []
-    for qid, q in BY_ID.items():
-        try:
-            _, recs = rows(client, q["cypher"])
-            if not recs:
-                empty.append(qid)
-        except Exception as exc:
-            failed.append(f"{qid}: {exc}")
-    assert not failed, f"queries failed: {failed}"
+    _, recs = rows(client, BY_ID[qid]["cypher"])
     # EA04 needs a model that misses at fp32 but fits at int8 on the same board;
     # at this small scale that combination may legitimately not occur. Its
     # correctness is pinned by test_ea04_shape_is_not_a_cartesian_product below.
-    assert not [q for q in empty if q != "EA04"], f"queries returned no rows: {empty}"
+    if qid != "EA04":
+        assert recs, f"{qid} returned no rows"
 
 
 def test_ea04_shape_is_not_a_cartesian_product():
@@ -267,25 +303,29 @@ ORDER BY model
     )
 
 
-def test_order_by_is_actually_applied(loaded):
+@pytest.mark.parametrize("qid", list(BY_ID))
+def test_order_by_is_actually_applied(loaded, qid, request):
     """ORDER BY on a RETURN-introduced alias is silently ignored on v1.7.0, and
     only the first sort key is honoured. Every catalog query must therefore
-    project through WITH and sort on a single key -- assert it really sorts."""
+    project through WITH and sort on a single key -- assert it really sorts.
+
+    Parametrised for the same reason as the sweep above: excusing the whole test
+    for note 10 would excuse the other fourteen queries' sort order too.
+    """
     import re
 
+    cypher = BY_ID[qid]["cypher"].strip()
+    match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.DOTALL)
+    if not match:
+        pytest.skip(f"{qid} has no ORDER BY")
+    keys = [k.strip() for k in match.group(1).split(",")]
+    assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
+
+    if qid in NOTE_10_QUERIES:
+        request.applymarker(excused_by_note_10())
     client, _ = loaded
-    broken = []
-    for qid, q in BY_ID.items():
-        cypher = q["cypher"].strip()
-        match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.DOTALL)
-        if not match:
-            continue
-        keys = [k.strip() for k in match.group(1).split(",")]
-        assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
-        cols, recs = rows(client, cypher)
-        key = keys[0].split()[0]
-        descending = keys[0].lower().endswith("desc")
-        values = [r[cols.index(key)] for r in recs]
-        if values != sorted(values, reverse=descending):
-            broken.append(f"{qid} ({key})")
-    assert not broken, f"ORDER BY not applied for: {broken}"
+    cols, recs = rows(client, cypher)
+    key = keys[0].split()[0]
+    descending = keys[0].lower().endswith("desc")
+    values = [r[cols.index(key)] for r in recs]
+    assert values == sorted(values, reverse=descending), f"ORDER BY not applied for {qid} ({key})"
