@@ -239,8 +239,10 @@ Two more are recorded but **not** filed, because they are not behaviours of the
 server: the embedded build and the HTTP server disagree about a second `WITH`
 that introduces a new alias ([note 10](docs/engine-notes.md)), and about the
 type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
-([note 11](docs/engine-notes.md)). So `EA01`, `EA02` and `EA04` are correct
-against the server and wrong against the engine `pytest` uses; three tests in
+([note 11](docs/engine-notes.md)). Neither is worked around in the catalog --
+note 11 has a known workaround deferred to #56, note 10 has none established. So
+`EA01`, `EA02` and `EA04` are correct against the server and wrong against the
+engine `pytest` uses; three tests in
 `tests/test_correctness.py` are marked `xfail` for them, five parameters in the
 run output. See #56 — which engine
 the suite should treat as authoritative is an open decision.
@@ -263,7 +265,7 @@ demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
 docs/         schema, data provenance, engine notes
 DATASET_CARD.md  HF-style card: structure, provenance, intended + out-of-scope uses
-tests/        parsing, fleet + real-layer invariants, query correctness
+tests/        ~100 tests: parsing, fleet + real-layer invariants, query correctness
 ```
 
 ## License

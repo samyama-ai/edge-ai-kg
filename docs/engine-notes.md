@@ -18,7 +18,9 @@ choosing that by the back door.
 
 **Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
 server: both are disagreements between the server and the in-process embedded
-build, neither is filed upstream, and nothing works around either. Between them
+build, neither is filed upstream, and neither is worked around in the catalog
+today -- note 11 has a known workaround that is deliberately deferred to #56,
+note 10 has none established. Between them
 they are why three tests in `tests/test_correctness.py` are marked `xfail`:
 
 | Test | Excused | Note |
@@ -462,9 +464,13 @@ applied or not, the same two rows come back. The divergence is invisible to any
 query whose groups all pass — which is why it surfaces on the generated graph
 and not on the fixture.
 
-**No workaround adopted**, for the same reason as note 10: #56 has not decided
-which build is authoritative, and there is no literal that would be correct on
-both anyway, so any rewrite would be choosing an engine. See the mark on
+**A workaround is known and deliberately not adopted.** `toFloat()` on the
+aggregate, above, is correct on both builds -- so unlike note 10 this is not
+"there is no way to write this". It is not applied because rewriting `EA04`
+changes the catalog, and #56 has not decided which build is authoritative;
+adopting it now would settle that question by the back door. The distinction
+matters: *fix deferred* and *no fix known* are different states, and someone
+reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 `tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`.
 
 ---
