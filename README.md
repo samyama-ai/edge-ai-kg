@@ -97,6 +97,42 @@ documented — every node carries `provenance` and `source`:
 python -m etl.loader --layers real        # public-source subgraph only
 ```
 
+#### What the real layer alone can answer
+
+Measured, not assumed (#21). `--layers real` is **connected** — it is not a set
+of islands sharing a database:
+
+| | |
+|---|---:|
+| nodes | 1,240 |
+| edges | 2,478 |
+| labels with nodes | 10 of 16 |
+| edge types present | 11 of 22 |
+| orphaned nodes | **18**, all `Operator`s no ONNX Runtime kernel registers |
+
+What it lacks is a *half*, not the joins. The real layer is the hardware and
+kernel spine plus the MLPerf submissions; the clinical spine is entirely
+generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
+and `Certification` are empty.
+
+**8 of the 16 catalog queries return rows against it**, 8 come back empty, none
+error:
+
+| | Queries |
+|---|---|
+| Return rows | `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` |
+| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA11` |
+
+**The hero question is one of the empty ones.** It walks
+`Model -[:USES_OPERATOR]-> Operator`, and the real layer has no `USES_OPERATOR`
+edges at all: it records which kernels implement which operators, but nothing
+records which operators a model uses. `EA01`, `EA02` and `EA11` therefore cannot
+be asked of the public-source subgraph — use the full graph for those.
+
+`tests/test_real_layer_shape.py` pins the shape above, so this section fails a
+test rather than going quietly stale. Counts are deliberately not pinned; they
+move whenever ONNX Runtime publishes.
+
 No **generated** number is a claim about any real product — attaching invented
 latency figures to real part numbers would produce a dataset that looks
 authoritative and isn't. The real layer, by contrast, is checkable line by line
@@ -151,7 +187,7 @@ start. To use a running server instead:
 python -m etl.loader --url http://127.0.0.1:8080        # ~13s for 25K/76K
 python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
 python -m mcp_server.server                             # expose over MCP
-pytest                                                  # the whole suite
+pytest                                                  # 50 tests
 ```
 
 Scale the fleet with `--scale` (`1.0` ≈ 24K nodes) and change the world with
@@ -235,18 +271,6 @@ two that **silently return wrong rows** rather than erroring:
 
 All nine are filed upstream — tracking issue [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-Two more are recorded but **not** filed, because they are not behaviours of the
-server: the embedded build and the HTTP server disagree about a second `WITH`
-that introduces a new alias ([note 10](docs/engine-notes.md)), and about the
-type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
-([note 11](docs/engine-notes.md)). Neither is worked around in the catalog --
-note 11 has a known workaround deferred to #56, note 10 has none established. So
-`EA01`, `EA02` and `EA04` are correct against the server and wrong against the
-engine `pytest` uses; three tests in
-`tests/test_correctness.py` are marked `xfail` for them, five parameters in the
-run output. See #56 — which engine
-the suite should treat as authoritative is an open decision.
-
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,
 [`tests/test_correctness.py`](tests/test_correctness.py) validates query
@@ -265,7 +289,7 @@ demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
 docs/         schema, data provenance, engine notes
 DATASET_CARD.md  HF-style card: structure, provenance, intended + out-of-scope uses
-tests/        ~100 tests: parsing, fleet + real-layer invariants, query correctness
+tests/        50 tests: parsing, fleet + real-layer invariants, query correctness
 ```
 
 ## License
