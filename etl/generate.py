@@ -35,6 +35,10 @@ DEFAULT_SEED = 20260814
 # Named so tests can assert against the generator rather than restate it.
 LATENCY_JITTER = (1.05, 1.45)
 LATENCY_DECIMALS = 3
+# `fallback_fraction` is stored rounded while `latency_ms` is computed from the
+# unrounded value, so a test recomputing the cost model from the graph carries
+# this error too. Named for the same reason as the two above.
+FALLBACK_FRACTION_DECIMALS = 4
 
 # --------------------------------------------------------------------------
 # Fictional vendors. Not real companies.
@@ -545,7 +549,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
                 "energy_mj": round(energy_mj, 4),
                 "memory_kb": memory_kb,
                 "fallback_op_count": len(fallback_ops),
-                "fallback_fraction": round(frac_fb, 4),
+                "fallback_fraction": round(frac_fb, FALLBACK_FRACTION_DECIMALS),
                 "accelerator_kind": accel["kind"],
                 "fits": fits,
                 "_variant": v["id"], "_board": b["id"], "_rt": rt["id"],

@@ -33,18 +33,26 @@ the spread cannot leave this test passing against a stale number.
 `gops_cpu` is the `MCU-CPU` accelerator on the deployment's board's SoC, which is
 how `etl/generate.py` chooses it, and is reachable from the graph.
 
-## Rounding
+## Rounding -- two sources, both paid for
 
-`latency_ms` is rounded to `LATENCY_DECIMALS`, so a stored value carries up to
-half a unit in the last place of absolute error -- 1.4% of the smallest latency
-in the graph today. That is larger than the headroom between the observed worst
-spread and the bound, so the bound is widened per variant by what rounding can
-actually do at that variant's smallest latency, rather than being applied flat.
+`latency_ms` is stored rounded, so it carries up to half a unit in the last
+place. That is an *absolute* error: 1.4% of the smallest latency in the graph
+today, shrinking as latency grows.
 
-A latency that rounds to zero cannot be normalised at all. None occur at the
-seed and scale used here, and the test asserts that rather than filtering them
-away silently -- a quiet `min(values) > 0` guard would let a generator change
-shrink the checked population without anyone noticing.
+`fallback_fraction` is stored rounded too -- and `latency_ms` was computed from
+the **unrounded** value. So rebuilding `shape` from what the graph holds is
+wrong by `d(shape)/df * delta_f`. That error is *relative*: it does not shrink
+with latency, so it cannot be folded into the first, and at the slow end of the
+fleet -- where the latency term has decayed to nothing -- it is all that is
+left. Measured worst on a full load: 0.06% from the fraction, 1.4% from the
+latency.
+
+The bound is therefore widened per variant by the sum of both, and the widening
+is itself bounded: `allowed_spread` grows without limit as a latency shrinks,
+and at 0.001 ms -- the smallest value surviving the rounding -- it reaches 4.14,
+wide enough to pass a broken derivation.
+`test_rounding_never_swallows_the_tolerance` fails before that, so the tolerance
+cannot quietly stop being one.
 
 ## A note on MCU-CPU deployments
 
@@ -80,8 +88,20 @@ SEED = 4242
 
 # Imported, not restated: a change to the generator's spread must reach here.
 SPREAD_BOUND = max(gen.LATENCY_JITTER) / min(gen.LATENCY_JITTER)
-# round(x, n) moves a value by at most half a unit in the last place.
-ROUNDING_ERROR_MS = 0.5 * 10 ** -gen.LATENCY_DECIMALS
+
+# round(x, n) moves a value by at most half a unit in the last place. There are
+# two such roundings between the cost model and what this test can recompute:
+# `latency_ms` is stored rounded, and `fallback_fraction` is stored rounded
+# while the latency was computed from the *unrounded* fraction.
+LATENCY_ROUNDING_MS = 0.5 * 10 ** -gen.LATENCY_DECIMALS
+FRACTION_ROUNDING = 0.5 * 10 ** -gen.FALLBACK_FRACTION_DECIMALS
+
+# Above this, the allowance is wide enough to pass a broken derivation, so the
+# tolerance has stopped being a tolerance. Measured worst today: 0.4%.
+MAX_TOLERABLE_ERROR = 0.05
+# Nearly every variant carries several deployments; a collapse in that is a
+# generator change hiding most of the population from the assertion.
+MIN_CHECKABLE_FRACTION = 0.8
 
 
 @pytest.fixture(scope="module")
@@ -120,8 +140,13 @@ def deployments_with_cost_model_inputs(client) -> list[dict]:
     def rows(cypher):
         return client.query(cypher, GRAPH).records
 
+    # Filtered on `provenance`, not on `fallback_fraction IS NOT NULL`. The
+    # real MLPerf deployments are appended to the same node list and created in
+    # the same batched CREATE, and engine note 8 records that a node created
+    # without a property can inherit the previous generation's column value.
+    # `provenance` is stamped by `Fleet.add_nodes` and cannot appear that way.
     found = {r[0]: {"latency": r[1], "fallback": r[2]} for r in rows(
-        "MATCH (x:Deployment) WHERE x.fallback_fraction IS NOT NULL "
+        'MATCH (x:Deployment) WHERE x.provenance = "synthetic" '
         "RETURN x.id, x.latency_ms, x.fallback_fraction")}
     for did, variant in rows(
             "MATCH (x:Deployment)-[:OF_VARIANT]->(v:ModelVariant) RETURN x.id, v.id"):
@@ -143,27 +168,47 @@ def deployments_with_cost_model_inputs(client) -> list[dict]:
     return [d for d in found.values() if needed <= set(d)]
 
 
+def recoverable_error(d: dict) -> float:
+    """Relative error in `latency / shape` from what the graph stores rounded.
+
+    Two independent sources, and both have to be paid for:
+
+    * `latency_ms` is stored rounded -- an absolute error, so its relative size
+      shrinks as latency grows.
+    * `fallback_fraction` is stored rounded *and the latency was computed from
+      the unrounded value*, so rebuilding `shape` from the stored one is wrong
+      by `d(shape)/df * delta_f`. That error is relative and does not shrink
+      with latency, which is exactly why it cannot be folded into the first.
+    """
+    shape = shape_of(d)
+    from_latency = LATENCY_ROUNDING_MS / d["latency"]
+    from_fraction = (FRACTION_ROUNDING
+                     * abs(1 / d["gops_cpu"] - 1 / d["gops_accel"]) / shape)
+    return from_latency + from_fraction
+
+
+def shape_of(d: dict) -> float:
+    return (1 - d["fallback"]) / d["gops_accel"] + d["fallback"] / d["gops_cpu"]
+
+
 def normalised_by_variant(deployments) -> dict[str, list[tuple[float, float]]]:
-    """(latency / shape, latency) per variant. The ratio is constant but for jitter."""
+    """(latency / shape, recoverable error) per variant."""
     grouped = defaultdict(list)
     for d in deployments:
-        shape = ((1 - d["fallback"]) / d["gops_accel"]
-                 + d["fallback"] / d["gops_cpu"])
-        grouped[d["variant"]].append((d["latency"] / shape, d["latency"]))
+        grouped[d["variant"]].append((d["latency"] / shape_of(d), recoverable_error(d)))
     return grouped
 
 
-def rounding_slack(smallest_latency: float) -> float:
-    """How much of the observed spread `round(latency, 3)` alone can explain."""
-    relative = ROUNDING_ERROR_MS / smallest_latency
-    return (1 + relative) / (1 - relative)
+def allowed_spread(error: float) -> float:
+    """The jitter bound, widened by what rounding alone can explain."""
+    return SPREAD_BOUND * (1 + error) / (1 - error)
 
 
 def test_every_generated_deployment_has_the_cost_model_terms(loaded):
     """Guard: the assertion below is only as good as what it can reach."""
     deployments = deployments_with_cost_model_inputs(loaded)
     total = loaded.query(
-        "MATCH (x:Deployment) WHERE x.fallback_fraction IS NOT NULL "
+        'MATCH (x:Deployment) WHERE x.provenance = "synthetic" '
         "RETURN count(x) AS n", GRAPH).records[0][0]
     assert len(deployments) == total, (
         f"{len(deployments)} of {total} deployments could be joined to a "
@@ -172,32 +217,46 @@ def test_every_generated_deployment_has_the_cost_model_terms(loaded):
     assert total > 50, f"only {total} deployments to check"
 
 
-def test_no_latency_rounds_away_to_zero(loaded):
-    """A zeroed latency cannot be normalised, so it would leave the check.
+def test_rounding_never_swallows_the_tolerance(loaded):
+    """The allowance must stay an allowance.
 
-    Asserted rather than filtered: `latency_ms` is rounded, and a faster
-    generated fleet -- bigger GOPS ranges, smaller models -- would push the
-    fastest deployments under half a millisecond's last place. If that happens
-    this fails and names it, instead of the population quietly shrinking.
+    `allowed_spread` grows without limit as a latency shrinks: the smallest
+    value surviving `round(x, 3)` is 0.001 ms, which alone gives a relative
+    error of 0.5 and an allowance of 4.14 -- wide enough for a completely broken
+    derivation to pass. Checking only for a zero latency does not catch that, so
+    the error itself is bounded rather than its most extreme cause.
     """
     deployments = deployments_with_cost_model_inputs(loaded)
     zeroed = [d for d in deployments if d["latency"] <= 0]
     assert not zeroed, (
         f"{len(zeroed)} deployments have a latency of 0 after rounding to "
-        f"{gen.LATENCY_DECIMALS} decimals; they cannot be normalised against "
-        f"the cost model and would silently leave the assertion"
+        f"{gen.LATENCY_DECIMALS} decimals and cannot be normalised at all"
+    )
+    worst = max(recoverable_error(d) for d in deployments)
+    assert worst < MAX_TOLERABLE_ERROR, (
+        f"rounding alone explains {worst:.1%} of the ratio, so the bound widens "
+        f"to {allowed_spread(worst):.2f} against a real jitter of "
+        f"{SPREAD_BOUND:.4f}; at that width the assertion below proves nothing"
     )
 
 
 def test_latency_matches_the_documented_cost_model(loaded):
-    grouped = normalised_by_variant(deployments_with_cost_model_inputs(loaded))
+    deployments = deployments_with_cost_model_inputs(loaded)
+    grouped = normalised_by_variant(deployments)
     checkable = {v: vals for v, vals in grouped.items() if len(vals) > 1}
-    assert len(checkable) > 20, f"only {len(checkable)} variants have >1 deployment"
+
+    # Proportional, not absolute: a generator change leaving most variants with
+    # a single deployment would drop them from the check while a fixed floor
+    # like "more than 20" stayed satisfied.
+    assert len(checkable) >= MIN_CHECKABLE_FRACTION * len(grouped), (
+        f"only {len(checkable)} of {len(grouped)} variants carry more than one "
+        f"deployment, so most of the population is outside this assertion"
+    )
 
     over = {}
     for variant, values in checkable.items():
-        ratios = [r for r, _ in values]
-        allowed = SPREAD_BOUND * rounding_slack(min(lat for _, lat in values))
+        ratios = [ratio for ratio, _ in values]
+        allowed = allowed_spread(max(error for _, error in values))
         spread = max(ratios) / min(ratios)
         if spread > allowed:
             over[variant] = (round(spread, 4), round(allowed, 4))
