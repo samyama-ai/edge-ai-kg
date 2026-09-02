@@ -20,17 +20,18 @@ so pinning them here would produce a test that fails for upstream's reasons
 rather than ours. Which labels and edge types `etl/real_layer.py` builds is our
 decision, and that is what is asserted.
 """
-import re
-from pathlib import Path
-
 import pytest
 
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
 from etl.loader import NODE_LABELS
 
+# Shared rather than a second regex over the same comment block: that helper
+# already asserts on its match, so a reformatted schema header fails there once
+# with a readable message instead of raising AttributeError in two places.
+from tests.test_schema_docs import declared_in_schema
+
 GRAPH = "default"
-SCHEMA = Path(__file__).resolve().parent.parent / "schema" / "edge_ai_kg.cypher"
 
 # The hardware and kernel spine, plus the MLPerf submissions.
 LABELS_PRESENT = {"Vendor", "SoC", "Accelerator", "Board", "Runtime",
@@ -76,10 +77,7 @@ def scalar(client, cypher: str) -> int:
 
 
 def declared_edge_types() -> set[str]:
-    match = re.search(r"^// Edge types:(.*?)^//\s*$",
-                      SCHEMA.read_text(encoding="utf-8"), re.DOTALL | re.MULTILINE)
-    body = re.sub(r"^//", "", match.group(1), flags=re.MULTILINE)
-    return {t.strip() for t in body.split(",") if t.strip()}
+    return set(declared_in_schema("Edge types"))
 
 
 def test_the_fixture_built_a_real_only_graph(real_only):
@@ -142,6 +140,10 @@ def test_the_real_layer_is_connected_apart_from_unregistered_operators(real_only
     Runtime publish, and the claim being defended is "a handful", not a figure.
     """
     client, _ = real_only
+    # Built from EDGES_PRESENT rather than every declared type: a newly added
+    # edge type would leave its endpoints looking orphaned here. That is safe
+    # only because test_which_edge_types_the_real_layer_carries fails first and
+    # names the new type -- if that test is ever relaxed, widen this too.
     connected = set()
     for rel in EDGES_PRESENT:
         for src, dst in client.query(
