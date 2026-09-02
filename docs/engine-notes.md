@@ -21,11 +21,19 @@ server: both are disagreements between the server and the in-process embedded
 build, neither is filed upstream, and nothing works around either. Between them
 they are why three tests in `tests/test_correctness.py` are marked `xfail`:
 
-| Test | Note |
-|---|---|
-| `test_every_catalog_query_runs_and_returns_rows` | 10 |
-| `test_order_by_is_actually_applied` | 10 |
-| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | **11** |
+| Test | Excused | Note |
+|---|---|---|
+| `test_every_catalog_query_runs_and_returns_rows` | `[EA01]`, `[EA02]` only | 10 |
+| `test_order_by_is_actually_applied` | `[EA01]`, `[EA02]` only | 10 |
+| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | whole test | **11** |
+
+Three test functions, **five xfailed parameters** in the run output. The two
+sweeps are parametrised over the catalog so only the affected queries are
+excused: marking either whole would excuse the other fourteen, and those two are
+what `CLAUDE.md` calls the catalog-wide invariant enforcers. The marks are
+applied with `request.applymarker`, not `pytest.xfail()` -- the imperative form
+never runs the body, so a parameter could only ever report XFAIL and the XPASS
+that says "the divergence is gone, remove the mark" would never arrive.
 
 Verified 2026-08-28 and 2026-08-31, both tracked at #56.
 
@@ -406,9 +414,28 @@ RETURN k, hits ORDER BY k
 
 The aggregate's *type* is what differs. Note 4 already records that this engine
 mis-compares across int and float, so the predicate is silently dropped on
-whichever build the literal does not match — and **no literal is correct on
-both**: `> 0` filters on the server only, `> 0.0` on the embedded build only.
-Nothing errors either way.
+whichever build the literal does not match. Nothing errors either way.
+
+**No bare literal is correct on both**, and that includes the obvious
+rephrasings:
+
+| Predicate | embedded | HTTP |
+|---|---|---|
+| `WHERE hits > 0` | **wrong** — not applied | correct |
+| `WHERE hits >= 1` | **wrong** — not applied | correct |
+| `WHERE hits <> 0` | **wrong** — not applied | correct |
+| `WHERE hits > 0.0` | correct | **wrong** — returns nothing |
+| **`WHERE toFloat(hits) > 0.0`** | **correct** | **correct** |
+
+**A workaround does exist**, and it was tried rather than assumed: coercing the
+aggregate with `toFloat()` before comparing is right on both builds, because it
+removes the type disagreement rather than guessing which side of it the literal
+should sit on.
+
+It is not adopted here. Rewriting `EA04` changes the catalog, and #56 has not
+decided which build is authoritative — but the decision there is now "adopt
+`toFloat()`, or reconcile the builds", rather than "there is no way to write
+this".
 
 **What it costs.** `EA04` uses `WHERE fp32_misses > 0 AND int8_hits > 0`, so on
 the server it filters and on the embedded build it does not. The unfiltered

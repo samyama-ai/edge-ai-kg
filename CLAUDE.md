@@ -140,7 +140,7 @@ around them**: a second `WITH` introducing a new alias fails embedded (note 10),
 and `sum(CASE ...)` returns a different type on each build, which silently drops
 a `WHERE` on it (note 11). Cypher that obeys every rule below still answers
 differently on the two builds, which is why `EA01`, `EA02` and `EA04` are right
-under `run_benchmark` and wrong under `pytest`. Three tests are marked `xfail`.
+under `run_benchmark` and wrong under `pytest`. Three tests are marked `xfail` -- five parameters in the run output.
 See #56 — which build is authoritative is undecided.
 
 The rules that follow from notes 1-9:

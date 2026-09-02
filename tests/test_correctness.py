@@ -216,15 +216,27 @@ NOTE_10_REASON = ("engine note 10 / #56: the embedded build does not register an
                   "server. Remove this mark when #56 is resolved.")
 
 
+def excused_by_note_10():
+    """A marker, not `pytest.xfail()`.
+
+    The imperative call raises at once, so the query never runs and the
+    parameter can only ever report XFAIL. Applying a marker lets the body run,
+    so if a future `samyama` release fixes note 10 the run says XPASS and the
+    mark can come off -- which is the signal the engine notes promise. With
+    `pytest.xfail()` that promise could never be kept.
+    """
+    return pytest.mark.xfail(reason=NOTE_10_REASON, strict=False)
+
+
 @pytest.mark.parametrize("qid", list(BY_ID))
-def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
+def test_every_catalog_query_runs_and_returns_rows(loaded, qid, request):
     """Parametrised so the two note-10 queries can be excused individually.
 
     Marking the whole sweep `xfail` would excuse the other fourteen too: EA07
     could stop returning rows and the run would still be green.
     """
     if qid in NOTE_10_QUERIES:
-        pytest.xfail(NOTE_10_REASON)
+        request.applymarker(excused_by_note_10())
     client, _ = loaded
     _, recs = rows(client, BY_ID[qid]["cypher"])
     # EA04 needs a model that misses at fp32 but fits at int8 on the same board;
@@ -292,7 +304,7 @@ ORDER BY model
 
 
 @pytest.mark.parametrize("qid", list(BY_ID))
-def test_order_by_is_actually_applied(loaded, qid):
+def test_order_by_is_actually_applied(loaded, qid, request):
     """ORDER BY on a RETURN-introduced alias is silently ignored on v1.7.0, and
     only the first sort key is honoured. Every catalog query must therefore
     project through WITH and sort on a single key -- assert it really sorts.
@@ -310,7 +322,7 @@ def test_order_by_is_actually_applied(loaded, qid):
     assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
 
     if qid in NOTE_10_QUERIES:
-        pytest.xfail(NOTE_10_REASON)
+        request.applymarker(excused_by_note_10())
     client, _ = loaded
     cols, recs = rows(client, cypher)
     key = keys[0].split()[0]

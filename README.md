@@ -241,7 +241,8 @@ that introduces a new alias ([note 10](docs/engine-notes.md)), and about the
 type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
 ([note 11](docs/engine-notes.md)). So `EA01`, `EA02` and `EA04` are correct
 against the server and wrong against the engine `pytest` uses; three tests in
-`tests/test_correctness.py` are marked `xfail` for them. See #56 — which engine
+`tests/test_correctness.py` are marked `xfail` for them, five parameters in the
+run output. See #56 — which engine
 the suite should treat as authoritative is an open decision.
 
 Each is documented with a minimal reproduction and the workaround used in
