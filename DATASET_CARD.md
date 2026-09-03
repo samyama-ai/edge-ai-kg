@@ -200,13 +200,27 @@ Every node has a globally unique `id` of the form `<prefix>:<5-digit>`.
 ceiling. **These constraints are what create the coverage gaps** the dataset
 exists to expose.
 
-| Kind | Opset ceiling | Covers | int8 GOPS | Energy factor |
-|---|---:|---|---|---:|
-| `MCU-CPU` | 99 | every category (universal fallback) | 0.5–3 | 1.00 |
-| `DSP` | 17 | signal, elementwise, conv, matmul, spatial | 8–40 | 0.42 |
-| `NPU-Lite` | 13 | conv, matmul, activation, spatial, quantization | 30–120 | 0.16 |
-| `NPU-Pro` | 19 | + reduction, attention, shape | 150–900 | 0.11 |
-| `GPU-Embedded` | 21 | + recurrent, tensor | 400–2400 | 0.30 |
+**These five archetypes cover the generated layer only** — 85 of the 91
+`Accelerator` nodes above. Counts are `--scale 1.0`, seed `20260814`.
+
+| Kind | Count | Opset ceiling | Covers | int8 GOPS | Energy factor |
+|---|---:|---:|---|---|---:|
+| `MCU-CPU` | 40 | 99 | every category (universal fallback) | 0.5–3 | 1.00 |
+| `GPU-Embedded` | 15 | 21 | + recurrent, tensor | 400–2400 | 0.30 |
+| `NPU-Lite` | 12 | 13 | conv, matmul, activation, spatial, quantization | 30–120 | 0.16 |
+| `NPU-Pro` | 9 | 19 | + reduction, attention, shape | 150–900 | 0.11 |
+| `DSP` | 9 | 17 | signal, elementwise, conv, matmul, spatial | 8–40 | 0.42 |
+| | **85** | | | | |
+
+`Opset ceiling` is not a count — `99` is a sentinel meaning *no ceiling*, not
+ninety-nine units.
+
+The remaining **6 are real**, and carry four kinds that have no archetype and so
+no ceiling, category list, GOPS or energy factor: `NPU` (3, MLPerf Tiny
+submitters), `CPU`, `GPU-CUDA` and `GPU-DirectML` (1 each, ONNX Runtime
+execution providers). `kind` is therefore an open vocabulary; see
+[`docs/schema.md`](docs/schema.md) for what that does to `EA05`, `EA08` and
+`EA11`.
 
 Every SoC carries an `MCU-CPU`, so *something* can always run. The question the
 graph answers is never "can it run" but **"is it ever accelerated, and what does
