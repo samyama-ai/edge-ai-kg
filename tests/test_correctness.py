@@ -78,6 +78,66 @@ def test_graph_loaded_completely(loaded):
     assert recs[0][0] == fleet.edge_count
 
 
+def test_ea11_cpu_only_models_match_ground_truth(loaded):
+    """EA11's anti-join, against Python, on a real-cardinality graph.
+
+    `EA11` is written as `OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op),
+    (k)-[:RUNS_ON]->(a:Accelerator)` -- the comma-separated single-`MATCH` shape
+    that `docs/engine-notes.md` records as correct on a toy graph and **wrong**
+    at scale, with the explicit warning that "a passing 6-node reproduction
+    proves nothing". `tests/test_empty_answers.py` builds exactly such a
+    reproduction to pin the zero-vs-one distinction, so the shape itself is
+    checked here instead.
+
+    Verified once by hand at full `--scale 1.0` (24,115 nodes), which is what
+    the engine note asks for: 60 of 60 models are CPU-only somewhere and EA11's
+    top ten counts `[12, 11, 10, 10, 10, 9, 9, 9, 9, 9]` matched Python exactly.
+    This runs at `SCALE` so the suite stays fast; if the join ever breaks it is
+    the ordered counts that go wrong, and those are compared in full.
+
+    Note `SignalStage` also emits `USES_OPERATOR`. EA11 filters on `:Model`, so
+    the ground truth below must too, or it counts operators no model uses.
+    """
+    client, fleet = loaded
+    idx = index(fleet)
+    kind = {a["id"]: a["kind"] for a in fleet.nodes["Accelerator"]}
+    name = {m["id"]: m["name"] for m in fleet.nodes["Model"]}
+    op_name = {o["id"]: o["name"] for o in fleet.nodes["Operator"]}
+
+    runs = {}
+    for k, a, _ in idx["out"]["RUNS_ON"]:
+        runs.setdefault(k, set()).add(a)
+    accelerated = {
+        op for k, op, _ in idx["out"]["IMPLEMENTS"]
+        if any(kind.get(a) != "MCU-CPU" for a in runs.get(k, ()))
+    }
+    uses = {}
+    for m, op, _ in idx["out"]["USES_OPERATOR"]:
+        if m in name:                      # :Model only -- SignalStage also uses operators
+            uses.setdefault(m, set()).add(op)
+    assert uses, "no model has an operator surface"
+
+    truth = {}
+    for m, ops in uses.items():
+        cpu_only = sorted(op_name[o] for o in ops if o not in accelerated)
+        if cpu_only:
+            truth[name[m]] = cpu_only
+
+    _, recs = rows(client, BY_ID["EA11"]["cypher"])
+    assert recs, "EA11 returned nothing; every model should have some CPU-only operator"
+    expected = sorted(((len(v), k) for k, v in truth.items()), reverse=True)[:len(recs)]
+    assert [r[2] for r in recs] == [n for n, _ in expected], (
+        f"EA11's counts disagree with the Fleet. Got {[(r[0], r[2]) for r in recs]}, "
+        f"expected the top {len(recs)} of {len(truth)} to be {expected}. This is the "
+        f"shape docs/engine-notes.md warns breaks once cardinalities are real."
+    )
+    for model, _family, count, operators in recs:
+        assert sorted(operators) == truth[model], (
+            f"EA11 named the wrong operators for {model}: got {sorted(operators)}, "
+            f"expected {truth[model]}"
+        )
+
+
 def test_ea01_fallback_audit_matches_ground_truth(loaded):
     """The hero query: operators with no kernel on a chosen accelerator."""
     client, fleet = loaded
