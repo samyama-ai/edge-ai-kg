@@ -122,6 +122,50 @@ this is what creates the coverage gaps the queries hunt for.
 | `NPU-Pro` | 19 | + reduction, attention, shape | 150-900 | 0.11 |
 | `GPU-Embedded` | 21 | + recurrent, tensor | 400-2400 | 0.30 |
 
+### What `opset_ceiling` means
+
+It is a **hard cut on kernel existence**, not a hint. `etl/generate.py` creates a
+`Kernel` for an `(operator, accelerator, runtime)` triple only when all of these
+hold, and the ceiling is one of them:
+
+```python
+if o.category not in a["_cats"]:            continue   # wrong category
+if o.since_version > a["opset_ceiling"]:    continue   # above the ceiling
+if o.is_control_flow and a["kind"] != "MCU-CPU": continue
+if a["kind"] != "MCU-CPU" and rng.random() < 0.18:     continue   # vendor gap
+```
+
+So the rule the graph obeys is:
+
+> **No `Kernel` exists on an `Accelerator` for an `Operator` whose
+> `since_version` is above that accelerator's `opset_ceiling`.**
+
+Measured on a full load: **0 of 21,844** generated kernel placements break it,
+and the bound is tight rather than loose -- in every band the highest operator
+opset actually used *equals* the ceiling:
+
+| Ceiling | Highest `since_version` used | Kernels |
+|---:|---:|---:|
+| 13 | **13** | 780 |
+| 17 | **17** | 704 |
+| 19 | **19** | 1,273 |
+| 21 | **21** | 2,892 |
+| 99 | 28 | 16,195 |
+
+`99` on `MCU-CPU` is a sentinel for *no ceiling*: ONNX's highest `since_version`
+in this catalog is 28, so nothing is excluded by it. That is what makes the
+MCU-CPU the universal fallback, and it is why the hero question always has an
+answer -- something can always run, just slowly.
+
+**The real layer has no ceiling at all.** All six real accelerators -- the three
+MLPerf Tiny NPUs and ONNX Runtime's CPU, CUDA and DirectML providers -- carry no
+`opset_ceiling`, because their real kernel registrations are read from upstream
+rather than derived from a rule. So their 738 kernel placements are outside this
+invariant: not violating it, not covered by it. A query filtering on
+`opset_ceiling` silently excludes them.
+
+`tests/test_opset_ceiling.py` asserts all of the above.
+
 Every SoC has an `MCU-CPU`, so *something* can always run -- the question the
 graph answers is never "can it run" but "is it ever accelerated, and what does
 the fallback cost".
