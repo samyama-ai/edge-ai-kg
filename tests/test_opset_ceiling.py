@@ -7,31 +7,37 @@ a `Kernel` is created only when, among other conditions,
     if o.since_version > a["opset_ceiling"]:
         continue
 
-so the rule is **no kernel exists on an accelerator for an operator whose
-`since_version` is above that accelerator's ceiling** -- and it is a rule, not a
-hint. `docs/schema.md` now states it; this file holds the graph to it.
+so it is a rule, not a hint. `docs/schema.md` now states it; this file holds the
+graph to it.
 
-Two things worth knowing before reading the assertions.
+**`since_version` is the operator's latest revision, not its introduction.**
+`etl/onnx_catalog.py` sets it to `max(versions)`, so `Pad` -- introduced at
+opset 1 and revised ten times through 25 -- carries 25 and is excluded from
+every band below that. The rule is therefore "no kernel for an operator whose
+*latest revision* is above the ceiling", which excludes a great many old
+operators and is easy to read backwards.
 
-**`99` is a sentinel, not a ceiling.** `MCU-CPU` carries 99 and ONNX's highest
-`since_version` in this catalog is 28, so it excludes nothing. That is what
-makes the MCU-CPU the universal fallback, and why the hero question always has
-an answer: something can always run, just slowly. The boundary assertion below
-skips it, because there is no boundary to reach.
+**`99` is a sentinel, not a ceiling.** `MCU-CPU` carries it and no ONNX operator
+reaches it, so it excludes nothing -- which is what makes the MCU-CPU the
+universal fallback, and why the hero question always has an answer. It is
+derived from `ACCEL_ARCHETYPES` rather than restated here, and skipped wherever
+a real band is meant.
 
-**The real layer has no ceiling at all.** All six real accelerators -- three
-MLPerf Tiny NPUs and ONNX Runtime's CPU, CUDA and DirectML providers -- carry
-none, because their kernel registrations are read from upstream rather than
-derived from a rule. Their placements are outside the invariant: not violating
-it, not covered by it. Asserted, so a query that filters on `opset_ceiling`
-silently dropping them stays a documented fact rather than a surprise.
+**The real layer has no ceiling at all.** Real accelerators carry none, because
+their kernel registrations are read from upstream rather than derived from a
+rule, so their placements are outside the invariant: not violating it, not
+covered by it.
 
-The comparison is done in Python rather than in the `WHERE` clause. That follows
-`tests/test_correctness.py`'s approach of recomputing the answer here and
-asserting the engine agrees, and it sidesteps a `Type error: AND requires
-boolean operands` this shape raised on the embedded build when a null ceiling
-was in play -- which I could not reduce to a minimal case, so it is avoided
-rather than relied upon.
+`tests/test_generate.py::test_kernels_respect_opset_ceiling` already asserts the
+core rule on the `Fleet`, with no engine and no downloaded data. That is the
+stronger place for it and the two should change together. What this file adds is
+the load round-trip, the per-band form the generator actually applies, and the
+anti-vacuity and provenance facts above.
+
+Comparisons run in Python rather than in a `WHERE` clause, following
+`tests/test_correctness.py`. It also sidesteps a `Type error: AND requires
+boolean operands` this shape raised on the embedded build with a null ceiling in
+play -- not reduced to a minimal case, so avoided rather than relied upon.
 """
 from collections import defaultdict
 
@@ -46,8 +52,11 @@ GRAPH = "default"
 SCALE = 0.3
 SEED = 4242
 
-# etl/generate.py gives MCU-CPU this so nothing is ever excluded.
-NO_CEILING_SENTINEL = 99
+# Derived, not restated: if MCU-CPU's ceiling changes in ACCEL_ARCHETYPES, the
+# sentinel follows instead of this file quietly treating it as a real band.
+ARCHETYPES = {kind: (cats, ceiling)
+              for kind, cats, ceiling, *_ in gen.ACCEL_ARCHETYPES}
+NO_CEILING_SENTINEL = ARCHETYPES["MCU-CPU"][1]
 
 
 @pytest.fixture(scope="module")
@@ -94,9 +103,22 @@ def accelerators(client):
 
 
 def test_no_kernel_exceeds_its_accelerators_ceiling(loaded):
-    """The rule `docs/schema.md` now states."""
+    """The rule `docs/schema.md` states, checked after the load round-trip.
+
+    `tests/test_generate.py::test_kernels_respect_opset_ceiling` already asserts
+    this on the `Fleet`, with no engine and no downloaded data, and that is the
+    stronger place for the generator's own invariant. What this adds is that the
+    round-trip preserves it: Fleet -> batched Cypher -> graph -> query. The two
+    should be changed together.
+    """
     over = [(kid, since, ceiling) for kid, since, ceiling in placements(loaded)
-            if ceiling is not None and since > ceiling]
+            if ceiling is not None and since is not None and since > ceiling]
+    unversioned = [kid for kid, since, _ in placements(loaded) if since is None]
+    assert not unversioned, (
+        f"{len(unversioned)} kernels implement an operator with no "
+        f"since_version, e.g. {unversioned[:3]}; the comparison above would "
+        f"raise TypeError rather than assert"
+    )
     assert not over, (
         f"{len(over)} kernels implement an operator above their accelerator's "
         f"opset_ceiling, e.g. {over[:5]}. The generator excludes these, so the "
@@ -104,55 +126,104 @@ def test_no_kernel_exceeds_its_accelerators_ceiling(loaded):
     )
 
 
-def test_the_rule_actually_excludes_something(loaded):
-    """Guard: an invariant nothing could break is not evidence of anything.
+def operators(client):
+    return client.query(
+        "MATCH (op:Operator) RETURN op.name, op.category, op.since_version",
+        GRAPH).records
 
-    For every real ceiling there must be operators in the graph above it --
-    otherwise the assertion above would hold on a catalog that simply never
-    reaches the bound, and would keep holding if the rule were deleted.
+
+def test_each_band_excludes_operators_it_otherwise_covers(loaded):
+    """Anti-vacuity, per archetype and category-aware.
+
+    An earlier version compared each ceiling against *every* operator in the
+    graph, which does not establish what it claims: an archetype only ever sees
+    operators in its own categories (`etl/generate.py`), so if everything above
+    a ceiling sat in categories that archetype does not cover, the ceiling check
+    could be deleted from the generator with no effect and the test would still
+    pass -- the exact failure it exists to prevent.
+
+    Scoped to the covering archetype's categories, it establishes the thing:
+    each band has operators it covers *and* excludes, so removing the rule would
+    change the graph.
     """
-    ceilings = {c for _, c, _, _ in accelerators(loaded)
-                if c is not None and c != NO_CEILING_SENTINEL}
-    assert ceilings, "no accelerator carries a real ceiling"
+    ops = [(name, cat, sv) for name, cat, sv in operators(loaded) if sv is not None]
+    assert ops, "no operators loaded"
 
-    versions = [r[0] for r in loaded.query(
-        "MATCH (op:Operator) RETURN op.since_version", GRAPH).records
-        if r[0] is not None]
-    for ceiling in sorted(ceilings):
-        above = sum(1 for v in versions if v > ceiling)
-        assert above > 0, (
-            f"no operator in the graph has since_version above {ceiling}, so a "
-            f"ceiling of {ceiling} excludes nothing and the invariant is vacuous"
+    for kind, (categories, ceiling) in sorted(ARCHETYPES.items()):
+        if ceiling == NO_CEILING_SENTINEL:
+            continue
+        covered = [o for o in ops if o[1] in categories]
+        above = [o for o in covered if o[2] > ceiling]
+        assert covered, f"{kind} covers no operator category present in the graph"
+        assert above, (
+            f"{kind} (ceiling {ceiling}) covers {len(covered)} operators and "
+            f"excludes none of them, so the ceiling changes nothing for this "
+            f"band and the invariant holds vacuously here"
         )
 
 
-def test_the_ceiling_is_reached_not_merely_respected(loaded):
-    """It is a boundary, not decoration: every band uses operators right up to it.
+def test_no_kernel_exists_for_an_operator_its_band_excludes(loaded):
+    """The rule stated per band, which is how the generator applies it.
 
-    If a band's highest `since_version` sat well below its ceiling, the ceiling
-    would not be the thing shaping coverage and the README's fallback story
-    would be resting on something else.
+    Deliberately not the exact-equality form this file used to carry -- that
+    required some operator to sit *exactly* on 13, 17, 19 and 21, and
+    `since_version` is `max(versions)`, so an upstream revision moving the
+    single operator holding a boundary would fail this for ONNX's reasons
+    rather than ours.
     """
-    highest = defaultdict(int)
-    for _, since, ceiling in placements(loaded):
-        if ceiling is not None and ceiling != NO_CEILING_SENTINEL:
-            highest[ceiling] = max(highest[ceiling], since)
-    assert highest, "no placements on an accelerator with a real ceiling"
+    excluded_by_band = {}
+    for kind, (categories, ceiling) in ARCHETYPES.items():
+        if ceiling == NO_CEILING_SENTINEL:
+            continue
+        excluded_by_band[kind] = {
+            name for name, cat, sv in operators(loaded)
+            if sv is not None and cat in categories and sv > ceiling
+        }
 
-    short = {c: hi for c, hi in highest.items() if hi != c}
-    assert not short, (
-        f"bands whose highest operator opset does not reach the ceiling: {short}. "
-        f"The ceiling is then not what limits coverage in those bands."
+    kind_of = {aid: kind for aid, _, _, kind in accelerators(loaded)}
+    violations = []
+    for name, kind in loaded.query(
+            "MATCH (op:Operator)<-[:IMPLEMENTS]-(k:Kernel)-[:RUNS_ON]->(a:Accelerator) "
+            "RETURN op.name, a.id", GRAPH).records:
+        band = kind_of.get(kind)
+        if band in excluded_by_band and name in excluded_by_band[band]:
+            violations.append((name, band))
+    assert not violations, (
+        f"{len(violations)} kernels implement an operator their band excludes, "
+        f"e.g. {violations[:5]}"
+    )
+
+
+def test_every_band_present_in_the_graph_is_actually_checked(loaded):
+    """A band with no kernels is a band nobody checked.
+
+    At `SCALE = 0.3` each SoC draws its extra accelerator kinds at random, so an
+    archetype can end up with no placements. If that happens the assertions
+    above skip it silently, which is worth knowing rather than passing.
+    """
+    kinds_with_accelerators = {kind for _, ceiling, _, kind in accelerators(loaded)
+                               if ceiling is not None}
+    kinds_with_kernels = {kind for kind, in loaded.query(
+        "MATCH (k:Kernel)-[:RUNS_ON]->(a:Accelerator) RETURN a.kind", GRAPH).records}
+    unchecked = kinds_with_accelerators - kinds_with_kernels
+    assert not unchecked, (
+        f"archetypes present in the graph but carrying no kernels, so their "
+        f"ceiling is never exercised: {sorted(unchecked)}"
     )
 
 
 def test_real_accelerators_carry_no_ceiling(loaded):
     """The documented gap, pinned.
 
-    Real kernel registrations come from upstream rather than a rule, so the six
-    real accelerators have no ceiling and their placements sit outside the
-    invariant. A query filtering on `opset_ceiling` drops them silently, which
+    Real kernel registrations come from upstream rather than a rule, so real
+    accelerators have no ceiling and their placements sit outside the invariant.
+    A query filtering on `opset_ceiling` drops them silently, which
     `docs/schema.md` says and this keeps true.
+
+    How many real accelerators there are is not asserted: `add_ort_layer`
+    derives them from the device ids present in the dump and `add_mlperf_layer`
+    from the distinct accelerator strings, so refreshing either changes the
+    count. What is asserted is that whatever is real lacks a ceiling.
     """
     by_provenance = defaultdict(lambda: [0, 0])
     for _, ceiling, provenance, _ in accelerators(loaded):
@@ -162,6 +233,14 @@ def test_real_accelerators_carry_no_ceiling(loaded):
 
     synthetic_total, synthetic_without = by_provenance["synthetic"]
     real_total, real_without = by_provenance["real"]
+    assert synthetic_total > 0, (
+        f"no generated accelerators in the load, so the check below is vacuous; "
+        f"provenance values seen: {sorted(by_provenance)}"
+    )
+    assert set(by_provenance) <= {"real", "synthetic"}, (
+        f"unexpected provenance values, silently uninspected: "
+        f"{sorted(set(by_provenance) - {'real', 'synthetic'})}"
+    )
     assert synthetic_without == 0, (
         f"{synthetic_without} of {synthetic_total} generated accelerators have "
         f"no opset_ceiling; the generator gives every archetype one"
