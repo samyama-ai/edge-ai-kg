@@ -72,8 +72,10 @@ Vendor <- SoC <- Board                        Sensor -> SignalStage -> ... -> Mo
                                                                           Deployment -> Board
 ```
 
-**Hardware**: 15 vendors, 52 SoCs, 91 accelerators (MCU-CPU / DSP / NPU-Lite /
-NPU-Pro / GPU-Embedded / real CPU+CUDA+DirectML), 134 boards, 13 runtimes.
+**Hardware**: 15 vendors, 52 SoCs, 91 accelerators -- 85 generated across five
+archetypes (MCU-CPU / DSP / NPU-Lite / NPU-Pro / GPU-Embedded) plus 6 real ones
+carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
+13 runtimes.
 **Software**: 375 operators, 22,578 kernels, 64 models, 240 quantized variants,
 1,513 deployments (73 of them real MLPerf Tiny measurements).
 **Clinical**: 14 biosignal sensors, 16 DSP stages, 18 clinical tasks, 4 MLPerf
