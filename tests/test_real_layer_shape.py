@@ -58,6 +58,17 @@ def real_only():
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
 
+    # Reset first, as every other embedded fixture in this suite does. Measured
+    # on `samyama` 0.6.1, two `SamyamaClient.embedded()` instances in one
+    # process are independent, so nothing another module loads reaches here --
+    # but that is a property of this build, not a guarantee, and
+    # `assert synthetic == 0` below would be the confusing way to find out it
+    # had changed.
+    try:
+        client.query("MATCH (n) DETACH DELETE n", GRAPH)
+    except Exception:
+        pass
+
     # Exactly what etl/loader.py does for --layers real: start from an empty
     # Fleet rather than filtering a generated one.
     from etl import generate as gen

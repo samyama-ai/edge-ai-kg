@@ -115,13 +115,24 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**8 of the 16 catalog queries return rows against it**, 8 come back empty, none
-error:
+**Against the HTTP server, 8 of the 16 catalog queries return rows**, 8 come
+back empty, none error:
 
 | | Queries |
 |---|---|
 | Return rows | `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA11` |
+
+**The embedded build answers three of them differently** on the same data —
+`EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports 6 and
+10. That is a divergence beyond [engine notes 10 and 11](docs/engine-notes.md)
+and is recorded on #56; the table above is the server's answer, which is the one
+a `--url` user sees.
+
+`EA01` and `EA02` are empty rather than erroring here, on both builds. Note 10
+makes them raise on the embedded build, but only once their opening `MATCH`
+yields rows — with no `USES_OPERATOR` edges it yields nothing, so the failing
+clause is never reached.
 
 **The hero question is one of the empty ones.** It walks
 `Model -[:USES_OPERATOR]-> Operator`, and the real layer has no `USES_OPERATOR`
