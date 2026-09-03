@@ -14,8 +14,27 @@ is what makes the first meaningful. Asserting only the empty case would pass
 just as well against a query that can never return anything.
 
 The fixtures are the whole graph. `EA11` and `EA13` are fleet-wide and carry no
-id filter, so a fresh embedded engine holding nothing else gives an exactly
-known answer.
+id filter, so an embedded engine holding nothing else gives an exactly known
+answer. Each fixture resets before loading, as every other module here does --
+measured on `samyama` 0.6.1 two `SamyamaClient.embedded()` instances in one
+process are independent, so nothing another module loads reaches here, but that
+is a property of this build rather than a guarantee and these assertions are
+exact counts that would fail confusingly if it changed.
+
+## What a 6-node fixture cannot show
+
+`EA11`'s anti-join is `OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op),
+(k)-[:RUNS_ON]->(a:Accelerator)` -- the comma-separated single-`MATCH` shape that
+`docs/engine-notes.md` records as correct on a toy graph and **wrong** at scale,
+with the explicit warning that "a passing 6-node reproduction proves nothing".
+
+So these two tests establish that `EA11` distinguishes zero from one, and
+nothing about whether it is right on the real graph. That is asserted
+separately, against ground truth computed from the `Fleet`, in
+`tests/test_correctness.py::test_ea11_cpu_only_models_match_ground_truth`.
+Checked once by hand at full `--scale 1.0` (24,115 nodes) as the engine note
+asks: 60 of 60 models are CPU-only somewhere, and `EA11`'s top ten counts
+`[12, 11, 10, 10, 10, 9, 9, 9, 9, 9]` match Python exactly.
 
 ## Why not EA01
 
@@ -40,9 +59,18 @@ GRAPH = "default"
 def engine():
     try:
         from samyama import SamyamaClient
-        return SamyamaClient.embedded()
+        client = SamyamaClient.embedded()
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+    # Every fixture here asserts an exact count, so a shared graph would not
+    # merely add rows -- ids repeat across fixtures, and `create_edges` resolves
+    # endpoints with `WHERE v.id = ...`, so each variable would bind twice and
+    # `CREATE` would emit the cartesian product. Reset regardless.
+    try:
+        client.query("MATCH (n) DETACH DELETE n", GRAPH)
+    except Exception:
+        pass
+    return client
 
 
 def run(client, query_id: str):
@@ -58,13 +86,20 @@ def fleet_with_coverage(*, hardswish_is_cpu_only: bool):
     client = engine()
     create_nodes(client, GRAPH, "Model",
                  [{"id": "m1", "name": "covered-model", "family": "cnn"}])
+    # Note 8: `props_map` drops absent keys, and the columnar store survives
+    # `DETACH DELETE` -- a key omitted here can report a *previous* load's value
+    # rather than null. Every property EA11 and EA13 read is set explicitly.
     create_nodes(client, GRAPH, "Operator",
-                 [{"id": "op1", "name": "Conv", "category": "convolution"},
-                  {"id": "op2", "name": "HardSwish", "category": "activation"}])
+                 [{"id": "op1", "name": "Conv", "category": "convolution",
+                   "domain": "ai.onnx"},
+                  {"id": "op2", "name": "HardSwish", "category": "activation",
+                   "domain": "ai.onnx"}])
     # `<>` matches a null property on this engine, so `kind` is always set.
     create_nodes(client, GRAPH, "Accelerator",
                  [{"id": "npu", "kind": "NPU-Lite"}, {"id": "cpu", "kind": "MCU-CPU"}])
-    create_nodes(client, GRAPH, "Kernel", [{"id": "k1"}, {"id": "k2"}])
+    create_nodes(client, GRAPH, "Kernel",
+                 [{"id": "k1", "execution_provider": "CPUExecutionProvider"},
+                  {"id": "k2", "execution_provider": "CPUExecutionProvider"}])
     create_edges(client, GRAPH, [
         ("Model", "m1", "USES_OPERATOR", "Operator", "op1", None),
         ("Model", "m1", "USES_OPERATOR", "Operator", "op2", None),
@@ -96,7 +131,7 @@ def onnx_runtime_with(*, cuda_implements_it: bool):
 def test_ea11_is_empty_when_every_operator_is_accelerated():
     """The answer is none, and none is correct."""
     rows = run(fleet_with_coverage(hardswish_is_cpu_only=False), "EA11")
-    assert rows == [], (
+    assert not rows, (
         f"every operator has a non-MCU-CPU kernel, so no model is CPU-only; "
         f"EA11 returned {rows}"
     )
@@ -107,14 +142,14 @@ def test_ea11_finds_the_model_when_an_operator_is_cpu_only():
     rows = run(fleet_with_coverage(hardswish_is_cpu_only=True), "EA11")
     assert len(rows) == 1, f"expected exactly the one CPU-only model, got {rows}"
     model, _family, count, operators = rows[0]
-    assert (model, count, operators) == ("covered-model", 1, ["HardSwish"]), (
+    assert (model, count, list(operators)) == ("covered-model", 1, ["HardSwish"]), (
         f"expected covered-model to be CPU-only on HardSwish alone, got {rows[0]}"
     )
 
 
 def test_ea13_is_empty_when_cuda_implements_everything():
     rows = run(onnx_runtime_with(cuda_implements_it=True), "EA13")
-    assert rows == [], (
+    assert not rows, (
         f"CUDA implements the only ai.onnx operator, so nothing is CPU-only; "
         f"EA13 returned {rows}"
     )
@@ -136,17 +171,26 @@ def test_ea13_finds_the_operator_when_cuda_does_not():
     strict=True,
 )
 def test_ea01_zero_row_case():
-    """An accelerator implementing everything must produce an empty audit."""
+    """An accelerator implementing everything must produce an empty audit.
+
+    Ids are deliberately un-generator-shaped. `etl/generate.py:182` mints
+    `f"{prefix}:{n:05d}"`, so `model:00000` and `accel:00001` are exactly its
+    first model and second accelerator -- and had this fixture ever shared a
+    graph with a generated fleet, `EA01` would stop raising once #56 lands, match
+    the *generated* model's operator surface, return a non-empty audit and fail
+    the assertion. That is XFAIL, not XPASS, so `strict=True` would never fire
+    and the mark would become permanent instead of retiring itself.
+    """
     client = engine()
-    create_nodes(client, GRAPH, "Model", [{"id": "model:00000", "name": "m"}])
+    create_nodes(client, GRAPH, "Model", [{"id": "ea01-model", "name": "m"}])
     create_nodes(client, GRAPH, "Operator",
                  [{"id": "op1", "name": "Conv", "category": "convolution",
                    "since_version": 1}])
-    create_nodes(client, GRAPH, "Accelerator", [{"id": "accel:00001", "kind": "NPU-Lite"}])
+    create_nodes(client, GRAPH, "Accelerator", [{"id": "ea01-accel", "kind": "NPU-Lite"}])
     create_nodes(client, GRAPH, "Kernel", [{"id": "k1"}])
     create_edges(client, GRAPH, [
-        ("Model", "model:00000", "USES_OPERATOR", "Operator", "op1", None),
+        ("Model", "ea01-model", "USES_OPERATOR", "Operator", "op1", None),
         ("Kernel", "k1", "IMPLEMENTS", "Operator", "op1", None),
-        ("Kernel", "k1", "RUNS_ON", "Accelerator", "accel:00001", None),
+        ("Kernel", "k1", "RUNS_ON", "Accelerator", "ea01-accel", None),
     ])
     assert run(client, "EA01") == []
