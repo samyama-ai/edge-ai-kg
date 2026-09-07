@@ -1,0 +1,76 @@
+# Runs the suite and ruff on every push and pull request (#2).
+#
+# The awkward part is not running pytest -- it is making a green run mean
+# something. 13 test modules `pytest.skip` when `data/` is absent, so a
+# workflow that omitted the download step would pass while testing almost
+# nothing. `--no-skips` (see conftest.py) turns a *fixture* skip into a
+# failure, so this job cannot go green without a real graph behind it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # `samyama` publishes only a macOS wheel plus an sdist, so Linux builds
+      # the Rust extension from source. On a bare runner that fails twice --
+      # first on a missing linker, then on zstd-sys bindgen not finding
+      # stddef.h. clang supplies the builtin headers; see CLAUDE.md.
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev clang libclang-dev
+
+      # The cargo build is the slowest step by far (~3 min cold).
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      # Fetches three public sources and generates the fleet into ./data.
+      # Nothing else works until this has run.
+      - name: Build the dataset
+        run: python -m etl.download_data
+
+      # Fail if the fixtures skipped: a suite that skips is a suite that did
+      # not run, and this job exists to notice that.
+      - name: Test
+        run: pytest -q --no-skips
+
+      # Belt and braces. If --no-skips ever regresses, a suite that collected
+      # far fewer tests than expected still fails here rather than passing
+      # quietly. The floor is deliberately well below the current count so it
+      # does not need editing for every added test.
+      - name: Assert the suite actually ran
+        run: |
+          COUNT=$(pytest -q --collect-only 2>/dev/null | tail -1 | grep -oE '^[0-9]+')
+          echo "collected ${COUNT} tests"
+          if [ "${COUNT:-0}" -lt 100 ]; then
+            echo "::error::only ${COUNT} tests collected; expected 100+"
+            exit 1
+          fi
