@@ -148,3 +148,97 @@ def test_the_stated_label_count_matches_the_table():
 
 def test_the_stated_edge_type_count_matches_the_table():
     assert stated_counts()[1] == len(edges_in_the_edge_table())
+
+
+# --- the edge table's Count column, which #16 read as 160 short -------------
+
+
+EDGE_ROW = re.compile(r"^\|\s*`(\w+)`\s*\|", re.MULTILINE)
+COUNT_CELL = re.compile(r"^([\d,]+)(?:\s*\(\+([\d,]+) real\))?$")
+
+
+def edge_table_lines() -> list[str]:
+    """The data rows of the `## Edge types` table, header and rule excluded."""
+    text = SCHEMA_DOC.read_text(encoding="utf-8")
+    match = re.search(r"^## Edge types$(.*?)^## ", text, re.DOTALL | re.MULTILINE)
+    assert match, "no `## Edge types` section in docs/schema.md"
+    return [line for line in match.group(1).splitlines() if EDGE_ROW.match(line)]
+
+
+def edge_counts() -> dict[str, tuple[int, int]]:
+    """`{edge type: (generated, real)}` from the table's Count column.
+
+    Cells are split on unescaped pipes only. The distinction is the whole of
+    #16: `MADE_BY` used to write its two source labels `Board\\|SoC`, and a
+    split on every `|` yields an extra column -- `160` read as the endpoints,
+    `supply chain` read as the count -- so `MADE_BY` scored zero and the column
+    came out 73,665 against a stated 73,825. Exactly its 160.
+    """
+    out = {}
+    for line in edge_table_lines():
+        cells = [c.replace(r"\|", "|").strip()
+                 for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        assert len(cells) == 4, (
+            f"edge table row has {len(cells)} cells, expected 4: {line!r}"
+        )
+        match = COUNT_CELL.match(cells[2])
+        assert match, (
+            f"unparsed Count cell for {cells[0]}: {cells[2]!r}. Expected `N` or "
+            f"`N (+M real)`, the convention docs/schema.md states."
+        )
+        out[cells[0].strip("`")] = (
+            int(match.group(1).replace(",", "")),
+            int((match.group(2) or "0").replace(",", "")),
+        )
+    return out
+
+
+def test_no_edge_table_cell_contains_an_escaped_pipe():
+    """The cause of #16, banned rather than merely fixed.
+
+    An escaped pipe is valid Markdown and renders correctly, which is why this
+    survived review: the table *looked* right and only broke for anything
+    splitting the row mechanically. Prose like `Board or SoC` costs nothing and
+    keeps the column addable.
+    """
+    offenders = [line.strip() for line in edge_table_lines() if r"\|" in line]
+    assert not offenders, (
+        "edge table rows containing an escaped pipe, which makes the Count "
+        f"column unparseable by anything splitting on `|`: {offenders}. "
+        "Write the alternation in prose instead -- `Board or SoC -> Vendor`."
+    )
+
+
+def test_the_edge_counts_sum_to_the_stated_total():
+    """#16's actual question. The table has always added up; it was unreadable.
+
+    Only the generated column is pinned. The `(+M real)` figures move whenever
+    ONNX Runtime or MLPerf publish -- 734 kernel registrations became 738 in one
+    week of this backlog -- and a test that fails for upstream's reasons is one
+    people learn to ignore. `tests/test_real_layer_shape.py` makes the same
+    choice for the same reason.
+    """
+    text = SCHEMA_DOC.read_text(encoding="utf-8")
+    stated = re.search(r"\*\*([\d,]+) nodes, ([\d,]+) edges\*\*", text)
+    assert stated, (
+        "docs/schema.md no longer opens with a `**N nodes, M edges**` total; "
+        "update this test alongside the rewording"
+    )
+    expected = int(stated.group(2).replace(",", ""))
+    counts = edge_counts()
+    total = sum(generated for generated, _ in counts.values())
+    assert total == expected, (
+        f"the edge table's generated counts sum to {total:,}, but the page "
+        f"states {expected:,} -- a difference of {expected - total:,}. Rows: "
+        f"{ {k: v[0] for k, v in sorted(counts.items())} }"
+    )
+
+
+def test_every_edge_type_in_the_table_has_a_count():
+    """A row with no number is a row that cannot be checked."""
+    missing = [name for name, (generated, real) in edge_counts().items()
+               if generated == 0 and real == 0]
+    assert not missing, (
+        f"edge types whose Count cell is zero in both layers: {missing}. Either "
+        f"the type is not built and should say so, or the count is wrong."
+    )
