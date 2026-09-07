@@ -57,15 +57,46 @@ Note also that `--graph` looks like tenant isolation and **is ignored** on the
 OSS HTTP path (note 7) — everything lands in `default`. Multi-tenancy is not a
 thing you have here.
 
-### Graph algorithms — they win
+### Graph algorithms — they win, but by less than this page first claimed
 
-Neo4j GDS ships centrality, community detection, pathfinding and embeddings at
-scale. This engine supports `shortestPath` and variable-length paths
-(`docs/engine-notes.md`, "What works well") and nothing beyond them.
+**Correction.** An earlier draft of this page said centrality and community
+detection were "not merely unused, unavailable". That is false, and it is the
+kind of checkable claim #50 exists to prevent. The Python client exposes:
 
-**Measured by absence:** of the 16 catalog queries, exactly one (`EA07`) uses a
-variable-length path and none uses `shortestPath`. There is no centrality, no
-community detection, no embedding — not merely unused, unavailable.
+```
+page_rank  wcc  scc  triangle_count  bfs  dijkstra  pca
+create_vector_index  add_vector  vector_search
+```
+
+**Measured** on a 3,896-node / 11,306-edge load (`--scale 0.15`, seed 4242):
+
+| call | result |
+|---|---|
+| `page_rank()` | 3,896 nodes scored |
+| `page_rank(label="Operator", edge_type="IMPLEMENTS")` | 205 scored — it takes projections |
+| `wcc()` | 3 components |
+| `scc()` | 3,833 components |
+| `triangle_count()` | 3,523 |
+
+So the honest comparison is **breadth, not presence**. Neo4j GDS ships dozens of
+algorithms with tuning, streaming and write-back modes; this engine ships about
+seven with none of that scaffolding. That is still a clear win for GDS, and a
+much smaller one than "they have algorithms and we have none".
+
+Two practical notes, both measured:
+
+- Results are keyed by the engine's **internal integer node id**, not by our
+  `id` property. `MATCH (n:Operator) RETURN id(n), n.id` is the bridge, and
+  nothing in this repo does it yet.
+- The first argument is `label`, not the graph name. Passing `"default"`
+  positionally silently scores **zero** nodes, because it is read as a label
+  that does not exist. That cost me a wrong conclusion before I checked the
+  signature, and it is exactly the "returns nothing rather than erroring" shape
+  `engine-notes.md` catalogues.
+
+**Measured by absence, still true:** of the 16 catalog queries, exactly one
+(`EA07`) uses a variable-length path and none uses `shortestPath` or any of the
+algorithms above. They are available and unused.
 
 ### Ecosystem and hiring — they win
 
@@ -146,11 +177,18 @@ page that presents embedding alone as the reason to choose this engine is
 weaker for pretending Kuzu does not exist.
 
 What is left after conceding that: the *convergence* — graph traversal, vector
-search and an MCP surface in one embedded binary. **Unmeasured.** #48 asks
-whether this repo actually uses the vector half (today it does not — the catalog
-is 16 Cypher queries and no vector search), and #49 asks whether the MCP surface
-is testable as a differentiator. Until those land, the convergence claim is an
-intention, not a result.
+search and an MCP surface in one embedded binary.
+
+**The vector half exists and works.** Measured: `create_vector_index`,
+`add_vector` and `vector_search` all succeed on the embedded build, and a search
+returns ranked `(node_id, distance)` pairs. So convergence is **available**, not
+hypothetical.
+
+**But this repo does not use it.** `grep` for vector/embedding/hnsw across the
+source returns nothing; the catalog is 16 Cypher queries. So the claim today is
+"the engine can, this KG does not" — #48 is the issue that closes that gap, and
+until it lands the convergence differentiator is real in the engine and
+undemonstrated here. #49 asks the same of the MCP surface.
 
 ### Memgraph — closest on the performance axis, unavailable on licence
 
@@ -192,7 +230,8 @@ Kept short deliberately: the claims that can be reproduced today.
 | Snapshot import "well under a second" | **Unmeasured** | #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
-| Graph + vector in one binary | **Unmeasured, and unused here** | #48 |
+| Graph + vector in one binary | **Available, measured; unused in this repo** | #48 |
+| PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | — |
 
 ---
 
