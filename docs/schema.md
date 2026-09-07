@@ -17,7 +17,7 @@ and what does it cost me when it can't?**
 | `ModelVariant` | 240 | id, name, precision, size_kb, accuracy, format |
 | `Operator` | 205 | id, name, domain, since_version, version_count, category, is_control_flow |
 | `Board` | 120 | id, name, form_factor, price_usd, power_budget_mw, ram_kb, flash_kb, year, battery_powered |
-| `Accelerator` | 85 | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
+| `Accelerator` | 85 (+6 real) | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
 | `Model` | 60 | id, name, family, task, params_k, macs_m |
 | `SoC` | 40 | id, name, process_nm, cpu_arch, cpu_mhz, cores |
 | `ClinicalTask` | 18 | id, name, category, latency_budget_ms, min_sensitivity |
@@ -114,13 +114,81 @@ one board). Those two joins are where every interesting query lives.
 `kind` drives which operator categories a unit can run and its opset ceiling --
 this is what creates the coverage gaps the queries hunt for.
 
-| Kind | Opset ceiling | Covers | int8 GOPS | Energy factor |
-|---|---:|---|---|---:|
-| `MCU-CPU` | 99 | everything (universal fallback) | 0.5-3 | 1.00 |
-| `DSP` | 17 | signal, elementwise, conv, matmul, spatial | 8-40 | 0.42 |
-| `NPU-Lite` | 13 | conv, matmul, activation, spatial, quant | 30-120 | 0.16 |
-| `NPU-Pro` | 19 | + reduction, attention, shape | 150-900 | 0.11 |
-| `GPU-Embedded` | 21 | + recurrent, tensor | 400-2400 | 0.30 |
+**These five archetypes describe the generated layer only.** Counts are
+`--scale 1.0`, seed `20260814`, and sum to the 85 in the node table above.
+
+| Kind | Count | Opset ceiling | Covers | int8 GOPS | Energy factor |
+|---|---:|---:|---|---|---:|
+| `MCU-CPU` | 40 | 99 | every category (universal fallback) | 0.5-3 | 1.00 |
+| `DSP` | 9 | 17 | activation, convolution, elementwise, matmul, reduction, shape, signal, spatial | 8-40 | 0.42 |
+| `NPU-Lite` | 12 | 13 | activation, convolution, elementwise, matmul, normalization, quantization, spatial | 30-120 | 0.16 |
+| `NPU-Pro` | 9 | 19 | activation, attention, convolution, elementwise, matmul, normalization, quantization, reduction, shape, spatial | 150-900 | 0.11 |
+| `GPU-Embedded` | 15 | 21 | activation, attention, convolution, elementwise, matmul, normalization, quantization, recurrent, reduction, shape, spatial, tensor | 400-2400 | 0.30 |
+| | **85** | | | | |
+
+Rows are in `ACCEL_ARCHETYPES` order and each `Covers` cell is spelled out in
+full. It used to read incrementally -- `NPU-Pro` as "+ reduction, attention,
+shape" over the row above -- and that notation was wrong: the sets are **not** a
+subset chain. `DSP` carries `signal`, which nothing below it has, and
+`NPU-Lite` drops `reduction` and `shape` that `DSP` holds. Four of the five rows
+understated their categories. `tests/test_accelerator_kinds.py` now pins this
+column against `ACCEL_ARCHETYPES`.
+
+`Opset ceiling` is not a count and does not sum to anything -- summing it gives
+169, which is how #26 came to compare it against 85. See
+[What `opset_ceiling` means](#what-opset_ceiling-means) below; `99` is a
+sentinel for *no ceiling*, not ninety-nine units.
+
+### Kinds outside the archetype table
+
+Loading the real layer as well takes `Accelerator` from **85 to 91**, and the
+six extra are *not* more of the five kinds above. They carry four kinds that
+have no archetype:
+
+| Kind | Count | Source |
+|---|---:|---|
+| `NPU` | 3 | MLPerf Tiny submitter hardware |
+| `CPU` | 1 | ONNX Runtime CPU execution provider |
+| `GPU-CUDA` | 1 | ONNX Runtime CUDA execution provider |
+| `GPU-DirectML` | 1 | ONNX Runtime DirectML execution provider |
+
+So **`kind` is an open vocabulary, not a closed set of five.**
+`etl/real_layer.py` names these from `ORT_DEVICES` and the MLPerf accelerator
+strings -- and `ORT_DEVICES` also holds `GPU-ROCm` and `GPU-TensorRT`, which
+appear as soon as a dump mentions them. Having no archetype, none of them
+carries an `opset_ceiling`, a category list, a `gops_int8` or an
+`energy_factor`.
+
+**This changes catalog answers, and it is not a rounding difference.** `EA11`
+asks which models fall back to the CPU and filters `WHERE a.kind <> "MCU-CPU"`.
+ONNX Runtime's CPU execution provider is spelled `CPU`, so it does not match the
+filter and its kernels count as *acceleration*. Measured at `--scale 1.0`:
+
+| | generated layer only | both layers |
+|---|---:|---:|
+| models EA11 reports as CPU-only | 60 | **12** |
+| top-ten operator counts | `[12, 11, 10, 10, 10, 9, 9, 9, 9, 9]` | `[1, 1, 1, ...]` |
+
+55 of the 149 operators a generated model uses flip to "accelerated" when the
+real layer loads; 54 of those are reachable through `kind = "CPU"` alone.
+Whether a CPU execution provider should count as acceleration is a catalog
+decision rather than a documentation one -- filed as its own issue. `EA05` and
+`EA08` also group by `kind` and gain four extra rows for the same reason.
+
+`tests/test_accelerator_kinds.py` pins the vocabulary: that the generated layer
+uses exactly the archetype kinds, that the real layer uses none of them, that
+kinds without an archetype carry no archetype properties, and that the `CPU` /
+`MCU-CPU` mismatch above is still what it says.
+
+### Which count is on which page
+
+| Page | Figure | Layer |
+|---|---:|---|
+| `docs/schema.md` node table | 85 | generated only |
+| `DATASET_CARD.md` | 91 | both layers |
+| `README.md` | 91 | both layers |
+
+All three are correct; none of them said so.
 
 ### What `opset_ceiling` means
 
