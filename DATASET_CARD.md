@@ -206,11 +206,15 @@ exists to expose.
 | Kind | Count | Opset ceiling | Covers | int8 GOPS | Energy factor |
 |---|---:|---:|---|---|---:|
 | `MCU-CPU` | 40 | 99 | every category (universal fallback) | 0.5–3 | 1.00 |
-| `GPU-Embedded` | 15 | 21 | + recurrent, tensor | 400–2400 | 0.30 |
-| `NPU-Lite` | 12 | 13 | conv, matmul, activation, spatial, quantization | 30–120 | 0.16 |
-| `NPU-Pro` | 9 | 19 | + reduction, attention, shape | 150–900 | 0.11 |
-| `DSP` | 9 | 17 | signal, elementwise, conv, matmul, spatial | 8–40 | 0.42 |
+| `DSP` | 9 | 17 | activation, convolution, elementwise, matmul, reduction, shape, signal, spatial | 8–40 | 0.42 |
+| `NPU-Lite` | 12 | 13 | activation, convolution, elementwise, matmul, normalization, quantization, spatial | 30–120 | 0.16 |
+| `NPU-Pro` | 9 | 19 | activation, attention, convolution, elementwise, matmul, normalization, quantization, reduction, shape, spatial | 150–900 | 0.11 |
+| `GPU-Embedded` | 15 | 21 | activation, attention, convolution, elementwise, matmul, normalization, quantization, recurrent, reduction, shape, spatial, tensor | 400–2400 | 0.30 |
 | | **85** | | | | |
+
+Rows follow `ACCEL_ARCHETYPES` order and each `Covers` cell is complete. The
+incremental "+ …" form this table used was wrong — the category sets are not a
+subset chain, and four of five rows understated themselves.
 
 `Opset ceiling` is not a count — `99` is a sentinel meaning *no ceiling*, not
 ninety-nine units.
