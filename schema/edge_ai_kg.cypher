@@ -16,6 +16,28 @@
 // `CREATE CONSTRAINT ... REQUIRE ... IS UNIQUE`; uniqueness of `id` is
 // guaranteed by the loader, which mints ids deterministically.
 //
+// --- What the indexes cost, measured (#18) ---
+//
+// The `id` indexes are not an optimisation, they are what makes a load
+// finish. Embedded engine, --scale 1.0, 25,150 nodes and 76,303 edges:
+//
+//     16 id indexes      nodes 0.35s   edges  22.1s
+//     no indexes at all  nodes 0.38s   edges 233.7s      <- 10.6x slower
+//
+// `etl/helpers.py` resolves every edge endpoint with `WHERE v.id = ...`, so
+// without the index each of the 76,303 edges costs a label scan. Node creation
+// is unaffected because nothing is looked up to create a node.
+//
+// The non-id indexes are the opposite: they cost load time and buy nothing at
+// load. Median of 4 runs -- 27 indexes 24.68s, 16 id only 23.13s -- so the
+// extras are ~1.5s, about 6% of the load, for queries that run in milliseconds.
+// Five that nothing filtered on were removed; removing them changed no catalog
+// row and no query time outside run-to-run noise (+9ms across all 16, on 562ms).
+//
+// Each surviving non-id index names what needs it. An index only helps a
+// lookup: a property that is merely projected or sorted on a `WITH` alias
+// cannot use one, which is why `Operator(category)` and `Model(family)` went.
+//
 // That guarantee is per load, not per graph. The loader resets the graph first
 // unless told not to; `--no-reset` against a populated graph mints every id a
 // second time and nothing rejects the write. The run does not survive it: with
@@ -23,7 +45,7 @@
 // once -- one submitted edge becomes four -- and the engine is OOM-killed
 // during edge creation. See tests/test_id_uniqueness.py.
 
-// --- id indexes (one per label; drives edge-creation lookups) ---
+// --- id indexes: one per label, and load-critical (see above) ---
 CREATE INDEX ON :Vendor(id);
 CREATE INDEX ON :SoC(id);
 CREATE INDEX ON :Accelerator(id);
@@ -41,20 +63,27 @@ CREATE INDEX ON :Certification(id);
 CREATE INDEX ON :Deployment(id);
 CREATE INDEX ON :BenchmarkTask(id);
 
-// --- lookup indexes used by the benchmark queries ---
-CREATE INDEX ON :Operator(name);
-CREATE INDEX ON :Operator(category);
-CREATE INDEX ON :Accelerator(kind);
-CREATE INDEX ON :ModelVariant(precision);
-CREATE INDEX ON :ClinicalTask(category);
-CREATE INDEX ON :Model(family);
+// --- lookup indexes: each one is filtered on by something ---
+// Traced to the queries that need them; tests/test_schema_indexes.py fails if
+// an index is added here that nothing filters on.
+CREATE INDEX ON :Operator(name);              // EA01, EA06, EA13, EA15; mcp operator_risk
+CREATE INDEX ON :Accelerator(kind);           // EA05, EA08, EA11; mcp coverage_by_kind
+CREATE INDEX ON :ModelVariant(precision);     // EA07; mcp boards_for_task, device_path
+CREATE INDEX ON :Deployment(provenance);      // EA14
+CREATE INDEX ON :Kernel(provenance);          // EA15, EA16
+CREATE INDEX ON :Kernel(execution_provider);  // EA13
 
-// --- provenance: every node is stamped real | synthetic ---
-CREATE INDEX ON :Deployment(provenance);
-CREATE INDEX ON :Kernel(provenance);
-CREATE INDEX ON :Board(provenance);
-CREATE INDEX ON :Accelerator(provenance);
-CREATE INDEX ON :Kernel(execution_provider);
+// Removed as unused (#18): nothing filtered on any of these.
+//   Operator(category)       projected and ORDER BY'd, never a predicate
+//   Model(family)            projected by EA11, never a predicate
+//   ClinicalTask(category)   read by nothing at all
+//   Board(provenance)        read by nothing at all
+//   Accelerator(provenance)  read by no query; one test reads it unfiltered
+//
+// Deliberately NOT added: `mcp_server` filters `ClinicalTask(name)` and
+// `Model(name)`, which have no index. Measured on the shape
+// `mcp_server.boards_for_task` uses, adding `ClinicalTask(name)` moved a 5.99ms
+// query to 5.55ms -- inside the noise, so it would be load cost for nothing.
 
 // --- Relationship shapes (documentation only) ---
 // (:Board)-[:HAS_SOC]->(:SoC)-[:HAS_ACCELERATOR]->(:Accelerator)
