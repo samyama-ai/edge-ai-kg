@@ -1,9 +1,24 @@
 # Edge AI KG -- schema
 
-16 node labels, 22 edge types. At `--scale 1.0`: **24,115 nodes, 73,825 edges**
-(seed `20260814`). See [`data-provenance.md`](data-provenance.md) for what is
-real and what is synthetic, and [`engine-notes.md`](engine-notes.md) for the
-v1.7.0 behaviours the queries work around.
+16 node labels, 22 edge types. At `--scale 1.0`, seed `20260814`, the generated
+layer is **24,115 nodes, 73,825 edges**.
+
+**Every count on this page is that generated layer unless it carries
+`(+M real)`** (#14). The two totals a reader is likely to want:
+
+| | nodes | edges |
+|---|---:|---:|
+| generated layer -- what this page's bare counts sum to | 24,115 | 73,825 |
+| both layers -- what `python -m etl.loader` actually loads | 25,150 | 76,303 |
+| the real layer adds | +1,035 | +2,478 |
+
+The README quotes the both-layer figures, so the two pages disagreed by 1,035
+nodes with nothing saying why. They are the same graph counted to different
+edges; the `(+M real)` column below is the reconciliation.
+
+See [`data-provenance.md`](data-provenance.md) for what is real and what is
+synthetic, and [`engine-notes.md`](engine-notes.md) for the v1.7.0 behaviours
+the queries work around.
 
 The graph answers one shape of question: **can this model run on this silicon,
 and what does it cost me when it can't?**
@@ -12,20 +27,20 @@ and what does it cost me when it can't?**
 
 | Label | Count | Key fields |
 |---|---:|---|
-| `Kernel` | 21,844 | id, name, efficiency, is_fallback |
-| `Deployment` | 1,440 | id, latency_ms, power_mw, energy_mj, memory_kb, fallback_op_count, fallback_fraction, accelerator_kind, fits |
+| `Kernel` | 21,844 (+738 real) | id, name, efficiency, is_fallback |
+| `Deployment` | 1,440 (+73 real) | id, latency_ms, power_mw, energy_mj, memory_kb, fallback_op_count, fallback_fraction, accelerator_kind, fits |
 | `ModelVariant` | 240 | id, name, precision, size_kb, accuracy, format |
-| `Operator` | 205 | id, name, domain, since_version, version_count, category, is_control_flow |
-| `Board` | 120 | id, name, form_factor, price_usd, power_budget_mw, ram_kb, flash_kb, year, battery_powered |
+| `Operator` | 205 (+171 real) | id, name, domain, since_version, version_count, category, is_control_flow |
+| `Board` | 120 (+14 real) | id, name, form_factor, price_usd, power_budget_mw, ram_kb, flash_kb, year, battery_powered |
 | `Accelerator` | 85 (+6 real) | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
-| `Model` | 60 | id, name, family, task, params_k, macs_m |
-| `SoC` | 40 | id, name, process_nm, cpu_arch, cpu_mhz, cores |
+| `Model` | 60 (+4 real) | id, name, family, task, params_k, macs_m |
+| `SoC` | 40 (+12 real) | id, name, process_nm, cpu_arch, cpu_mhz, cores |
 | `ClinicalTask` | 18 | id, name, category, latency_budget_ms, min_sensitivity |
 | `SignalStage` | 16 | id, name, kind, window_ms, cost_kmacs |
 | `Sensor` | 14 | id, name, modality, sample_rate_hz, channels, adc_bits |
 | `Dataset` | 12 | id, name, source, subjects, hours, license |
-| `Vendor` | 8 | id, name, country |
-| `Runtime` | 7 | id, name, version, format |
+| `Vendor` | 8 (+7 real) | id, name, country |
+| `Runtime` | 7 (+6 real) | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
 | `BenchmarkTask` | 0 (+4 real) | id, name, code, dataset, metric, quality_target |
 
@@ -37,8 +52,15 @@ write, and the duplicate ids then multiply edges rather than merely doubling
 nodes. `tests/test_id_uniqueness.py` asserts the invariant.
 
 A count written `N (+M real)` is N from the generated layer plus M more once the
-real layer is loaded. Only N is inside the totals stated above, which are
-generated-layer figures.
+real layer is loaded. **N is what the generated-layer total counts; N+M is what
+the both-layer total counts.** The eight labels with no `(+M real)` -- the
+clinical spine plus `ModelVariant` -- are generated only, so their two counts are
+the same number.
+
+The `(+M real)` figures are a snapshot of the current upstream dumps, not an
+invariant: ONNX Runtime's kernel registrations went 734 to 738 during one week
+of this backlog. `tests/test_schema_docs.py` pins the generated column, which is
+ours, and deliberately not the real one.
 
 `BenchmarkTask` is the one label the generator does not produce. Its four nodes
 -- Anomaly Detection, Image Classification, Keyword Spotting, Visual Wake Words
