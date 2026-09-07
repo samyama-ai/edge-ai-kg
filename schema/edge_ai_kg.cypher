@@ -66,12 +66,20 @@ CREATE INDEX ON :BenchmarkTask(id);
 // --- lookup indexes: each one is filtered on by something ---
 // Traced to the queries that need them; tests/test_schema_indexes.py fails if
 // an index is added here that nothing filters on.
-CREATE INDEX ON :Operator(name);              // EA01, EA06, EA13, EA15; mcp operator_risk
-CREATE INDEX ON :Accelerator(kind);           // EA05, EA08, EA11; mcp coverage_by_kind
+CREATE INDEX ON :Operator(name);              // EA06; mcp operator_risk
+CREATE INDEX ON :Accelerator(kind);           // EA11; mcp coverage_by_kind
 CREATE INDEX ON :ModelVariant(precision);     // EA07; mcp boards_for_task, device_path
 CREATE INDEX ON :Deployment(provenance);      // EA14
-CREATE INDEX ON :Kernel(provenance);          // EA15, EA16
+CREATE INDEX ON :Kernel(provenance);          // EA15
 CREATE INDEX ON :Kernel(execution_provider);  // EA13
+//
+// Only queries that put the property in a *predicate* are listed. Several more
+// read these properties through `WITH x.p AS ...` -- EA01/EA13/EA15 project
+// `op.name`, EA05/EA08 project `a.kind`, EA16 projects `k.provenance` -- and a
+// projection cannot use an index, so naming them here would be the same
+// overclaim this file removes five indexes for.
+// `sum(CASE WHEN v.precision = ...)` in EA04 is aggregation over rows the MATCH
+// already produced, so it is not a user either.
 
 // Removed as unused (#18): nothing filtered on any of these.
 //   Operator(category)       projected and ORDER BY'd, never a predicate
