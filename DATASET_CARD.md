@@ -28,8 +28,8 @@ and what it costs when those two sets do not line up.
 > `"synthetic"`) and a `source`. Read
 > [Real vs. synthetic](#real-vs-synthetic) before using or quoting anything.
 
-**25,145 nodes · 76,291 edges · 16 node labels · 22 edge types**
-**1,030 real nodes from 3 public sources · 24,115 generated**
+**25,150 nodes · 76,303 edges · 16 node labels · 22 edge types**
+**1,035 real nodes from 3 public sources · 24,115 generated**
 
 ---
 
@@ -285,7 +285,7 @@ even after upstream moves.
 Load the layers independently:
 
 ```bash
-python -m etl.loader --layers real        # 1,235 nodes / 2,466 edges, all real
+python -m etl.loader --layers real        # 1,240 nodes / 2,478 edges, all real
 python -m etl.loader --layers synthetic   # generated fleet only
 python -m etl.loader                      # both (default)
 ```
@@ -338,7 +338,7 @@ upstream sources.
 
 ### Known limitations
 
-1. **Heavily skewed to `Kernel`** — 22,578 of 25,145 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
+1. **Heavily skewed to `Kernel`** — 22,578 of 25,150 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
 2. **The cost model is the ground truth**, so any model trained on it recovers the model, not reality.
 3. **Operator categories are heuristic** — regex over operator names with a short override table; some assignments are debatable.
 4. **Uniform random structure** — real fleets cluster (vendors reuse IP, boards share SoC families). Sampling here is close to uniform, so the graph has less community structure than a real one.
