@@ -1,0 +1,224 @@
+"""Measure ingest velocity -- nodes/s and edges/s -- as a repeatable artifact.
+
+#10 asks for the third V. The only figures that existed were a sentence in
+`docs/engine-notes.md`: "~35K nodes/s ... ~3.1K edges/s", an 11x gap. Measured
+here, the node figure was stale and the gap is **~21x**, not 11x.
+
+Usage:
+    python -m benchmarks.ingest                      # one load, embedded
+    python -m benchmarks.ingest --repeats 3          # medians
+    python -m benchmarks.ingest --sweep-edge-batch   # the batch-size experiment
+    python -m benchmarks.ingest --url http://127.0.0.1:8080 --scale 0.3
+
+## What the gap actually is
+
+Creating a node is a write. Creating an edge is **two lookups and a write**:
+`etl/helpers.py:create_edges` emits one `MATCH` pattern per distinct endpoint in
+the batch, constrains them all in one `WHERE`, then `CREATE`s the relationships.
+So a 100-edge batch is a single statement with up to 200 patterns.
+
+That statement is the whole cost, and it is **superlinear in the number of
+patterns**. Measured at `--scale 1.0` on the embedded build:
+
+| edges/batch | patterns/stmt | ms/stmt | edges/s |
+|---:|---:|---:|---:|
+| 40 | 30 | 13.3 | 3,010 |
+| 50 | 37 | 15.9 | **3,140** |
+| 60 | 44 | 19.1 | **3,146** |
+| 75 | 54 | 26.0 | 2,886 |
+| 100 | 71 | 38.5 | 2,594 |
+| 200 | 136 | 128.6 | 1,553 |
+
+4.5x the patterns costs 9.7x the time -- roughly `O(p^1.5)`, steepening toward
+`O(p^2)` at the larger sizes. Below ~40 the per-statement overhead takes over
+again, so the curve has a floor rather than trending to zero.
+
+Node batching, by contrast, is **flat**: 52-53K/s at every size from 100 to
+2000, because a node `CREATE` looks nothing up. That contrast is the finding --
+the gap is not "writes are slow", it is the endpoint lookup.
+
+## Two things that do not help
+
+- **Reordering edges.** The `Fleet`'s natural order already dedups endpoints
+  well (56,823 patterns at batch 50, against a 152,606 ceiling). Sorting by
+  source is a wash; sorting by target or relationship type is 38% *worse*,
+  because it breaks up the runs of edges that share a source node.
+- **Bigger batches.** Fewer statements, but each one superlinearly more
+  expensive. Total patterns actually *fall* slightly as batches grow (51,112 at
+  250 vs 56,823 at 50) while time doubles -- which is what rules out pattern
+  count as the driver and points at patterns *per statement*.
+
+Timings are machine- and build-specific, so nothing here is asserted in a test.
+`tests/test_ingest_benchmark.py` checks the shape of the report, not its
+numbers -- a performance figure pinned in CI fails for the hardware's reasons.
+"""
+from __future__ import annotations
+
+import json
+import statistics
+import time
+from pathlib import Path
+
+import click
+
+from etl.helpers import chunked, create_edges, create_nodes
+from etl.loader import NODE_LABELS, apply_schema
+
+GRAPH_DEFAULT = "default"
+
+
+def connect(url: str | None):
+    from samyama import SamyamaClient
+    return SamyamaClient.connect(url) if url else SamyamaClient.embedded()
+
+
+def build_fleet(seed: int, scale: float, layers: str):
+    from etl import generate as gen
+    from etl import onnx_catalog as oc
+    ops = oc.load_cached()
+    fleet = gen.Fleet(seed=seed, scale=scale) if layers == "real" else \
+        gen.generate(seed=seed, scale=scale, operators=ops)
+    if layers in ("all", "real"):
+        from etl import real_layer
+        real_layer.build_real(fleet, ops)
+    return fleet
+
+
+def patterns_per_statement(edges, batch: int) -> float:
+    """Mean distinct endpoints per batch -- the `MATCH` patterns one statement carries.
+
+    This is the number the cost tracks, which is why it is reported beside the
+    timing rather than left to be inferred from the batch size.
+    """
+    total, statements = 0, 0
+    for group in chunked(edges, batch):
+        keys = set()
+        for src_label, src_id, _rel, tgt_label, tgt_id, _props in group:
+            keys.add((src_label, src_id))
+            keys.add((tgt_label, tgt_id))
+        total += len(keys)
+        statements += 1
+    return total / statements if statements else 0.0
+
+
+def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
+                  graph: str) -> dict:
+    """One clean load into a fresh graph. Returns seconds and rates."""
+    client = client_factory()
+    # The loader's own routine rather than a copy of it. Applied before every
+    # timed load and outside the timer: without the id indexes, edge creation is
+    # ~10x slower (#18), which would swamp everything measured here.
+    apply_schema(client, graph)
+
+    t0 = time.perf_counter()
+    for label in NODE_LABELS:
+        if fleet.nodes.get(label):
+            create_nodes(client, graph, label, fleet.nodes[label], batch=node_batch)
+    t1 = time.perf_counter()
+    create_edges(client, graph, fleet.edges, batch=edge_batch)
+    t2 = time.perf_counter()
+
+    node_s, edge_s = t1 - t0, t2 - t1
+    return {
+        "nodes": fleet.node_count,
+        "edges": fleet.edge_count,
+        "node_seconds": round(node_s, 3),
+        "edge_seconds": round(edge_s, 3),
+        "nodes_per_s": round(fleet.node_count / node_s) if node_s else None,
+        "edges_per_s": round(fleet.edge_count / edge_s) if edge_s else None,
+        "node_batch": node_batch,
+        "edge_batch": edge_batch,
+        "patterns_per_statement": round(
+            patterns_per_statement(fleet.edges, edge_batch), 1),
+    }
+
+
+def median_of(runs: list[dict], key: str):
+    values = [r[key] for r in runs if r[key] is not None]
+    return round(statistics.median(values), 3) if values else None
+
+
+@click.command()
+@click.option("--url", default=None, help="Samyama server URL. Omit for embedded.")
+@click.option("--graph", default=GRAPH_DEFAULT, show_default=True)
+@click.option("--scale", default=1.0, show_default=True, type=float)
+@click.option("--seed", default=20260814, show_default=True, type=int)
+@click.option("--layers", type=click.Choice(["all", "generated", "real"]),
+              default="all", show_default=True)
+@click.option("--repeats", default=1, show_default=True,
+              help="Loads per configuration; the median is reported.")
+@click.option("--node-batch", default=250, show_default=True, type=int)
+@click.option("--edge-batch", default=None, type=int,
+              help="Defaults to etl.helpers.create_edges' own default.")
+@click.option("--sweep-edge-batch", is_flag=True,
+              help="Time a range of edge batch sizes instead of one load.")
+@click.option("--json-out", type=click.Path(), default=None)
+def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
+         sweep_edge_batch, json_out):
+    import inspect
+    if edge_batch is None:
+        edge_batch = inspect.signature(create_edges).parameters["batch"].default
+
+    try:
+        fleet = build_fleet(seed, scale, layers)
+    except FileNotFoundError:
+        raise SystemExit("run `python -m etl.download_data` first") from None
+
+    def factory():
+        return connect(url)
+
+    click.echo(f"fleet: {fleet.node_count:,} nodes, {fleet.edge_count:,} edges "
+               f"(--scale {scale}, seed {seed}, layers {layers})")
+    click.echo(f"target: {'embedded' if not url else url}, graph {graph!r}")
+    click.echo("")
+
+    batches = ([40, 50, 60, 75, 100, 200] if sweep_edge_batch else [edge_batch])
+    results = []
+
+    if sweep_edge_batch:
+        click.echo(f"{'edge batch':>11}{'median s':>10}{'edges/s':>10}"
+                   f"{'pat/stmt':>10}{'ms/stmt':>9}")
+    for batch in batches:
+        runs = [time_one_load(factory, fleet, node_batch, batch, graph)
+                for _ in range(repeats)]
+        entry = dict(runs[0])
+        entry["edge_seconds"] = median_of(runs, "edge_seconds")
+        entry["node_seconds"] = median_of(runs, "node_seconds")
+        entry["edges_per_s"] = (round(fleet.edge_count / entry["edge_seconds"])
+                                if entry["edge_seconds"] else None)
+        entry["nodes_per_s"] = (round(fleet.node_count / entry["node_seconds"])
+                                if entry["node_seconds"] else None)
+        entry["repeats"] = repeats
+        results.append(entry)
+
+        if sweep_edge_batch:
+            statements = -(-fleet.edge_count // batch)
+            click.echo(f"{batch:>11}{entry['edge_seconds']:>10.2f}"
+                       f"{entry['edges_per_s']:>10,}"
+                       f"{entry['patterns_per_statement']:>10.0f}"
+                       f"{1000 * entry['edge_seconds'] / statements:>9.2f}")
+        else:
+            click.echo(f"  nodes  {entry['node_seconds']:>7.2f}s  "
+                       f"{entry['nodes_per_s']:>9,}/s   (batch {node_batch})")
+            click.echo(f"  edges  {entry['edge_seconds']:>7.2f}s  "
+                       f"{entry['edges_per_s']:>9,}/s   (batch {batch}, "
+                       f"{entry['patterns_per_statement']:.0f} patterns/statement)")
+            if entry["nodes_per_s"] and entry["edges_per_s"]:
+                click.echo(f"  per-item gap: "
+                           f"{entry['nodes_per_s'] / entry['edges_per_s']:.1f}x")
+
+    if sweep_edge_batch and results:
+        best = max(results, key=lambda r: r["edges_per_s"] or 0)
+        click.echo("")
+        click.echo(f"== fastest edge batch: {best['edge_batch']} "
+                   f"({best['edges_per_s']:,} edges/s)")
+        click.echo("== cost is superlinear in patterns per statement, so the "
+                   "optimum is a floor, not a maximum")
+
+    if json_out:
+        Path(json_out).write_text(json.dumps(results, indent=1), encoding="utf-8")
+        click.echo(f"== wrote {json_out}")
+
+
+if __name__ == "__main__":
+    main()
