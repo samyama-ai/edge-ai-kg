@@ -17,7 +17,7 @@ and what does it cost me when it can't?**
 | `ModelVariant` | 240 | id, name, precision, size_kb, accuracy, format |
 | `Operator` | 205 | id, name, domain, since_version, version_count, category, is_control_flow |
 | `Board` | 120 | id, name, form_factor, price_usd, power_budget_mw, ram_kb, flash_kb, year, battery_powered |
-| `Accelerator` | 85 | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
+| `Accelerator` | 85 (+6 real) | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
 | `Model` | 60 | id, name, family, task, params_k, macs_m |
 | `SoC` | 40 | id, name, process_nm, cpu_arch, cpu_mhz, cores |
 | `ClinicalTask` | 18 | id, name, category, latency_budget_ms, min_sensitivity |
@@ -119,12 +119,20 @@ this is what creates the coverage gaps the queries hunt for.
 
 | Kind | Count | Opset ceiling | Covers | int8 GOPS | Energy factor |
 |---|---:|---:|---|---|---:|
-| `MCU-CPU` | 40 | 99 | everything (universal fallback) | 0.5-3 | 1.00 |
-| `GPU-Embedded` | 15 | 21 | + recurrent, tensor | 400-2400 | 0.30 |
-| `NPU-Lite` | 12 | 13 | conv, matmul, activation, spatial, quant | 30-120 | 0.16 |
-| `NPU-Pro` | 9 | 19 | + reduction, attention, shape | 150-900 | 0.11 |
-| `DSP` | 9 | 17 | signal, elementwise, conv, matmul, spatial | 8-40 | 0.42 |
+| `MCU-CPU` | 40 | 99 | every category (universal fallback) | 0.5-3 | 1.00 |
+| `DSP` | 9 | 17 | activation, convolution, elementwise, matmul, reduction, shape, signal, spatial | 8-40 | 0.42 |
+| `NPU-Lite` | 12 | 13 | activation, convolution, elementwise, matmul, normalization, quantization, spatial | 30-120 | 0.16 |
+| `NPU-Pro` | 9 | 19 | activation, attention, convolution, elementwise, matmul, normalization, quantization, reduction, shape, spatial | 150-900 | 0.11 |
+| `GPU-Embedded` | 15 | 21 | activation, attention, convolution, elementwise, matmul, normalization, quantization, recurrent, reduction, shape, spatial, tensor | 400-2400 | 0.30 |
 | | **85** | | | | |
+
+Rows are in `ACCEL_ARCHETYPES` order and each `Covers` cell is spelled out in
+full. It used to read incrementally -- `NPU-Pro` as "+ reduction, attention,
+shape" over the row above -- and that notation was wrong: the sets are **not** a
+subset chain. `DSP` carries `signal`, which nothing below it has, and
+`NPU-Lite` drops `reduction` and `shape` that `DSP` holds. Four of the five rows
+understated their categories. `tests/test_accelerator_kinds.py` now pins this
+column against `ACCEL_ARCHETYPES`.
 
 `Opset ceiling` is not a count and does not sum to anything -- summing it gives
 169, which is how #26 came to compare it against 85. See
