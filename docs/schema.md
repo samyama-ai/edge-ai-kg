@@ -52,18 +52,18 @@ here describe the generated layer, which is itself worth stating more plainly
 
 | Edge | From -> To | Count | Meaning |
 |---|---|---:|---|
-| `IMPLEMENTS` | Kernel -> Operator | 21,844 | this kernel implements this operator |
-| `RUNS_ON` | Kernel -> Accelerator | 21,844 | on this compute unit |
-| `PROVIDED_BY` | Kernel -> Runtime | 21,844 | shipped by this runtime |
+| `IMPLEMENTS` | Kernel -> Operator | 21,844 (+738 real) | this kernel implements this operator |
+| `RUNS_ON` | Kernel -> Accelerator | 21,844 (+738 real) | on this compute unit |
+| `PROVIDED_BY` | Kernel -> Runtime | 21,844 (+738 real) | shipped by this runtime |
 | `OF_VARIANT` | Deployment -> ModelVariant | 1,440 | what was deployed |
-| `ON_BOARD` | Deployment -> Board | 1,440 | where |
-| `VIA_RUNTIME` | Deployment -> Runtime | 1,440 | through which runtime |
-| `USES_ACCELERATOR` | Deployment -> Accelerator | 1,440 | on which compute unit |
+| `ON_BOARD` | Deployment -> Board | 1,440 (+73 real) | where |
+| `VIA_RUNTIME` | Deployment -> Runtime | 1,440 (+60 real) | through which runtime |
+| `USES_ACCELERATOR` | Deployment -> Accelerator | 1,440 (+11 real) | on which compute unit |
 | `USES_OPERATOR` | Model -> Operator `{count}` | 1,069 | model's operator surface |
-| `TARGETS` | Runtime -> Accelerator | 426 | runtime can target this unit |
+| `TARGETS` | Runtime -> Accelerator | 426 (+3 real) | runtime can target this unit |
 | `VARIANT_OF` | ModelVariant -> Model | 240 | fp32 / fp16 / int8 / int4 |
-| `MADE_BY` | Board\|SoC -> Vendor | 160 | supply chain |
-| `HAS_SOC` | Board -> SoC | 120 | board's chip |
+| `MADE_BY` | Board or SoC -> Vendor | 160 (+26 real) | supply chain |
+| `HAS_SOC` | Board -> SoC | 120 (+14 real) | board's chip |
 | `CERTIFIED_FOR` | Board -> Certification | 104 | regulatory posture |
 | `HAS_ACCELERATOR` | SoC -> Accelerator | 85 | chip's compute units |
 | `TRAINED_ON` | Model -> Dataset | 82 | provenance |
@@ -75,11 +75,30 @@ here describe the generated layer, which is itself worth stating more plainly
 | `FEEDS` | Sensor -> SignalStage | 14 | front of the pipeline |
 | `MEASURES` | Deployment -> Model | 0 (+73 real) | a measured MLPerf Tiny submission against its reference model |
 
-Counts are the generated layer, so the column sums to the 73,825 above.
+The `N` column is the generated layer and sums to the **73,825** stated above --
+verified against the `Fleet` and pinned by `tests/test_schema_docs.py`. Eleven
+of the 22 types also gain real edges, written `(+M real)`; those add 2,478 more,
+which is the whole of the real layer (see [`data-provenance.md`](data-provenance.md)).
+
+**The `(+M real)` figures are a snapshot, not an invariant.** They move whenever
+ONNX Runtime or MLPerf publish -- 734 kernel registrations became 738 during one
+week -- so no test pins them; a test that fails for upstream's reasons is one
+people learn to ignore. The generated column is ours and is pinned.
+
 `MEASURES` is real-only for the same reason `BenchmarkTask` is -- the generator
 does not emit it -- and carries one edge per real MLPerf Tiny submission.
 `SOLVES` gains its second target, `Model -> BenchmarkTask`, only when the real
 layer is loaded.
+
+**Why this table once looked 160 short (#16).** `MADE_BY` covers two source
+labels, and the row used to write them `Board\|SoC`. Markdown needs the pipe
+escaped inside a cell, but anything splitting the row on every `|` -- a reader
+counting columns, or a script -- gets an extra column, reads `160` as the
+endpoints and `supply chain` as the count, and so scores `MADE_BY` as zero.
+73,825 - 160 = 73,665, which is exactly the sum the issue reported. The table
+was never wrong; it was unparseable. It now reads `Board or SoC`, and
+`tests/test_schema_docs.py` rejects an escaped pipe anywhere in the table so the
+column stays addable.
 
 ## The two spines
 
