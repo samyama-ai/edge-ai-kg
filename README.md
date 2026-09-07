@@ -1,6 +1,6 @@
 # Edge AI Deployment Knowledge Graph
 
-**25,145 nodes. 76,291 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
+**25,150 nodes. 76,303 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
 
 Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. Every node is stamped `real` or `synthetic`.
 
@@ -72,6 +72,13 @@ Vendor <- SoC <- Board                        Sensor -> SignalStage -> ... -> Mo
                                                                           Deployment -> Board
 ```
 
+*The diagram is an orientation sketch, not the schema.* It shows 12 of the 16
+node labels and names 3 of the 22 edge types; it **omits** `ClinicalTask`,
+`Certification`, `Dataset` and `BenchmarkTask`, so the clinical spine appears to
+stop at `Model` when it actually continues to a task and its regulatory
+posture. [`docs/schema.md`](docs/schema.md) is the full picture, and
+`tests/test_readme_diagram.py` fails if the two drift apart.
+
 **Hardware**: 15 vendors, 52 SoCs, 91 accelerators -- 85 generated across five
 archetypes (MCU-CPU / DSP / NPU-Lite / NPU-Pro / GPU-Embedded) plus 6 real ones
 carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
@@ -92,7 +99,7 @@ Full detail in [`docs/schema.md`](docs/schema.md).
 | [mlcommons/tiny_results_v1.2](https://github.com/mlcommons/tiny_results_v1.2) | Apache-2.0 | **73 measured submissions** — real boards from Qualcomm, Renesas, ST, Syntiant, Bosch, with real throughput, accuracy and energy |
 | generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
 
-**1,030 nodes are real; 24,115 are generated.** The split is queryable, not just
+**1,035 nodes are real; 24,115 are generated.** The split is queryable, not just
 documented — every node carries `provenance` and `source`:
 
 ```bash
@@ -215,7 +222,7 @@ check.
 
 ## Load it without building it
 
-A prebuilt `.sgsnap` snapshot of the full graph (25,145 nodes / 76,291 edges,
+A prebuilt `.sgsnap` snapshot of the full graph (25,150 nodes / 76,303 edges,
 both layers, ~970 KB gzipped) is published on the engine repo's releases, so you
 can skip the ETL entirely:
 
