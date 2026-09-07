@@ -94,10 +94,23 @@ CREATE INDEX ON :Kernel(execution_provider);  // EA13
 //   Board(provenance)        read by nothing at all
 //   Accelerator(provenance)  read by no query; one test reads it unfiltered
 //
-// Deliberately NOT added: `mcp_server` filters `ClinicalTask(name)` and
-// `Model(name)`, which have no index. Measured on the shape
-// `mcp_server.boards_for_task` uses, adding `ClinicalTask(name)` moved a 5.99ms
-// query to 5.55ms -- inside the noise, so it would be load cost for nothing.
+// Deliberately NOT added. Seven properties are filtered on somewhere and carry
+// no index. All were measured together: adding all seven moved the whole
+// 16-query catalog by +0.9ms on 575ms, individual queries swinging -8.6ms to
+// +3.0ms. Noise. Every one sits on a small label -- Deployment 1,513 rows,
+// Operator 376, Board 134, ClinicalTask 18 -- where the scan is already cheap.
+//
+//   ClinicalTask(name)               mcp boards_for_task
+//   ClinicalTask(latency_budget_ms)  EA09
+//   Model(name)                      mcp fallback_audit
+//   Operator(domain)                 EA13, `AND op.domain = "ai.onnx"`
+//   Deployment(fits)                 EA06, EA07, demo/demo.py
+//   Deployment(latency_ms)           EA03
+//   Board(battery_powered)           demo/demo.py
+//
+// `tests/test_schema_indexes.py` holds this list to the queries, in both
+// directions: an index nothing filters on fails, and a *new* filtered property
+// with neither an index nor a line here fails too.
 
 // --- Relationship shapes (documentation only) ---
 // (:Board)-[:HAS_SOC]->(:SoC)-[:HAS_ACCELERATOR]->(:Accelerator)
