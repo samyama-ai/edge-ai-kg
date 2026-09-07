@@ -63,6 +63,22 @@ def declared_indexes() -> list[tuple[str, str]]:
     return out
 
 
+MCP_DEF = re.compile(r"^def (\w+)", re.MULTILINE)
+
+
+def mcp_tools() -> dict[str, str]:
+    """Each MCP tool's source, separately.
+
+    Scanned per function rather than as one blob. `filtered_on` collects aliases
+    and predicates from whatever text it is given, so the whole file would let an
+    alias bound in `device_path` combine with a predicate in `fallback_audit`
+    into a "user" no single tool is -- over-attribution of exactly the kind this
+    file exists to catch.
+    """
+    parts = MCP_DEF.split(MCP.read_text(encoding="utf-8"))
+    return {parts[i]: parts[i + 1] for i in range(1, len(parts), 2)}
+
+
 def query_sources() -> dict[str, str]:
     """Every place Cypher is written: the catalog, and the MCP server's variants.
 
@@ -70,7 +86,7 @@ def query_sources() -> dict[str, str]:
     catalog (`CLAUDE.md`), so an index may exist only for its sake.
     """
     sources = {q["id"]: q["cypher"] for q in QUERIES}
-    sources["mcp_server"] = MCP.read_text(encoding="utf-8")
+    sources.update({f"mcp {name}": body for name, body in mcp_tools().items()})
     return sources
 
 
@@ -192,11 +208,13 @@ def test_each_query_named_in_a_trace_comment_really_filters_on_it():
     projections, which is precisely the justification this file rejects when it
     removes an index. Asserting a comment merely exists let that through.
 
-    Only the `EAnn` ids are checked. The `mcp <tool>` half names a Python
-    function rather than a query id, and `mcp_server/server.py` is already
-    scanned whole by the test above.
+    Both halves are checked. An earlier version validated only the `EAnn` ids
+    and said so in a docstring -- which left the `mcp <tool>` half as the one
+    part of the deliverable nothing verified, and two of those names turned out
+    to be functions that do not exist. Documenting a gap is not closing it.
     """
     sources = query_sources()
+    tools = mcp_tools()
     wrong = []
     for label, prop, comment in traced_indexes():
         for qid in re.findall(r"\bEA\d{2}\b", comment):
@@ -204,6 +222,18 @@ def test_each_query_named_in_a_trace_comment_really_filters_on_it():
                 wrong.append(f"{label}({prop}) names {qid}, which is not in the catalog")
             elif not filtered_on(sources[qid], label, prop):
                 wrong.append(f"{label}({prop}) names {qid}, which only projects it")
+        named_tools = re.search(r"\bmcp\s+(.+)$", comment)
+        for tool in (re.findall(r"\w+", named_tools.group(1)) if named_tools else []):
+            if tool not in tools:
+                wrong.append(
+                    f"{label}({prop}) names mcp tool {tool!r}, which is not a "
+                    f"function in mcp_server/server.py"
+                )
+            elif not filtered_on(tools[tool], label, prop):
+                wrong.append(
+                    f"{label}({prop}) names mcp tool {tool!r}, which does not "
+                    f"filter on it"
+                )
     assert not wrong, (
         "trace comments naming queries that do not filter on the property:\n  "
         + "\n  ".join(wrong)
