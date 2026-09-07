@@ -43,7 +43,15 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 
 
 def declared_indexes() -> list[tuple[str, str]]:
-    """(label, property) per index, parsed the way `etl.loader.apply_schema` does."""
+    """(label, property) per index, parsed the way `etl.loader.apply_schema` does.
+
+    Stricter than the loader on purpose: `apply_schema` sends any non-comment
+    line to the engine and merely warns if it is rejected, so a stray statement
+    would load silently. Here anything that is not `CREATE INDEX ON :L(p)` fails
+    with the line quoted -- the schema file is index declarations and nothing
+    else, and a new kind of statement should be a decision rather than a
+    surprise.
+    """
     out = []
     for raw in SCHEMA.read_text(encoding="utf-8").splitlines():
         stmt = raw.split("//", 1)[0].strip().rstrip(";")
@@ -66,13 +74,33 @@ def query_sources() -> dict[str, str]:
     return sources
 
 
+CASE_SPAN = re.compile(r"\bCASE\b.*?\bEND\b", re.DOTALL | re.IGNORECASE)
+
+
+def without_case_expressions(text: str) -> str:
+    """Blank out `CASE ... END` spans before looking for predicates.
+
+    `sum(CASE WHEN v.precision = "fp32" ...)` reads like a predicate and is not:
+    conditional aggregation runs over rows the `MATCH` has already produced, so
+    no index is consulted. Counting it would bless an index whose only user is
+    an aggregate -- the same overclaim this file exists to prevent, and the one
+    the surviving trace comments were guilty of before review.
+
+    Blanked rather than deleted so line structure survives for the `WHERE`
+    check below.
+    """
+    return CASE_SPAN.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def filtered_on(text: str, label: str, prop: str) -> bool:
     """Is `label.prop` used as a predicate, rather than merely projected?
 
-    An index serves a lookup. A property that only appears in a `RETURN`, or in
-    an `ORDER BY` over a `WITH` alias, cannot use one -- so matching any mention
-    of the property would defeat the point of this file.
+    An index serves a lookup. A property that only appears in a `RETURN`, in an
+    `ORDER BY` over a `WITH` alias, or inside a `CASE` expression cannot use one
+    -- so matching any mention of the property would defeat the point of this
+    file.
     """
+    text = without_case_expressions(text)
     aliases = {m.group(1) for m in re.finditer(rf"\((\w+)\s*:\s*{label}\b", text)}
     for alias in aliases:
         ref = rf"\b{re.escape(alias)}\.{re.escape(prop)}\b"
@@ -130,24 +158,57 @@ def test_every_non_id_index_is_filtered_on_somewhere():
     )
 
 
+def traced_indexes() -> list[tuple[str, str, str]]:
+    """(label, property, trailing comment) for each non-id index."""
+    out = []
+    for raw in SCHEMA.read_text(encoding="utf-8").splitlines():
+        stmt, _, comment = raw.partition("//")
+        stmt = stmt.strip().rstrip(";")
+        m = INDEX_RE.match(stmt) if stmt else None
+        if m and m.group(2) != "id":
+            out.append((m.group(1), m.group(2), comment.strip()))
+    return out
+
+
 def test_the_indexes_that_survived_name_who_needs_them():
     """The comments beside them, not just the statements.
 
     #18 asks for each index to be *traced*, so an untraced one is a regression
     even if some query happens to filter on it.
     """
-    untraced = []
-    for raw in SCHEMA.read_text(encoding="utf-8").splitlines():
-        stmt, _, comment = raw.partition("//")
-        stmt = stmt.strip().rstrip(";")
-        m = INDEX_RE.match(stmt) if stmt else None
-        if not m or m.group(2) == "id":
-            continue
-        if not comment.strip():
-            untraced.append(f"{m.group(1)}({m.group(2)})")
+    untraced = [f"{label}({prop})" for label, prop, comment in traced_indexes()
+                if not comment]
     assert not untraced, (
         f"non-id indexes with no trailing comment naming what needs them: "
         f"{untraced}"
+    )
+
+
+def test_each_query_named_in_a_trace_comment_really_filters_on_it():
+    """The trace comment is the deliverable, so it is checked like one.
+
+    Added because the first version of these comments overclaimed: they named
+    every query that *read* the property, including `WITH op.name AS operator`
+    projections, which is precisely the justification this file rejects when it
+    removes an index. Asserting a comment merely exists let that through.
+
+    Only the `EAnn` ids are checked. The `mcp <tool>` half names a Python
+    function rather than a query id, and `mcp_server/server.py` is already
+    scanned whole by the test above.
+    """
+    sources = query_sources()
+    wrong = []
+    for label, prop, comment in traced_indexes():
+        for qid in re.findall(r"\bEA\d{2}\b", comment):
+            if qid not in sources:
+                wrong.append(f"{label}({prop}) names {qid}, which is not in the catalog")
+            elif not filtered_on(sources[qid], label, prop):
+                wrong.append(f"{label}({prop}) names {qid}, which only projects it")
+    assert not wrong, (
+        "trace comments naming queries that do not filter on the property:\n  "
+        + "\n  ".join(wrong)
+        + "\nAn index serves a lookup; a projection or a CASE expression is not "
+          "one. List only the queries with the property in a predicate."
     )
 
 
