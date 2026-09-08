@@ -17,6 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    defaults:
+      run:
+        # `sh`, not the default `bash`. Evidence: every `uses:` step succeeded
+        # while the *first* `run:` step failed in 0s -- first `apt-get`, then,
+        # once a plain-`echo` probe was put ahead of it, the probe itself. A
+        # step that only echoes cannot fail in zero seconds unless the shell
+        # never starts, and `uses:` working means the container and node are
+        # fine. Alpine-based images ship `sh` and no `bash`, which fits exactly.
+        #
+        # Everything below is POSIX: no arrays, no [[ ]], no pipefail.
+        shell: sh
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,11 +42,14 @@ jobs:
       # identified it in one look.
       - name: Runner environment
         run: |
-          echo "user   : $(id -un) (uid $(id -u))"
-          echo "sudo   : $(command -v sudo || echo 'not installed')"
-          echo "apt-get: $(command -v apt-get || echo 'not installed')"
-          echo "python : $(python --version 2>&1)"
-          echo "os     : $(cat /etc/os-release 2>/dev/null | head -1 || uname -a)"
+          echo "shell  : $0"
+          echo "user   : $(id -un 2>/dev/null || echo '?') (uid $(id -u))"
+          echo "sudo   : $(command -v sudo || echo 'none')"
+          echo "apt-get: $(command -v apt-get || echo 'none')"
+          echo "apk    : $(command -v apk || echo 'none')"
+          echo "bash   : $(command -v bash || echo 'none')"
+          echo "python : $(python3 --version 2>&1 || echo 'none')"
+          echo "os     : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
 
       # `samyama` publishes only a macOS wheel plus an sdist, so Linux builds
       # the Rust extension from source. On a bare runner that fails twice --
@@ -42,16 +57,21 @@ jobs:
       # stddef.h. clang supplies the builtin headers; see CLAUDE.md.
       - name: Install build prerequisites
         run: |
-          set -eux
-          # `sudo` is not a given. Gitea's act_runner images typically run as
-          # root and ship no sudo, so an unconditional `sudo apt-get` fails
-          # instantly with "command not found" -- which is exactly how this
-          # workflow failed on its first real run (0s at this step, after
-          # checkout and setup-python had both succeeded).
+          set -eu
+          # `sudo` is not a given -- act_runner images usually run as root and
+          # ship none -- and neither is the package manager. The probe above
+          # prints which of these exist, so a failure here is legible.
           if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
-          $SUDO apt-get update -qq
-          $SUDO apt-get install -y --no-install-recommends \
-            build-essential python3-dev clang libclang-dev
+          if command -v apt-get >/dev/null; then
+            $SUDO apt-get update -qq
+            $SUDO apt-get install -y --no-install-recommends \
+              build-essential python3-dev clang libclang-dev
+          elif command -v apk >/dev/null; then
+            $SUDO apk add --no-cache build-base python3-dev clang clang-dev
+          else
+            echo "no apt-get and no apk; see the Runner environment step above" >&2
+            exit 1
+          fi
 
       # The cargo build is the slowest step by far (~3 min cold).
       - name: Cache cargo
