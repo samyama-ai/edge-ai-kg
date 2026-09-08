@@ -326,6 +326,6 @@ def test_every_node_label_row_declares_its_layer():
         f"  listed in `generated_only` but now carrying `(+M real)`: "
         f"{sorted(generated_only - bare)}\n"
         f"A bare count asserts 'the real layer never adds to this'. Either write "
-        f"`N (+M real)` in docs/schema.md, or update this set -- and check the "
-        f"prose above the table, which states how many there are."
+        f"`N (+M real)` in docs/schema.md, or amend `generated_only` here -- and "
+        f"check the prose above the table, which states how many there are."
     )
