@@ -72,13 +72,6 @@ Vendor <- SoC <- Board                        Sensor -> SignalStage -> ... -> Mo
                                                                           Deployment -> Board
 ```
 
-*The diagram is an orientation sketch, not the schema.* It shows 12 of the 16
-node labels and names 3 of the 22 edge types; it **omits** `ClinicalTask`,
-`Certification`, `Dataset` and `BenchmarkTask`, so the clinical spine appears to
-stop at `Model` when it actually continues to a task and its regulatory
-posture. [`docs/schema.md`](docs/schema.md) is the full picture, and
-`tests/test_readme_diagram.py` fails if the two drift apart.
-
 **Hardware**: 15 vendors, 52 SoCs, 91 accelerators -- 85 generated across five
 archetypes (MCU-CPU / DSP / NPU-Lite / NPU-Pro / GPU-Embedded) plus 6 real ones
 carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
