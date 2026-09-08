@@ -122,8 +122,13 @@ def questions(idx, limit: int) -> list[dict]:
                    if idx["runs"].get(k, set()) & on_kind
                    for op in ops_}
         for mid in models[:max(1, fallback_budget // max(1, len(kinds)))]:
-            missing = sorted(idx["op"][o]["name"]
-                             for o in idx["uses"][mid] if o not in covered)
+            # A set: operator *names* repeat across ids -- `AveragePool` exists
+            # at three domains -- so a model using two same-named ids would put
+            # a duplicate in the ground truth. Scoring is set-based so grading
+            # is unaffected, but the uniqueness invariant the tests assert would
+            # fail at some other seed or scale.
+            missing = sorted({idx["op"][o]["name"]
+                              for o in idx["uses"][mid] if o not in covered})
             out.append({
                 "id": f"fallback/{idx['model'][mid]['name']}/{kind}",
                 "question": (
@@ -232,6 +237,12 @@ def main(emit, emit_truth, score, limit, seed, scale):
     if not emit and not emit_truth and not score:
         raise SystemExit("give --emit questions.jsonl, --emit-truth truth.jsonl "
                          "or --score answers.jsonl")
+    if limit < 2:
+        # Section 1 emits at least one question and section 2 at least one, so
+        # below 2 the truncation drops a whole family and one MCP tool goes
+        # untested. Refused rather than special-cased.
+        raise SystemExit(f"--limit {limit} cannot cover both question families; "
+                         f"use --limit 2 or more")
     if score and (emit or emit_truth):
         # `--emit --score` used to write the questions and return, ignoring the
         # score with no indication it had been skipped.
@@ -266,7 +277,7 @@ def main(emit, emit_truth, score, limit, seed, scale):
                               encoding="utf-8")
         click.echo(f"wrote {len(qs)} questions (no answers) to {emit}")
         click.echo(f"  answer-set sizes: min {min(sizes)}, "
-                   f"median {int(statistics.median(sizes))}, max {max(sizes)}")
+                   f"median {statistics.median(sizes):g}, max {max(sizes)}")
         empty = sum(1 for s in sizes if s == 0)
         if empty:
             click.echo(f"  {empty} question(s) have an empty answer -- "
@@ -283,16 +294,24 @@ def main(emit, emit_truth, score, limit, seed, scale):
         return
 
     truth = {q["id"]: q["answer"] for q in qs}
-    answered, unknown = {}, []
-    for line in Path(score).read_text(encoding="utf-8").splitlines():
+    answered, unknown, stamped = {}, [], False
+    for lineno, line in enumerate(
+            Path(score).read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
-        row = json.loads(line)
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"{score}: line {lineno} is not valid JSON: {exc}") from None
+        if "id" not in row:
+            raise SystemExit(f"{score}: line {lineno} has no 'id' field")
         if row["id"] not in truth:
             unknown.append(row["id"])
             continue
         for key, mine in (("seed", seed), ("scale", scale), ("limit", limit)):
             theirs = row.get(key)
+            if theirs is not None:
+                stamped = True
             if theirs is not None and theirs != mine:
                 raise SystemExit(
                     f"{score} was produced with {key}={theirs!r} but this run "
@@ -300,6 +319,12 @@ def main(emit, emit_truth, score, limit, seed, scale):
                     f"set silently counts the regenerated ids as refusals -- "
                     f"pass --{key} {theirs!r}.")
         answered[row["id"]] = row.get("answer", [])
+
+    if answered and not stamped:
+        click.echo(f"  ! no row in {score} carries seed/scale/limit, so the "
+                   f"question set could not be checked against the one that\n"
+                   f"    produced these answers. A mismatch would count the "
+                   f"regenerated ids as refusals and deflate the score.", err=True)
 
     # Scored against the *question set*, not against the answers file. An
     # omitted question counts as an empty answer -- i.e. a refusal -- because
