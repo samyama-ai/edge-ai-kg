@@ -21,11 +21,16 @@ import math
 import pytest
 
 from benchmarks import ingest
-from etl.helpers import create_edges
+from etl.helpers import DEFAULT_EDGE_BATCH, create_edges
 
 
 def test_the_edge_batch_default_is_the_measured_optimum():
     """50, not the 100 it was.
+
+    Reads `DEFAULT_EDGE_BATCH` rather than introspecting the signature. The
+    earlier version used `inspect.signature(create_edges)`, which the CLI also
+    used -- so the pin and the thing pinned agreed by construction and neither
+    named the number.
 
     Measured at `--scale 1.0` (embedded): 100 gives 2,594 edges/s against 3,140
     at 50, because cost is superlinear in `MATCH` patterns per statement rather
@@ -36,6 +41,15 @@ def test_the_edge_batch_default_is_the_measured_optimum():
     rounding-down and reads as arbitrary without the measurement beside it.
     """
     default = inspect.signature(create_edges).parameters["batch"].default
+    assert DEFAULT_EDGE_BATCH == 50, (
+        f"DEFAULT_EDGE_BATCH is {DEFAULT_EDGE_BATCH}; 50-60 was measured "
+        f"fastest and 100 costs 21% of edge throughput. Re-run "
+        f"`python -m benchmarks.ingest --sweep-edge-batch` before changing it."
+    )
+    assert default == DEFAULT_EDGE_BATCH, (
+        f"create_edges' default ({default}) no longer follows "
+        f"DEFAULT_EDGE_BATCH ({DEFAULT_EDGE_BATCH})"
+    )
     assert default == 50, (
         f"create_edges batches {default}, but 50-60 was measured fastest and 100 "
         f"costs 21% of edge throughput. If this is a deliberate change, re-run "
@@ -47,9 +61,14 @@ def test_the_edge_batch_default_is_the_measured_optimum():
 def test_patterns_per_statement_counts_distinct_endpoints():
     """The number the cost tracks, on a fixture small enough to count by hand.
 
-    Six edges over four nodes. Batched two at a time the first batch touches
-    a, b, c (3 patterns), the second c, d and a, d -- so the mean is what the
-    engine actually sees, not `2 * batch`.
+    **Four** edges over four nodes: `a->b`, `a->c`, `d->b`, `d->c`. Batched two
+    at a time the first statement touches `{a, b, c}` and the second `{d, b, c}`
+    -- three patterns each, not `2 * batch` -- so the mean is what the engine
+    actually sees.
+
+    The value of this test is that a reader can count it by hand, so the prose
+    describing it has to be right; an earlier version said "six edges" and
+    described the wrong split while the assertions below were correct.
     """
     edges = [
         ("A", "a", "R", "B", "b", None),
@@ -92,9 +111,10 @@ def report():
         from samyama import SamyamaClient
     except Exception as exc:  # pragma: no cover
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+    patterns = round(ingest.patterns_per_statement(fleet.edges, 50), 1)
     return ingest.time_one_load(
         SamyamaClient.embedded, fleet, node_batch=250, edge_batch=50,
-        graph="default")
+        graph="default", patterns=patterns)
 
 
 def test_the_report_carries_every_field_the_issue_asked_for(report):
