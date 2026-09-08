@@ -55,10 +55,13 @@ def counts():
     (`test_graph_loaded_completely`), so going through the engine here would
     add a 25-second load to re-check something already pinned.
     """
+    from etl import generate as gen
+    from etl import onnx_catalog as oc
+    from etl import real_layer
+    # Only the cache read is guarded. Wrapping the imports too would turn a
+    # genuinely missing or broken module into a skip, which is the same
+    # "passes while testing nothing" failure this file is about.
     try:
-        from etl import generate as gen
-        from etl import onnx_catalog as oc
-        from etl import real_layer
         ops = oc.load_cached()
     except FileNotFoundError:
         pytest.skip("run `python -m etl.download_data` first")
@@ -83,6 +86,12 @@ def figures_in(relative_path: str) -> set[tuple[int, str]]:
 
     Only counts written as `N nodes` / `N edges` with a thousands separator, so
     a stray four-digit number in prose is not read as a claim about the graph.
+
+    The consequence, which the reason above does not cover: **a published count
+    below 1,000 is invisible to every test in this file.** No node or edge total
+    is that small today, and widening the pattern would start matching prose
+    like "16 node labels", so this is a deliberate blind spot rather than an
+    oversight.
     """
     text = (ROOT / relative_path).read_text(encoding="utf-8")
     found = set()
@@ -91,33 +100,56 @@ def figures_in(relative_path: str) -> set[tuple[int, str]]:
     return found
 
 
-def unexplained(relative_path: str, known: set[int]) -> set[tuple[int, str]]:
-    return {(n, unit) for n, unit in figures_in(relative_path) if n not in known}
+def unexplained(relative_path: str,
+                known: set[tuple[int, str]]) -> set[tuple[int, str]]:
+    return {pair for pair in figures_in(relative_path) if pair not in known}
+
+
+# Documents that legitimately publish no generated-layer figure. An explicit
+# list, not an inferred one: the previous version skipped any document with no
+# node count, which silently disabled the whole check for a page that stopped
+# publishing one -- the failure this file exists to prevent.
+NO_GENERATED_FIGURES: set[str] = set()
 
 
 def test_the_generated_layer_figures_are_exact(counts):
-    """Ours, deterministic from the seed. A mismatch here is a bug, not drift."""
-    nodes, _edges = counts["generated"]
+    """Ours, deterministic from the seed. A mismatch here is a bug, not drift.
+
+    Both units are asserted separately. An earlier version wrote
+    `(nodes, "nodes") in published or (nodes, "edges") in published`, which is
+    unit-blind -- a document publishing `24,115 edges` satisfied a *node*-count
+    assertion -- and never checked the generated edge count at all, though the
+    PR listing these six figures claimed it did.
+    """
+    nodes, edges = counts["generated"]
     for doc in GENERATED_DOCS:
-        published = figures_in(doc)
-        if not any(unit == "nodes" for _, unit in published):
+        if doc in NO_GENERATED_FIGURES:
             continue
-        assert (nodes, "nodes") in published or (nodes, "edges") in published, (
-            f"{doc} publishes no figure equal to the generated node count "
-            f"{nodes:,}. Figures found: {sorted(published)}. The generated layer "
-            f"is deterministic from seed 20260814, so this is a documentation "
-            f"error rather than upstream drift."
-        )
+        published = figures_in(doc)
+        for value, unit in ((nodes, "nodes"), (edges, "edges")):
+            assert (value, unit) in published, (
+                f"{doc} does not publish the generated {unit} count "
+                f"{value:,}. Figures found: {sorted(published)}. The generated "
+                f"layer is deterministic from seed 20260814, so this is a "
+                f"documentation error rather than upstream drift -- if the "
+                f"document deliberately omits it, add it to "
+                f"NO_GENERATED_FIGURES."
+            )
 
 
-def test_every_published_figure_matches_some_real_layer_count(counts):
+def test_every_published_figure_matches_some_layer_of_the_graph(counts):
     """The check #17 asks for: no published number the graph does not hold.
 
     Fails naming the document and both numbers. A figure that matches *no*
     layer is either stale or invented, and the message says which layers were
     considered so the fix is obvious.
     """
-    known = {n for pair in counts.values() for n in pair}
+    # Pairs, not a flat bag of numbers. Flattening ignored the unit, so
+    # `25,150 edges` in a document passed because 25,150 is a valid *node*
+    # count somewhere -- and any real-layer figure passed where a both-layer
+    # figure belonged.
+    known = {(nodes, "nodes") for nodes, _ in counts.values()}
+    known |= {(edges, "edges") for _, edges in counts.values()}
     problems = []
     for doc in sorted(set(GENERATED_DOCS) | set(BOTH_LAYER_DOCS)):
         for number, unit in sorted(unexplained(doc, known)):
