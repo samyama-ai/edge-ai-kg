@@ -51,6 +51,19 @@ the gap is not "writes are slow", it is the endpoint lookup.
 Timings are machine- and build-specific, so nothing here is asserted in a test.
 `tests/test_ingest_benchmark.py` checks the shape of the report, not its
 numbers -- a performance figure pinned in CI fails for the hardware's reasons.
+
+## Only the embedded path is trustworthy for the sweep
+
+Every timed load calls `reset_graph` first, but engine note 8 records that
+`DETACH DELETE` is **not** a true reset on this engine: the columnar property
+store survives it. So over `--url`, successive configurations are not measuring
+identical starting states, and a genuine reset means stopping the server and
+deleting its data directory between runs.
+
+Embedded has no such problem -- each `SamyamaClient.embedded()` is a fresh
+in-memory graph -- which is why every figure quoted above and in
+`docs/engine-notes.md` was taken embedded. Treat `--url --sweep-edge-batch`
+output as indicative only.
 """
 from __future__ import annotations
 
@@ -62,7 +75,7 @@ from pathlib import Path
 import click
 
 from etl.helpers import chunked, create_edges, create_nodes
-from etl.loader import NODE_LABELS, apply_schema
+from etl.loader import NODE_LABELS, apply_schema, reset_graph
 
 GRAPH_DEFAULT = "default"
 
@@ -102,9 +115,17 @@ def patterns_per_statement(edges, batch: int) -> float:
 
 
 def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
-                  graph: str) -> dict:
-    """One clean load into a fresh graph. Returns seconds and rates."""
+                  graph: str, patterns: float) -> dict:
+    """One clean load into a reset graph. Returns seconds and rates."""
     client = client_factory()
+    # Reset first, exactly as `etl/loader.py` does. Embedded hides the need for
+    # this -- each `SamyamaClient.embedded()` is a fresh in-memory graph -- but
+    # over `--url` nothing clears prior state, so a second configuration would
+    # load 76,303 edges into a graph that already holds them. Every endpoint
+    # `MATCH` then scans a doubled index, and `--sweep-edge-batch` would report
+    # a monotonic slowdown ordered by sweep position rather than by batch size:
+    # indistinguishable from the superlinear result this module concludes.
+    reset_graph(client, graph)
     # The loader's own routine rather than a copy of it. Applied before every
     # timed load and outside the timer: without the id indexes, edge creation is
     # ~10x slower (#18), which would swamp everything measured here.
@@ -128,8 +149,10 @@ def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
         "edges_per_s": round(fleet.edge_count / edge_s) if edge_s else None,
         "node_batch": node_batch,
         "edge_batch": edge_batch,
-        "patterns_per_statement": round(
-            patterns_per_statement(fleet.edges, edge_batch), 1),
+        # Computed by the caller: it re-walks all 76K edges, and doing that
+        # inside the reported entry meant recomputing it per repeat for a value
+        # that depends only on (edges, batch).
+        "patterns_per_statement": patterns,
     }
 
 
@@ -179,7 +202,8 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
         click.echo(f"{'edge batch':>11}{'median s':>10}{'edges/s':>10}"
                    f"{'pat/stmt':>10}{'ms/stmt':>9}")
     for batch in batches:
-        runs = [time_one_load(factory, fleet, node_batch, batch, graph)
+        patterns = round(patterns_per_statement(fleet.edges, batch), 1)
+        runs = [time_one_load(factory, fleet, node_batch, batch, graph, patterns)
                 for _ in range(repeats)]
         entry = dict(runs[0])
         entry["edge_seconds"] = median_of(runs, "edge_seconds")
