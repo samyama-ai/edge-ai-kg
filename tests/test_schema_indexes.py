@@ -76,6 +76,7 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
     "benchmarks/queries.py",
+    "benchmarks/vector_probe.py",
     "demo/demo.py",
     "demo/questions.py",
     "etl/loader.py",
