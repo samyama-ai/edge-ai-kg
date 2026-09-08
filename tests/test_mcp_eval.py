@@ -58,6 +58,12 @@ def test_a_correct_none_is_not_counted_as_a_refusal():
         "not a refusal"
     )
     assert mcp_eval.score_one([], ["Conv"])["refused"] is False
+    # Same bug class in the precision branch: naming no wrong thing when
+    # nothing was expected is perfect precision, not zero.
+    assert s["precision"] == 1.0, (
+        "precision was 0.0 for an empty-but-correct answer, which would drag "
+        "down any aggregate that reads it"
+    )
 
 
 def test_partial_credit_is_between_zero_and_one():
@@ -83,8 +89,8 @@ def test_the_questions_carry_ground_truth_and_name_a_tool(built):
     A question with no named tool cannot distinguish "right because grounded"
     from "right anyway", which is the whole comparison #49 asks for.
     """
-    fleet, idx = built
-    qs = mcp_eval.questions(fleet, idx, limit=10)
+    _fleet, idx = built
+    qs = mcp_eval.questions(idx, limit=10)
     assert qs, "no questions generated"
     for q in qs:
         assert q["question"].strip().endswith("only."), q["id"]
@@ -102,15 +108,36 @@ def test_the_ground_truth_is_not_trivially_empty_or_total(built):
     Guards the two degenerate shapes: every answer empty (so refusing scores
     100%) and every answer the whole universe.
     """
-    fleet, idx = built
-    qs = mcp_eval.questions(fleet, idx, limit=10)
+    _fleet, idx = built
+    qs = mcp_eval.questions(idx, limit=10)
     sizes = [len(q["answer"]) for q in qs]
     assert any(n > 0 for n in sizes), (
         "every question has an empty answer, so a model that refuses everything "
         "scores 100%"
     )
-    operators = len(idx["op"])
-    assert all(n < operators for n in sizes), (
-        "a question's answer is the entire operator catalog, so naming "
-        "everything scores 100%"
-    )
+    # Each family against its own universe. Comparing every answer to the
+    # operator count was vacuous for `blast/*`, whose answers are board names --
+    # a much smaller set -- so a blast question naming literally every board
+    # passed the guard while being free points.
+    universe = {"fallback": len(idx["op"]), "blast": len(idx["board"])}
+    for q in qs:
+        family = q["id"].split("/", 1)[0]
+        assert family in universe, f"unknown question family {family!r}"
+        assert len(q["answer"]) < universe[family], (
+            f"{q['id']}'s answer is the entire {family} universe "
+            f"({universe[family]} items), so naming everything scores 100%"
+        )
+
+
+def test_formatting_differences_do_not_count_as_errors():
+    """Answers come from model prose; the graph's names do not.
+
+    Without normalisation `"conv"`, `"Conv "` and ``"`Conv`"`` each score 0 on
+    an otherwise perfect answer, and that formatting noise is indistinguishable
+    from real error -- plausibly dominating the very gap being measured.
+    """
+    s = mcp_eval.score_one(["Conv", "Relu"], ["`conv`", " RELU "])
+    assert s["exact"] is True, "case, whitespace and backticks must not count"
+    assert mcp_eval.normalise('  "`Conv`" ') == "conv"
+    # Normalisation must not merge genuinely different operators.
+    assert mcp_eval.score_one(["Conv"], ["ConvTranspose"])["exact"] is False

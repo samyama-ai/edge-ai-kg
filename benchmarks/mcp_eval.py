@@ -17,8 +17,18 @@ and **nothing in this repo should quote them**.
 What it gives whoever has a key: one command to generate the questions, and one
 to score a JSONL of answers, with the scoring published rather than described.
 
-    python -m benchmarks.mcp_eval --emit questions.jsonl     # questions + truth
-    python -m benchmarks.mcp_eval --score answers.jsonl      # grade a run
+    python -m benchmarks.mcp_eval --emit questions.jsonl       # questions ONLY
+    python -m benchmarks.mcp_eval --emit-truth truth.jsonl    # keep this away
+    python -m benchmarks.mcp_eval --score answers.jsonl        # grade a run
+
+`--emit` deliberately strips the answers. The natural next step is to feed that
+file to a model, and shipping the ground truth inside it would quietly produce a
+very good number -- the one failure mode a harness like this must not have.
+
+Scoring is against the **question set**, not the answers file: a question with no
+answer row counts as a refusal. Dividing by the number answered would make
+omission strictly better than refusal, inverting the incentive the `refused`
+metric exists to capture.
 
 ## Why set-valued questions
 
@@ -85,7 +95,7 @@ def build_index(seed: int, scale: float):
     return fleet, idx
 
 
-def questions(fleet, idx, limit: int) -> list[dict]:
+def questions(idx, limit: int) -> list[dict]:
     """Question, ground-truth set, and the MCP tool that answers it.
 
     The tool is named so a grounded run can be checked for *using* it -- an
@@ -93,17 +103,25 @@ def questions(fleet, idx, limit: int) -> list[dict]:
     right because of it, and #49's claim is about the second.
     """
     out = []
+    # Split the budget between the two families. `out[:limit]` alone let
+    # section 1 fill the whole list at small limits -- its per-kind floor is 1 --
+    # and silently drop every `blast/*` question.
+    fallback_budget = max(1, limit // 2)
 
     # 1. The hero question, per (model, accelerator kind).
     kinds = sorted({a["kind"] for a in idx["accel"].values()
                     if a.get("provenance") == "synthetic"})
     models = sorted(idx["uses"], key=lambda m: -len(idx["uses"][m]))
     for kind in kinds:
-        on_kind = {a["id"] for a in idx["accel"].values() if a["kind"] == kind}
+        # Same provenance filter as `kinds` above. Without it, one archetype
+        # renamed to `NPU` would let real ORT kernels mark synthetic operators
+        # as covered, silently shrinking the answer set with no test failing.
+        on_kind = {a["id"] for a in idx["accel"].values()
+                   if a["kind"] == kind and a.get("provenance") == "synthetic"}
         covered = {op for k, ops_ in idx["impl"].items()
                    if idx["runs"].get(k, set()) & on_kind
                    for op in ops_}
-        for mid in models[:max(1, limit // (len(kinds) * 2))]:
+        for mid in models[:max(1, fallback_budget // max(1, len(kinds)))]:
             missing = sorted(idx["op"][o]["name"]
                              for o in idx["uses"][mid] if o not in covered)
             out.append({
@@ -121,7 +139,7 @@ def questions(fleet, idx, limit: int) -> list[dict]:
     op_by_name = {}
     for o in idx["op"].values():
         op_by_name.setdefault(o["name"], o["id"])
-    for name in sorted(op_by_name)[:limit // 4 or 1]:
+    for name in sorted(op_by_name)[:max(1, limit - len(out))]:
         oid = op_by_name[name]
         accels = {a for k, ops_ in idx["impl"].items() if oid in ops_
                   for a in idx["runs"].get(k, set())}
@@ -140,6 +158,21 @@ def questions(fleet, idx, limit: int) -> list[dict]:
     return out[:limit]
 
 
+def normalise(name: str) -> str:
+    """Fold the differences a free-text answer will have and a graph will not.
+
+    Answers come from model prose, so `"conv"`, `"Conv "` and ``"`Conv`"`` all
+    mean the operator the graph calls `Conv`. Comparing raw strings would score
+    those 0 on an otherwise perfect answer, and that formatting noise would be
+    indistinguishable from real error -- plausibly dominating the very gap this
+    harness exists to measure.
+
+    Published rather than described, because the scoring is the claim: strip
+    surrounding whitespace, backticks and quotes, then casefold.
+    """
+    return name.strip().strip("`'\"").strip().casefold()
+
+
 def score_one(expected: list[str], given: list[str]) -> dict:
     """Jaccard plus exact match, and the shape of the miss.
 
@@ -147,55 +180,85 @@ def score_one(expected: list[str], given: list[str]) -> dict:
     interesting distinction for an ungrounded run: a model that says "I cannot
     know" is behaving well and scores 0 the same as one that invents a list.
     """
-    exp, got = set(expected), set(given)
+    exp = {normalise(x) for x in expected}
+    got = {normalise(x) for x in given}
+    # Compare normalised, but report what the model actually wrote: a reviewer
+    # reading `fabricated` wants the answer as given, not a folded version of it.
+    as_given = {}
+    for x in given:
+        as_given.setdefault(normalise(x), x)
     union = exp | got
     return {
         "expected_n": len(exp),
         "given_n": len(got),
         "exact": exp == got,
         "jaccard": (len(exp & got) / len(union)) if union else 1.0,
-        "precision": (len(exp & got) / len(got)) if got else 0.0,
+        # 1.0 when nothing was expected and nothing was given: naming no wrong
+        # thing is perfect precision. Returning 0.0 there was the same bug class
+        # as counting a correct "none" as a refusal.
+        "precision": (len(exp & got) / len(got)) if got else (0.0 if exp else 1.0),
         "recall": (len(exp & got) / len(exp)) if exp else 1.0,
         # Empty *and* something was expected. A question whose true answer is
         # the empty set is one where "none" is correct, and counting that as a
         # refusal made a perfect run report a refusal it never made.
         "refused": (not got) and bool(exp),
-        "fabricated": sorted(got - exp),
+        "fabricated": sorted(as_given.get(x, x) for x in (got - exp)),
     }
 
 
 @click.command()
 @click.option("--emit", type=click.Path(), default=None,
-              help="Write the question set with ground truth to a JSONL file.")
+              help="Write the questions -- WITHOUT answers -- to a JSONL file.")
+@click.option("--emit-truth", type=click.Path(), default=None,
+              help="Write the ground truth separately. Keep it away from the model.")
 @click.option("--score", type=click.Path(exists=True), default=None,
               help="Score a JSONL of {id, answer: [...]} against the ground truth.")
 @click.option("--limit", default=20, show_default=True)
 @click.option("--seed", default=20260814, show_default=True, type=int)
 @click.option("--scale", default=1.0, show_default=True, type=float)
-def main(emit, score, limit, seed, scale):
-    if not emit and not score:
-        raise SystemExit("give --emit questions.jsonl or --score answers.jsonl")
+def main(emit, emit_truth, score, limit, seed, scale):
+    if not emit and not emit_truth and not score:
+        raise SystemExit("give --emit questions.jsonl, --emit-truth truth.jsonl "
+                         "or --score answers.jsonl")
     try:
-        fleet, idx = build_index(seed, scale)
+        _fleet, idx = build_index(seed, scale)
     except FileNotFoundError:
         raise SystemExit("run `python -m etl.download_data` first") from None
-    qs = questions(fleet, idx, limit)
+    qs = questions(idx, limit)
+
+    sizes = [len(q["answer"]) for q in qs]
+    if not sizes:
+        raise SystemExit(
+            f"no questions generated at --limit {limit} --scale {scale}; "
+            f"nothing to emit or score")
 
     if emit:
-        Path(emit).write_text("\n".join(json.dumps(q) for q in qs) + "\n",
+        # Answers are stripped. The natural next step is to feed this file to a
+        # model, and shipping the ground truth in it would quietly produce a
+        # very good score -- the one failure mode a harness like this must not
+        # have.
+        asked = [{k: v for k, v in q.items() if k != "answer"} for q in qs]
+        Path(emit).write_text("\n".join(json.dumps(q) for q in asked) + "\n",
                               encoding="utf-8")
-        click.echo(f"wrote {len(qs)} questions with ground truth to {emit}")
-        sizes = [len(q["answer"]) for q in qs]
+        click.echo(f"wrote {len(qs)} questions (no answers) to {emit}")
         click.echo(f"  answer-set sizes: min {min(sizes)}, "
                    f"median {int(statistics.median(sizes))}, max {max(sizes)}")
         empty = sum(1 for s in sizes if s == 0)
         if empty:
             click.echo(f"  {empty} question(s) have an empty answer -- "
                        f"'none' is a correct and checkable answer")
+
+    if emit_truth:
+        Path(emit_truth).write_text(
+            "\n".join(json.dumps({"id": q["id"], "answer": q["answer"]}) for q in qs)
+            + "\n", encoding="utf-8")
+        click.echo(f"wrote ground truth for {len(qs)} questions to {emit_truth}")
+
+    if emit or emit_truth:
         return
 
     truth = {q["id"]: q["answer"] for q in qs}
-    results, unknown = [], []
+    answered, unknown = {}, []
     for line in Path(score).read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -203,7 +266,15 @@ def main(emit, score, limit, seed, scale):
         if row["id"] not in truth:
             unknown.append(row["id"])
             continue
-        results.append((row["id"], score_one(truth[row["id"]], row.get("answer", []))))
+        answered[row["id"]] = row.get("answer", [])
+
+    # Scored against the *question set*, not against the answers file. An
+    # omitted question counts as an empty answer -- i.e. a refusal -- because
+    # dividing by the number answered would make skipping strictly better than
+    # refusing: answer the three you are sure of and score 100%. That inverts
+    # the incentive the `refused` metric exists to capture.
+    results = [(qid, score_one(expected, answered.get(qid, [])))
+               for qid, expected in truth.items()]
 
     if unknown:
         click.echo(f"!! {len(unknown)} answered ids are not in the question set "
@@ -215,9 +286,12 @@ def main(emit, score, limit, seed, scale):
     refused = sum(1 for _, s in results if s["refused"])
     correctly_none = sum(1 for _, s in results
                          if s["exact"] and s["expected_n"] == 0)
-    fabricated = sum(1 for _, s in results if s["fabricated"] and not s["exact"])
+    fabricated = sum(1 for _, s in results if s["fabricated"])
     click.echo("")
-    click.echo(f"scored {len(results)} answers")
+    click.echo(f"scored {len(results)} questions; "
+               f"answered {len(answered)}/{len(truth)}"
+               + (f", {len(truth) - len(answered)} unanswered (counted as refusals)"
+                  if len(answered) < len(truth) else ""))
     click.echo(f"  exact set match : {exact}/{len(results)} "
                f"= {100 * exact / len(results):.0f}%")
     click.echo(f"  mean Jaccard    : "
