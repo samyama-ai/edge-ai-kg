@@ -12,9 +12,18 @@ layer is **24,115 nodes, 73,825 edges**.
 | both layers -- what `python -m etl.loader` actually loads | 25,150 | 76,303 |
 | the real layer adds | +1,035 | +2,478 |
 
-The README quotes the both-layer figures, so the two pages disagreed by 1,035
-nodes with nothing saying why. They are the same graph counted to different
-edges; the `(+M real)` column below is the reconciliation.
+The README quotes both-layer figures, so the two pages disagreed by 1,035 nodes
+with nothing saying why. They are the same graph counted to different edges; the
+`(+M real)` column below is the reconciliation.
+
+**The both-layer row is a snapshot and nothing pins it.** The generated column
+is ours and deterministic from the seed, so it is asserted by
+`tests/test_schema_docs.py`. The `+1,035 / +2,478` comes from ONNX Runtime and
+MLPerf, which publish on their own schedule -- 734 kernel registrations became
+738 during one week of this backlog. **Other pages may therefore quote an
+earlier snapshot than this one**; where they disagree, the figures here were
+measured most recently, and #17 is the work that binds every page's published
+counts to a rebuild so the lag is caught rather than discovered.
 
 See [`data-provenance.md`](data-provenance.md) for what is real and what is
 synthetic, and [`engine-notes.md`](engine-notes.md) for the v1.7.0 behaviours
@@ -53,9 +62,9 @@ nodes. `tests/test_id_uniqueness.py` asserts the invariant.
 
 A count written `N (+M real)` is N from the generated layer plus M more once the
 real layer is loaded. **N is what the generated-layer total counts; N+M is what
-the both-layer total counts.** The eight labels with no `(+M real)` -- the
-clinical spine plus `ModelVariant` -- are generated only, so their two counts are
-the same number.
+the both-layer total counts.** The six labels with no `(+M real)` --
+`ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset` and
+`Certification` -- are generated only, so their two counts are the same number.
 
 The `(+M real)` figures are a snapshot of the current upstream dumps, not an
 invariant: ONNX Runtime's kernel registrations went 734 to 738 during one week
