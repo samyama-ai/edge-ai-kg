@@ -135,7 +135,19 @@ def questions(idx, limit: int) -> list[dict]:
                 "tool": "fallback_audit",
             })
 
+    # Enforced here, not by `out[:limit]` at the end. Section 1 emits at least
+    # one question per accelerator kind, so with 8 kinds and --limit 4 it
+    # produced 8 and the final truncation removed every blast question -- the
+    # regression the comment above claimed to have fixed.
+    out = out[:fallback_budget]
+
     # 2. Blast radius: which boards carry an accelerator that implements X.
+    #
+    # No provenance filter here, unlike section 1. Deliberate: "which boards can
+    # run this operator" is a question about the whole fleet as loaded, and a
+    # real ORT kernel on a real accelerator is a true answer to it. Section 1
+    # filters because it compares against a *synthetic* accelerator kind, where
+    # a real kernel would be answering a different question.
     op_by_name = {}
     for o in idx["op"].values():
         op_by_name.setdefault(o["name"], o["id"])
@@ -220,6 +232,11 @@ def main(emit, emit_truth, score, limit, seed, scale):
     if not emit and not emit_truth and not score:
         raise SystemExit("give --emit questions.jsonl, --emit-truth truth.jsonl "
                          "or --score answers.jsonl")
+    if score and (emit or emit_truth):
+        # `--emit --score` used to write the questions and return, ignoring the
+        # score with no indication it had been skipped.
+        raise SystemExit("--score cannot be combined with --emit/--emit-truth; "
+                         "emit first, answer, then score")
     try:
         _fleet, idx = build_index(seed, scale)
     except FileNotFoundError:
@@ -237,7 +254,14 @@ def main(emit, emit_truth, score, limit, seed, scale):
         # model, and shipping the ground truth in it would quietly produce a
         # very good score -- the one failure mode a harness like this must not
         # have.
-        asked = [{k: v for k, v in q.items() if k != "answer"} for q in qs]
+        # Every row carries the parameters that generated it. `--score` rebuilds
+        # the question set from its own defaults, so an --emit at one scale
+        # scored at another silently counts the regenerated ids as refusals --
+        # deflating the number this harness exists to produce, in the direction
+        # that makes a grounded run look worse than it is.
+        stamp = {"seed": seed, "scale": scale, "limit": limit}
+        asked = [{**{k: v for k, v in q.items() if k != "answer"}, **stamp}
+                 for q in qs]
         Path(emit).write_text("\n".join(json.dumps(q) for q in asked) + "\n",
                               encoding="utf-8")
         click.echo(f"wrote {len(qs)} questions (no answers) to {emit}")
@@ -249,9 +273,10 @@ def main(emit, emit_truth, score, limit, seed, scale):
                        f"'none' is a correct and checkable answer")
 
     if emit_truth:
+        stamp = {"seed": seed, "scale": scale, "limit": limit}
         Path(emit_truth).write_text(
-            "\n".join(json.dumps({"id": q["id"], "answer": q["answer"]}) for q in qs)
-            + "\n", encoding="utf-8")
+            "\n".join(json.dumps({"id": q["id"], "answer": q["answer"], **stamp})
+                      for q in qs) + "\n", encoding="utf-8")
         click.echo(f"wrote ground truth for {len(qs)} questions to {emit_truth}")
 
     if emit or emit_truth:
@@ -266,6 +291,14 @@ def main(emit, emit_truth, score, limit, seed, scale):
         if row["id"] not in truth:
             unknown.append(row["id"])
             continue
+        for key, mine in (("seed", seed), ("scale", scale), ("limit", limit)):
+            theirs = row.get(key)
+            if theirs is not None and theirs != mine:
+                raise SystemExit(
+                    f"{score} was produced with {key}={theirs!r} but this run "
+                    f"uses {key}={mine!r}. Scoring against a different question "
+                    f"set silently counts the regenerated ids as refusals -- "
+                    f"pass --{key} {theirs!r}.")
         answered[row["id"]] = row.get("answer", [])
 
     # Scored against the *question set*, not against the answers file. An
@@ -300,7 +333,7 @@ def main(emit, emit_truth, score, limit, seed, scale):
                f"{statistics.mean(s['recall'] for _, s in results):.3f}")
     click.echo(f"  refused (empty) : {refused}"
                + (f"   (+{correctly_none} correct 'none')" if correctly_none else ""))
-    click.echo(f"  fabricated names: {fabricated}")
+    click.echo(f"  answers containing a fabrication: {fabricated}")
     click.echo("")
     click.echo("Report both runs together. An ungrounded score is not meaningful "
                "on its own:\nthe fleet is fictional, so a low score is expected "

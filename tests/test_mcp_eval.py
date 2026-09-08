@@ -141,3 +141,37 @@ def test_formatting_differences_do_not_count_as_errors():
     assert mcp_eval.normalise('  "`Conv`" ') == "conv"
     # Normalisation must not merge genuinely different operators.
     assert mcp_eval.score_one(["Conv"], ["ConvTranspose"])["exact"] is False
+
+
+def test_both_question_families_survive_a_small_limit(built):
+    """`out[:limit]` used to drop every `blast/*` question.
+
+    Section 1 emits at least one question per accelerator kind, so with 8 kinds
+    and `--limit 4` it produced 8 and the final truncation removed the whole
+    blast family -- leaving no `kernel_blast_radius` coverage, with nothing
+    failing. The budget is now enforced before section 2 runs.
+    """
+    _fleet, idx = built
+    qs = mcp_eval.questions(idx, limit=3)
+    families = {q["id"].split("/", 1)[0] for q in qs}
+    assert families == {"fallback", "blast"}, (
+        f"at limit=3 the question set covers only {sorted(families)}; both "
+        f"families must survive or one MCP tool goes untested"
+    )
+    assert len(qs) <= 3, f"limit=3 produced {len(qs)} questions"
+
+
+def test_question_ids_are_unique(built):
+    """`truth = {q["id"]: ...}` silently collapses a duplicate.
+
+    Two models sharing a name would drop a question from the denominator
+    without anything saying so.
+    """
+    _fleet, idx = built
+    qs = mcp_eval.questions(idx, limit=20)
+    ids = [q["id"] for q in qs]
+    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    assert not duplicates, (
+        f"duplicate question ids {duplicates}; the truth dict would keep only "
+        f"the last of each and quietly shrink the question set"
+    )
