@@ -56,7 +56,13 @@ TWINS = {
 # given, so there is nothing to compare it against.
 NO_TWIN = {"run_cypher"}
 
-TOOL_DEF = re.compile(r"^@mcp\.tool\(\)[^\n]*\n(?:async\s+)?def\s+(\w+)", re.MULTILINE)
+# Decorator lines may sit between `@mcp.tool()` and the `def`. Requiring them to
+# be adjacent made a second decorator hide the tool from `tool_names()`, which
+# would quietly defeat the completeness check -- the one guard whose whole job is
+# that a new tool cannot skip these tests.
+TOOL_DEF = re.compile(
+    r"^@mcp\.tool\(\)[^\n]*\n(?:\s*@[^\n]*\n)*\s*(?:async\s+)?def\s+(\w+)",
+    re.MULTILINE)
 
 
 def mcp_source() -> str:
@@ -79,10 +85,45 @@ def tool_cypher(name: str) -> str:
     return re.sub(r"\{[^}]*\}", "?", match.group(1))
 
 
+# A line starting one of these begins a new clause; anything else continues the
+# previous one. Both files wrap long patterns across lines.
+CLAUSE_START = re.compile(
+    r"^\s*(OPTIONAL\s+MATCH|MATCH|WHERE|WITH|RETURN|ORDER\s+BY|LIMIT|SKIP|UNWIND)\b",
+    re.IGNORECASE)
+
+
+def clauses(cypher: str) -> list[str]:
+    """Whole clauses, with wrapped continuation lines folded back in.
+
+    Filtering `splitlines()` for lines that *start* with `MATCH` drops
+    continuations, and both files wrap. `EA04`'s pattern is written
+
+        MATCH (m:Model)<-[:VARIANT_OF]-(v:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+              -[:ON_BOARD]->(b:Board)
+
+    so the line-filter compared the first line and silently discarded
+    `-[:ON_BOARD]->(b:Board)` -- half the traversal, in the pair this file calls
+    its flagship case. EA03, EA06 and EA07 wrap the same way.
+    """
+    out: list[str] = []
+    for line in cypher.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # A line that is *only* a blanked interpolation stands in for a whole
+        # clause -- `operator_coverage` builds an optional `WHERE` that way --
+        # so it starts a clause rather than folding into the pattern above it.
+        whole_clause_param = stripped == "?"
+        if CLAUSE_START.match(line) or whole_clause_param or not out:
+            out.append(stripped)
+        else:
+            out[-1] += " " + stripped
+    return [re.sub(r"\s+", " ", c) for c in out]
+
+
 def match_patterns(cypher: str) -> list[str]:
-    return [re.sub(r"\s+", " ", line.strip())
-            for line in cypher.splitlines()
-            if re.match(r"^\s*(OPTIONAL\s+MATCH|MATCH)\b", line, re.IGNORECASE)]
+    return [c for c in clauses(cypher)
+            if re.match(r"^(OPTIONAL\s+MATCH|MATCH)\b", c, re.IGNORECASE)]
 
 
 def test_every_tool_is_either_twinned_or_declared_twinless():
@@ -147,11 +188,16 @@ def test_each_tool_projects_through_with_before_returning(tool):
 def test_each_tool_sorts_on_a_single_key(tool):
     """Engine note 3b: only the first `ORDER BY` key is honoured."""
     cypher = tool_cypher(tool)
-    match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher,
-                      re.DOTALL | re.IGNORECASE)
-    if not match:
+    ordering = [c for c in clauses(cypher)
+                if re.match(r"^ORDER\s+BY\b", c, re.IGNORECASE)]
+    if not ordering:
         pytest.skip(f"{tool} has no ORDER BY")
-    keys = [k.strip() for k in match.group(1).split(",") if k.strip()]
+    # Taken from the clause, not by regexing to `LIMIT`-or-end-of-string: with
+    # no LIMIT that capture swallowed the rest of the query, so a comma in a
+    # later RETURN list would have been counted as a second sort key.
+    body = re.sub(r"^ORDER\s+BY\s+", "", ordering[0], flags=re.IGNORECASE)
+    body = re.sub(r"\s+LIMIT\b.*$", "", body, flags=re.IGNORECASE)
+    keys = [k.strip() for k in body.split(",") if k.strip()]
     assert len(keys) == 1, (
         f"{tool} sorts on {len(keys)} keys ({keys}); only the first is honoured, "
         f"so the rest are a silent no-op (engine note 3b)"
