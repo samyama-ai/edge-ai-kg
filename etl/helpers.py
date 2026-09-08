@@ -53,6 +53,12 @@ def props_map(props: dict[str, Any]) -> str:
     return "{" + inner + "}"
 
 
+# The measured optimum for `create_edges`; see its docstring for the sweep.
+# Named rather than introspected, so the CLI default and the test that pins it
+# read the same constant instead of agreeing by construction.
+DEFAULT_EDGE_BATCH = 50
+
+
 def chunked(items: Sequence, size: int) -> Iterator[Sequence]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -70,7 +76,7 @@ def create_nodes(client, graph: str, label: str, rows: Sequence[dict],
 
 
 def create_edges(client, graph: str, edges: Sequence[tuple],
-                 batch: int = 50) -> int:
+                 batch: int = DEFAULT_EDGE_BATCH) -> int:
     """Batch-CREATE edges.
 
     Each edge is `(src_label, src_id, rel_type, tgt_label, tgt_id, props|None)`
