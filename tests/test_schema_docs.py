@@ -242,3 +242,90 @@ def test_every_edge_type_in_the_table_has_a_count():
         f"edge types whose Count cell is zero in both layers: {missing}. Either "
         f"the type is not built and should say so, or the count is wrong."
     )
+
+
+# --- the node table's Count column, the analogue of the edge check ----------
+
+
+def node_counts() -> dict[str, tuple[int, int]]:
+    """`{label: (generated, real)}` from the node table's Count column.
+
+    Same `N (+M real)` grammar as the edge table, parsed the same way, so the
+    two halves of the page cannot drift into different conventions.
+    """
+    text = SCHEMA_DOC.read_text(encoding="utf-8")
+    match = re.search(r"^## Node labels$(.*?)^## ", text, re.DOTALL | re.MULTILINE)
+    assert match, "no `## Node labels` section in docs/schema.md"
+    out = {}
+    for line in match.group(1).splitlines():
+        if not EDGE_ROW.match(line):
+            continue
+        cells = [c.replace(r"\|", "|").strip()
+                 for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        assert len(cells) == 3, (
+            f"node table row has {len(cells)} cells, expected 3: {line!r}"
+        )
+        cell = COUNT_CELL.match(cells[1])
+        assert cell, (
+            f"unparsed Count cell for {cells[0]}: {cells[1]!r}. Expected `N` or "
+            f"`N (+M real)`, the convention docs/schema.md states."
+        )
+        out[cells[0].strip("`")] = (
+            int(cell.group(1).replace(",", "")),
+            int((cell.group(2) or "0").replace(",", "")),
+        )
+    return out
+
+
+def test_the_node_counts_sum_to_the_stated_generated_total():
+    """#14: the page's bare counts are the generated layer, and say so.
+
+    They summed to 24,115 while the README quoted 25,145, and nothing on either
+    page said the two were counting to different edges. Only the generated
+    column is pinned -- the `(+M real)` figures move when ONNX Runtime or MLPerf
+    publish, exactly as for the edge table.
+    """
+    text = SCHEMA_DOC.read_text(encoding="utf-8")
+    stated = re.search(r"generated\s+layer is \*\*([\d,]+) nodes, ([\d,]+) edges\*\*",
+                       text)
+    assert stated, (
+        "docs/schema.md no longer states its generated-layer total in the form "
+        "`generated layer is **N nodes, M edges**`; update this test alongside "
+        "the rewording"
+    )
+    expected = int(stated.group(1).replace(",", ""))
+    counts = node_counts()
+    total = sum(generated for generated, _ in counts.values())
+    assert total == expected, (
+        f"the node table's generated counts sum to {total:,}, but the page "
+        f"states {expected:,} -- a difference of {expected - total:,}. Rows: "
+        f"{ {k: v[0] for k, v in sorted(counts.items())} }"
+    )
+
+
+def test_every_node_label_row_declares_its_layer():
+    """A bare count means "generated only", so it must really be generated only.
+
+    Catches the row that gains real nodes upstream and keeps a bare count --
+    which is how `Accelerator` read 85 while the loader created 91.
+    """
+    bare = {label for label, (_gen, real) in node_counts().items() if real == 0}
+    generated_only = {
+        "ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
+        "Dataset", "Certification",
+    }
+    # Equality, not a one-way subset. The subset form caught a label that gained
+    # real nodes and kept a bare count, but not the reverse -- a label listed
+    # here that quietly gained a `(+M real)` cell -- and it let the prose claim
+    # "eight labels" while the table had six, with nothing to contradict it on a
+    # page whose whole subject is counts that add up.
+    assert bare == generated_only, (
+        f"the set of generated-only labels changed.\n"
+        f"  bare count but absent from `generated_only`: "
+        f"{sorted(bare - generated_only)}\n"
+        f"  listed in `generated_only` but now carrying `(+M real)`: "
+        f"{sorted(generated_only - bare)}\n"
+        f"A bare count asserts 'the real layer never adds to this'. Either write "
+        f"`N (+M real)` in docs/schema.md, or amend `generated_only` here -- and "
+        f"check the prose above the table, which states how many there are."
+    )
