@@ -1,6 +1,6 @@
 # Why this engine, and where it loses
 
-Closes #44, #50, #51, #52 under the tracking issue #43.
+Part of the differentiation work tracked in #43.
 
 Neo4j, Memgraph, KuzuDB, ArangoDB and TigerGraph all exist and are mature.
 "Why not just use Neo4j" is the first question a technical reader asks, and a
@@ -216,7 +216,7 @@ embedded, so neither competes on the axis this repo cares about.
 
 ---
 
-## 3b. Embedded and in-process — the claim worth leading with (#44)
+## 4. Embedded and in-process — the claim worth leading with (#44)
 
 This is the one differentiator that is **architectural rather than a benchmark**,
 so no tuning flag on the other side overturns it.
@@ -243,7 +243,8 @@ throws it away — it is a timing exercise, not a way to prepare data (#4).
 
 That reframes the 2.5 ms honestly: it is the time to a *usable engine*, not to
 a *loaded graph*. Querying **this** graph in a fresh process means loading it
-first, which is ~25 s at `--scale 1.0` (see the ingest table above). The options
+first, which is ~25 s at `--scale 1.0` — the figure `python -m etl.loader`
+prints on its `[4/4] loading edges` line. The options
 are to build the graph inside your process — as every demo and test here does —
 or to run the HTTP server and pay a network hop instead.
 
@@ -251,7 +252,7 @@ So the fair statement is: **zero-install and instant to start, and you pay for
 the data every process.** A snapshot import is the escape hatch from that and is
 still unmeasured (#45).
 
-## 4. What this engine actually has, measured
+## 5. What this engine actually has, measured
 
 Kept short deliberately: the claims that can be reproduced today.
 
@@ -260,7 +261,7 @@ Kept short deliberately: the claims that can be reproduced today.
 | Runs in-process, no server, no install beyond `pip` | **Measured** | 2.5 ms cold to first query; every test and demo does it |
 | Embedded mode does not persist — every process reloads | **Measured** | #4; ~25 s for this graph |
 | Apache-2.0, embeddable and redistributable | **Quoted** | [`LICENSE`](../LICENSE) |
-| ~52K nodes/s, ~3.1K edges/s ingest | **Measured** | `python -m benchmarks.ingest` (#10) |
+| ~52K nodes/s, ~3.1K edges/s ingest | **Measured, no command on this branch** | figures from #10, which adds the `benchmarks.ingest` module that reproduces them |
 | `id` indexes are load-critical — 10.6x | **Measured** | #18 |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
 | Snapshot import "well under a second" | **Unmeasured** | #45 |
