@@ -1,9 +1,16 @@
 """Build and load the Edge AI deployment graph into Samyama.
 
 Usage:
-    python -m etl.loader                          # embedded engine, default scale
-    python -m etl.loader --url http://127.0.0.1:8080
+    python -m etl.loader --url http://127.0.0.1:8080   # loads a graph you can query
+    python -m etl.loader                               # embedded: TIMING ONLY
     python -m etl.loader --scale 4
+
+**Without `--url` the graph is discarded when this process exits** (#4).
+`SamyamaClient.embedded()` runs the engine in-process and in-memory, so a
+following `python -m benchmarks.run_benchmark` -- also embedded by default --
+finds nothing, with no error to explain why. The bare form is a
+timing and verification exercise, not a way to prepare data, and it says so on
+exit rather than leaving a newcomer to discover it.
 """
 from __future__ import annotations
 
@@ -95,7 +102,10 @@ def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
 
 @click.command()
 @click.option("--url", default=None,
-              help="Samyama server URL, e.g. http://127.0.0.1:8080. Omit for embedded.")
+              help="Samyama server URL, e.g. http://127.0.0.1:8080. Omit for "
+                   "embedded -- but note that an embedded load is DISCARDED when "
+                   "this process exits (#4), so it is a timing exercise rather "
+                   "than a way to prepare data.")
 @click.option("--graph", default="default", show_default=True,
               help="Target graph / tenant. Accepted and IGNORED on the OSS build -- everything lands in 'default' whatever you pass (engine note 7). Kept because the engine takes the argument and a future build may honour it.")
 @click.option("--seed", type=int, default=gen.DEFAULT_SEED, show_default=True)
@@ -240,6 +250,28 @@ def main(url, graph, seed, scale, limit, regenerate, reset, layers, verify):
                   "binds twice and one submitted edge is created twice.")
         if missing or surplus:
             sys.exit(1)
+
+    if not url:
+        # #4: the load succeeded and is about to be thrown away. Said last, and
+        # on stderr, because everything above it reads like a successful load --
+        # the per-label counts, the timings, and `verified: N nodes` are all
+        # true right up to the moment this process exits.
+        for line in (
+            "",
+            "  ! this graph was NOT persisted.",
+            "    Embedded mode is in-process and in-memory, so everything above is",
+            "    gone when this command exits. A following",
+            "    `python -m benchmarks.run_benchmark` -- also embedded by default --",
+            "    will find an empty graph and not say why.",
+            "",
+            "    To keep it, run the server and point both commands at it:",
+            "      ./target/release/samyama --http-port 8080",
+            "      python -m etl.loader --url http://127.0.0.1:8080",
+            "      python -m benchmarks.run_benchmark --url http://127.0.0.1:8080",
+            "",
+            "    Without --url this command is a timing and verification exercise (#4).",
+        ):
+            click.echo(line, err=True)
 
 
 if __name__ == "__main__":
