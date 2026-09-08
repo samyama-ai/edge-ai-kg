@@ -21,7 +21,7 @@ Omit `--url` to run against an in-process embedded engine.
 > command and queried by the next. The figures below are kept as the last
 > recorded run rather than silently restated for 16 queries.
 > `README.md` quotes a later 16-query run: all 16 return rows, median 14 ms,
-> slowest 73 ms, on 25,145 nodes / 76,291 edges.
+> slowest 73 ms, on 25,150 nodes / 76,303 edges.
 
 Samyama Graph v1.7.0 OSS, 24,115 nodes / 73,825 edges, server on localhost:
 

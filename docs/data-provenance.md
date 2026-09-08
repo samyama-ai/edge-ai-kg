@@ -10,8 +10,8 @@ WITH k.provenance AS provenance, k.source AS source, count(k.id) AS kernels
 RETURN provenance, source, kernels ORDER BY kernels DESC
 ```
 
-At `--scale 1.0` the graph is **25,145 nodes / 76,291 edges**, of which
-**1,030 nodes are real** and 24,115 generated.
+At `--scale 1.0` the graph is **25,150 nodes / 76,303 edges**, of which
+**1,035 nodes are real** and 24,115 generated.
 
 ## Real
 
@@ -106,7 +106,7 @@ quoted as achievable.
 ### Keeping the layers apart
 
 `python -m etl.loader --layers real` loads **only** the public-source subgraph
-(1,235 nodes / 2,466 edges) -- no generated data at all. `--layers synthetic`
+(1,240 nodes / 2,478 edges) -- no generated data at all. `--layers synthetic`
 does the inverse. The default loads both.
 
 Because provenance is a property, a query can always scope itself:
