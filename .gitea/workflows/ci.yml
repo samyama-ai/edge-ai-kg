@@ -24,14 +24,33 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Printed before anything can fail, so a future red run says *where* it
+      # is running rather than only that it stopped. The first failure of this
+      # workflow was a 0s step with no output, and this is what would have
+      # identified it in one look.
+      - name: Runner environment
+        run: |
+          echo "user   : $(id -un) (uid $(id -u))"
+          echo "sudo   : $(command -v sudo || echo 'not installed')"
+          echo "apt-get: $(command -v apt-get || echo 'not installed')"
+          echo "python : $(python --version 2>&1)"
+          echo "os     : $(cat /etc/os-release 2>/dev/null | head -1 || uname -a)"
+
       # `samyama` publishes only a macOS wheel plus an sdist, so Linux builds
       # the Rust extension from source. On a bare runner that fails twice --
       # first on a missing linker, then on zstd-sys bindgen not finding
       # stddef.h. clang supplies the builtin headers; see CLAUDE.md.
       - name: Install build prerequisites
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          set -eux
+          # `sudo` is not a given. Gitea's act_runner images typically run as
+          # root and ship no sudo, so an unconditional `sudo apt-get` fails
+          # instantly with "command not found" -- which is exactly how this
+          # workflow failed on its first real run (0s at this step, after
+          # checkout and setup-python had both succeeded).
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
             build-essential python3-dev clang libclang-dev
 
       # The cargo build is the slowest step by far (~3 min cold).
