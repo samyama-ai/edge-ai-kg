@@ -24,12 +24,20 @@ SRC_ORT = "onnxruntime"
 SRC_TINY = f"mlperf-tiny-{tiny.ROUND}"
 
 # ONNX Runtime execution provider -> Accelerator node metadata.
+# (display name, kind, is_cpu_fallback).
+#
+# The third element is the point: whether running here *is* the CPU fallback is
+# decided when the device is added to this table, not by comparing its `kind`
+# against a literal somewhere else (#69). An entry added without a verdict is a
+# tuple-arity error rather than a silent misclassification -- which is what
+# `1 if kind == "CPU" else 0` would have given for a future
+# `("OpenVINO CPU EP", "CPU-OpenVINO")`.
 ORT_DEVICES = {
-    "ort-cpu": ("ONNX Runtime CPU EP", "CPU"),
-    "ort-cuda": ("ONNX Runtime CUDA EP", "GPU-CUDA"),
-    "ort-dml": ("ONNX Runtime DirectML EP", "GPU-DirectML"),
-    "ort-rocm": ("ONNX Runtime ROCm EP", "GPU-ROCm"),
-    "ort-trt": ("ONNX Runtime TensorRT EP", "GPU-TensorRT"),
+    "ort-cpu": ("ONNX Runtime CPU EP", "CPU", 1),
+    "ort-cuda": ("ONNX Runtime CUDA EP", "GPU-CUDA", 0),
+    "ort-dml": ("ONNX Runtime DirectML EP", "GPU-DirectML", 0),
+    "ort-rocm": ("ONNX Runtime ROCm EP", "GPU-ROCm", 0),
+    "ort-trt": ("ONNX Runtime TensorRT EP", "GPU-TensorRT", 0),
 }
 
 
@@ -42,10 +50,16 @@ def add_ort_layer(fleet: Fleet, kernels: list[ort.OrtKernel],
     }], provenance="real", source=SRC_ORT)
 
     used_devices = sorted({k.device_id for k in kernels})
+    # An unrecognised device id is assumed to be an accelerator (0), not a
+    # fallback. Deliberate: guessing "accelerator" at worst omits a model from
+    # the CPU-only answer, where an operator notices; guessing "fallback" would
+    # hide one that is genuinely accelerated.
+    described = {dev: ORT_DEVICES.get(dev, (dev, "Unknown", 0)) for dev in used_devices}
     fleet.add_nodes("Accelerator", [{
         "id": f"accel:{dev}",
-        "name": ORT_DEVICES.get(dev, (dev, "Unknown"))[0],
-        "kind": ORT_DEVICES.get(dev, (dev, "Unknown"))[1],
+        "name": described[dev][0],
+        "kind": described[dev][1],
+        "is_cpu_fallback": described[dev][2],
     } for dev in used_devices], provenance="real", source=SRC_ORT)
 
     for dev in used_devices:
@@ -113,7 +127,19 @@ def add_mlperf_layer(fleet: Fleet, results: list[tiny.TinyResult]) -> None:
 
         if r.accelerator:
             aid = f"accel:{tiny.slug(r.accelerator)}"
-            accels.setdefault(aid, {"id": aid, "name": r.accelerator, "kind": "NPU"})
+            # Every MLPerf submission's named accelerator is taken to be an
+            # NPU, and therefore not a fallback target. That was cosmetic while
+            # `kind` only labelled things; since #69 it is an input to the hero
+            # question, so state the assumption: a submission whose named
+            # accelerator is really a CPU core would enter the graph asserted as
+            # an accelerator, and no test can see it -- both the flag and the
+            # ground truth derive from `kind`, so a wrong `kind` propagates to a
+            # wrong flag and the two agree. The direction matches the ORT
+            # `Unknown` fall-through: guessing "accelerator" at worst omits a
+            # model from the CPU-only answer, where an operator notices, rather
+            # than hiding one that is genuinely accelerated.
+            accels.setdefault(aid, {"id": aid, "name": r.accelerator,
+                                    "kind": "NPU", "is_cpu_fallback": 0})
 
         if r.inference_framework and r.inference_framework not in ("N/A", "None"):
             rid = f"runtime:{tiny.slug(r.inference_framework)}"

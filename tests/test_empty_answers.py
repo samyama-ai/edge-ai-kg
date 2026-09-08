@@ -95,8 +95,13 @@ def fleet_with_coverage(*, hardswish_is_cpu_only: bool):
                   {"id": "op2", "name": "HardSwish", "category": "activation",
                    "domain": "ai.onnx"}])
     # `<>` matches a null property on this engine, so `kind` is always set.
+    # `is_cpu_fallback` is what EA11 filters on since #69 -- it used to infer
+    # "is a CPU" from `kind <> "MCU-CPU"`, which read ONNX Runtime's CPU
+    # execution provider as an accelerator. A fixture omitting it leaves the
+    # property null, and note 8 means a null here is not merely "not 0".
     create_nodes(client, GRAPH, "Accelerator",
-                 [{"id": "npu", "kind": "NPU-Lite"}, {"id": "cpu", "kind": "MCU-CPU"}])
+                 [{"id": "npu", "kind": "NPU-Lite", "is_cpu_fallback": 0},
+                  {"id": "cpu", "kind": "MCU-CPU", "is_cpu_fallback": 1}])
     create_nodes(client, GRAPH, "Kernel",
                  [{"id": "k1", "execution_provider": "CPUExecutionProvider"},
                   {"id": "k2", "execution_provider": "CPUExecutionProvider"}])

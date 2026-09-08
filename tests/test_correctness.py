@@ -100,17 +100,58 @@ def test_ea11_cpu_only_models_match_ground_truth(loaded):
     """
     client, fleet = loaded
     idx = index(fleet)
-    kind = {a["id"]: a["kind"] for a in fleet.nodes["Accelerator"]}
+    accel = {a["id"]: a for a in fleet.nodes["Accelerator"]}
     name = {m["id"]: m["name"] for m in fleet.nodes["Model"]}
     op_name = {o["id"]: o["name"] for o in fleet.nodes["Operator"]}
+
+    # Derived from the source definitions, NOT from `is_cpu_fallback` -- the
+    # property EA11 filters on. An earlier version computed truth with the same
+    # `kind != "MCU-CPU"` rule the query used, so the two agreed with each other
+    # while both treating ONNX Runtime's CPU provider as an accelerator (#69).
+    # A ground truth that restates the query cannot check the query's premise,
+    # so this rebuilds the notion of "is a CPU" from `ORT_DEVICES` and checks
+    # the flag as well as the query.
+    #
+    # Not fully independent, and worth not overselling: `cpu_kinds` is the union
+    # of the same two rules the implementation applies, so it agrees by
+    # construction unless one side is edited. What it does catch is exactly
+    # that -- one side drifting, including `add_mlperf_layer`'s hardcoded
+    # `kind: "NPU"` -- which is the realistic failure, not a conspiracy.
+    from etl.real_layer import ORT_DEVICES
+    # Read from the source tables, not from `is_cpu_fallback` -- the property
+    # EA11 filters on -- so this checks the flag as well as the query.
+    #
+    # An earlier version wrote `{kind for _, kind in ORT_DEVICES.values()
+    # if kind == "CPU"}` and claimed it would pick up a future CPU-ish entry.
+    # It would not: that reduces to {"CPU"}, so a `("OpenVINO CPU EP",
+    # "CPU-OpenVINO")` would be classified as an accelerator by the test and by
+    # the implementation alike, agreeing with each other and both wrong.
+    # `ORT_DEVICES` now carries the verdict as its third element, so this reads
+    # the decision instead of re-deriving it from a spelling.
+    cpu_kinds = {"MCU-CPU"} | {kind for _name, kind, fallback in ORT_DEVICES.values()
+                               if fallback}
+
+    def is_fallback_target(accelerator_id: str) -> bool:
+        row = accel.get(accelerator_id)
+        return bool(row) and row["kind"] in cpu_kinds
 
     runs = {}
     for k, a, _ in idx["out"]["RUNS_ON"]:
         runs.setdefault(k, set()).add(a)
     accelerated = {
         op for k, op, _ in idx["out"]["IMPLEMENTS"]
-        if any(kind.get(a) != "MCU-CPU" for a in runs.get(k, ()))
+        if any(not is_fallback_target(a) for a in runs.get(k, ()))
     }
+
+    # The flag EA11 reads must agree with that independent derivation, or the
+    # comparison below is checking the query against itself again.
+    disagreeing = [a["id"] for a in fleet.nodes["Accelerator"]
+                   if bool(a.get("is_cpu_fallback")) != (a["kind"] in cpu_kinds)]
+    assert not disagreeing, (
+        f"`is_cpu_fallback` disagrees with the kind it is derived from for "
+        f"{disagreeing[:5]}. EA11 filters on the flag, so a wrong flag is a "
+        f"wrong answer that this test would otherwise inherit."
+    )
     uses = {}
     for m, op, _ in idx["out"]["USES_OPERATOR"]:
         if m in name:                      # :Model only -- SignalStage also uses operators

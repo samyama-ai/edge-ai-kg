@@ -217,7 +217,7 @@ ORDER BY avg_fallback_fraction DESC
         "cypher": """
 MATCH (m:Model)-[:USES_OPERATOR]->(op:Operator)
 OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op), (k)-[:RUNS_ON]->(a:Accelerator)
-WHERE a.kind <> "MCU-CPU"
+WHERE a.is_cpu_fallback = 0
 WITH m, op, count(k) AS accel_kernels
 WHERE accel_kernels = 0
 RETURN m.name AS model, m.family AS family,

@@ -325,6 +325,11 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
                 "clock_mhz": rng.choice([100, 200, 400, 600, 800, 1000, 1400]),
                 "opset_ceiling": opset_ceiling,
                 "energy_factor": energy,
+                # Whether running here *is* the CPU fallback, rather than
+                # acceleration. Explicit because the catalog used to infer it
+                # from `kind <> "MCU-CPU"`, which reads ONNX Runtime's CPU
+                # execution provider (kind "CPU") as an accelerator (#69).
+                "is_cpu_fallback": 1 if kind == "MCU-CPU" else 0,
                 "_cats": cats, "_soc": soc["id"],
             })
     fleet.add_nodes("SoC", [{k: v for k, v in s.items() if not k.startswith("_")} for s in socs])
