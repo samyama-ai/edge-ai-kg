@@ -1,7 +1,5 @@
 # The vector half: what it is for here, and why it does not work yet
 
-Closes #48.
-
 The convergence pitch is graph traversal and vector search in one binary. This
 KG uses the graph half and nothing else, and #48 asks whether the obvious
 application works: **a model arrives carrying an operator this graph has never
@@ -48,16 +46,21 @@ subclass — so an `except Exception` around the call does not catch it.
 import math, random
 from samyama import SamyamaClient
 
+client = SamyamaClient.embedded()
+client.query('CREATE (:T {id: "a"}), (:T {id: "b"})', "default")
+ids = [r[0] for r in client.query("MATCH (t:T) RETURN id(t)", "default").records]
+
 v = [random.random() for _ in range(8)]
 n = math.sqrt(sum(x * x for x in v))
-v = [x / n for x in v]                      # a normalised random vector
+v = [x / n for x in v]                       # a normalised random vector
 
-client = SamyamaClient.embedded()
-# ... create two nodes labelled T, take their id() values ...
 client.create_vector_index("T", "emb", dimensions=8, metric="cosine")
-client.add_vector("T", "emb", id_a, v)
-client.add_vector("T", "emb", id_b, v)      # PANIC
+client.add_vector("T", "emb", ids[0], v)
+client.add_vector("T", "emb", ids[1], v)     # PANIC
 ```
+
+Runs as pasted. `python -m benchmarks.vector_probe --repro` is the same thing as
+a command, and `--collisions` reproduces the embedding table below.
 
 ### What triggers it, measured
 
@@ -82,9 +85,12 @@ duplicates" passes and "40 + 4" does not.
 
 Volume alone is fine. 336 distinct vectors index and search without complaint.
 
-### It is not the metric
+## The metric argument is not validated
 
-Every metric panics on the same two-call reproduction:
+This is a separate finding from the panic, and useful on its own.
+
+Every metric panics on the same two-call reproduction, so the panic is not
+metric-specific:
 
 | `metric=` | duplicate add + search |
 |---|---|
@@ -108,20 +114,30 @@ Measured on this graph's 376 operators with a 64-dimension character-trigram
 embedding:
 
 ```
-376 operators -> 344 distinct embeddings; 26 collide
+376 operators -> 344 distinct embeddings
+                 26 collision groups, covering 58 operators
   collision: ['AveragePool', 'AveragePool', 'AveragePool']
   collision: ['BatchNormalization', 'BatchNormalization']
   collision: ['Conv', 'Conv', 'Conv']
 ```
 
-Those are the same operator name at several opset versions and domains — real
-rows in this graph, not an artefact of the embedding.
+`376 - 344 = 32` is the number of *surplus* rows; the 58 is how many operators
+sit in a group with at least one other. Those are the same operator name at
+several opset versions and domains — real rows in this graph, not an artefact of
+the embedding.
 
-**Deduplicating exact vectors is not enough.** After collapsing the 376 to 307
-distinct embeddings, every `add_vector` succeeded and **`vector_search` then
-panicked** — so vectors that are merely *close* trip the same assertion. Any
-embedding worth using puts `Conv` and `ConvTranspose` close together; that is
-what an embedding is for.
+**Deduplicating exact vectors is not enough.** The experiment holds out 40
+operators as "unseen", leaving 336 to index; those 336 collapse to **307**
+distinct embeddings. Every one of the 307 `add_vector` calls succeeded and
+**`vector_search` then panicked** — so vectors that are merely *close* trip the
+same assertion.
+
+(344 and 307 are counts of different sets: 344 distinct embeddings across all
+376 operators, 307 across the 336 that remain after the hold-out. Both are
+reproducible with `python -m benchmarks.vector_probe --collisions`.)
+
+Any embedding worth using puts `Conv` and `ConvTranspose` close together; that
+is what an embedding is for.
 
 ## So the honest position
 

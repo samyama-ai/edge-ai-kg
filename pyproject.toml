@@ -53,6 +53,12 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # graph -- not a weak RNG standing in for a secure one.
 "etl/generate.py" = ["S311"]
 
+# S311 for the same reason: the probe's vectors and hold-out are seeded so the
+# panic and the collision counts reproduce exactly. S324: md5 is used as a
+# cheap hash to bucket character n-grams into embedding dimensions -- it is a
+# hashing-trick index, never a digest of anything that matters.
+"benchmarks/vector_probe.py" = ["S311", "S324"]
+
 # S101: asserts are what a test is. S110: cleanup between fixtures is
 # best-effort by design -- failing to delete leftover nodes must not mask the
 # assertion the test exists to make. PERF203: the catalog sweep catches
