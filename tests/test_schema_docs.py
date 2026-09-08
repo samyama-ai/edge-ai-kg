@@ -314,9 +314,18 @@ def test_every_node_label_row_declares_its_layer():
         "ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
         "Dataset", "Certification",
     }
-    unexpected = bare - generated_only
-    assert not unexpected, (
-        f"labels with a bare count that the real layer may add to: "
-        f"{sorted(unexpected)}. Either write `N (+M real)`, or add the label to "
-        f"`generated_only` here because etl/real_layer.py genuinely never emits it."
+    # Equality, not a one-way subset. The subset form caught a label that gained
+    # real nodes and kept a bare count, but not the reverse -- a label listed
+    # here that quietly gained a `(+M real)` cell -- and it let the prose claim
+    # "eight labels" while the table had six, with nothing to contradict it on a
+    # page whose whole subject is counts that add up.
+    assert bare == generated_only, (
+        f"the set of generated-only labels changed.\n"
+        f"  bare count but absent from `generated_only`: "
+        f"{sorted(bare - generated_only)}\n"
+        f"  listed in `generated_only` but now carrying `(+M real)`: "
+        f"{sorted(generated_only - bare)}\n"
+        f"A bare count asserts 'the real layer never adds to this'. Either write "
+        f"`N (+M real)` in docs/schema.md, or update this set -- and check the "
+        f"prose above the table, which states how many there are."
     )
