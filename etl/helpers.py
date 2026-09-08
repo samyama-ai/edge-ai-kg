@@ -53,6 +53,12 @@ def props_map(props: dict[str, Any]) -> str:
     return "{" + inner + "}"
 
 
+# The measured optimum for `create_edges`; see its docstring for the sweep.
+# Named rather than introspected, so the CLI default and the test that pins it
+# read the same constant instead of agreeing by construction.
+DEFAULT_EDGE_BATCH = 50
+
+
 def chunked(items: Sequence, size: int) -> Iterator[Sequence]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -70,11 +76,31 @@ def create_nodes(client, graph: str, label: str, rows: Sequence[dict],
 
 
 def create_edges(client, graph: str, edges: Sequence[tuple],
-                 batch: int = 100) -> int:
+                 batch: int = DEFAULT_EDGE_BATCH) -> int:
     """Batch-CREATE edges.
 
     Each edge is `(src_label, src_id, rel_type, tgt_label, tgt_id, props|None)`
     and endpoints are looked up by their unique `id` property.
+
+    `batch` is 50 rather than a rounder 100 because the cost is superlinear in
+    the number of `MATCH` patterns one statement carries, not in the number of
+    statements. Measured at `--scale 1.0`, embedded (#10):
+
+        batch  40     50     60     75    100    200
+      edges/s  3,010  3,140  3,146  2,886  2,594  1,553
+
+    Doubling the batch to 100 costs 21% of the throughput, and 200 costs 51%,
+    because 4.5x the patterns takes 9.7x the time. Below ~40 the per-statement
+    overhead takes over again, so 50-60 is a floor rather than a peak; 50 is the
+    conservative end of it.
+
+    The optimum drifts with graph size -- `--scale 0.3` peaks at 40 rather than
+    50-60 -- so 50 is chosen as a value inside the flat region at both, not as a
+    tuned maximum for one scale.
+
+    `python -m benchmarks.ingest --sweep-edge-batch` reproduces the table. Note
+    it is a property of this engine's join planning, not of the data -- re-run
+    it against a new build before assuming the optimum has not moved.
     """
     total = 0
     for group in chunked(edges, batch):

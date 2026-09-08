@@ -482,6 +482,59 @@ Everything the catalog depends on, other than the above:
 — though see note 10 on chaining two of them against the embedded build —
 variable-length paths (`-[:R*0..3]->`), `shortestPath`, `CASE`, `IN`, `SKIP` / `LIMIT`, string functions, `EXPLAIN`, and `CREATE INDEX`.
 
-Load throughput on this box (RTX 4050 laptop, server on localhost):
-~35K nodes/s batched 250-per-`CREATE`, ~3.1K edges/s batched 100-per-statement
-using `MATCH ... WHERE id = ... CREATE`.
+## Load throughput, measured (#10)
+
+`python -m benchmarks.ingest` reports this, so it is a re-runnable artifact
+rather than a sentence here. On this box (RTX 4050 laptop), embedded build,
+`--scale 1.0`, 25,150 nodes and 76,303 edges, medians of 3:
+
+| | rate | batch |
+|---|---:|---|
+| nodes | **~52K/s** | 250 per `CREATE` |
+| edges | **~3.1K/s** | 50 per statement |
+
+**The per-item gap is ~17-21x, not the 11x this file used to imply.** The old
+figures paired a stale node rate (~35K/s) with the edge rate, which understated
+it. The gap moves with scale -- 18x at `--scale 0.3`, 21x at 1.0 -- because the
+edge cost grows with graph size while the node cost does not.
+
+### Why edges are slower, and what it is *not*
+
+A node `CREATE` writes. An edge `CREATE` **looks up two endpoints and then
+writes**: `etl/helpers.py:create_edges` emits one `MATCH` pattern per distinct
+endpoint in the batch, constrains them in one `WHERE`, then creates the
+relationships. A 50-edge batch is one statement carrying ~37 patterns.
+
+That statement is the entire cost, and it is **superlinear in patterns per
+statement**:
+
+| edges/batch | patterns/stmt | ms/stmt | edges/s |
+|---:|---:|---:|---:|
+| 40 | 30 | 13.3 | 3,010 |
+| 50 | 37 | 15.9 | **3,140** |
+| 60 | 44 | 19.1 | **3,146** |
+| 75 | 54 | 26.0 | 2,886 |
+| 100 | 71 | 38.5 | 2,594 |
+| 200 | 136 | 128.6 | 1,553 |
+
+4.5x the patterns costs 9.7x the time, roughly `O(p^1.5)` steepening toward
+`O(p^2)`. Node batching is **flat** by contrast -- 52-53K/s at every size from
+100 to 2000 -- which is the control that isolates the cause to the lookup rather
+than to writing.
+
+`create_edges` batches 50 for this reason; it was 100, which costs 21% of edge
+throughput. Reproduce with `python -m benchmarks.ingest --sweep-edge-batch`.
+This is a property of this build's join planning, so re-measure before assuming
+the optimum has not moved.
+
+**Two things that do not help.** Reordering edges: the `Fleet`'s natural order
+already dedups endpoints well (56,823 patterns at batch 50 against a 152,606
+ceiling), sorting by source is a wash, and sorting by target or relationship
+type is 38% *worse* because it breaks up runs of edges sharing a source. Bigger
+batches: total patterns actually *fall* as batches grow (51,112 at 250 vs 56,823
+at 50) while time doubles, which is what rules out pattern count as the driver.
+
+**The `id` indexes dominate everything above.** Without them the same edge load
+takes 234s instead of 22s, a 10.6x penalty, because each endpoint lookup becomes
+a label scan (#18). The numbers here all assume `schema/edge_ai_kg.cypher` has
+been applied.
