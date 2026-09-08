@@ -379,6 +379,10 @@ KNOWN_UNINDEXED = {
     ("Deployment", "fits"),               # EA06, EA07 and the demo
     ("Deployment", "latency_ms"),
     ("Board", "battery_powered"),         # demo/demo.py
+    # EA11 (#69). Measured on its own: adding this index moved EA11 from
+    # 105.6ms to 115.5ms and the catalog from 541ms to 615ms -- slower, because
+    # Accelerator has 91 rows and the index is overhead a scan does not need.
+    ("Accelerator", "is_cpu_fallback"),
 }
 
 

@@ -41,7 +41,7 @@ and what does it cost me when it can't?**
 | `ModelVariant` | 240 | id, name, precision, size_kb, accuracy, format |
 | `Operator` | 205 (+171 real) | id, name, domain, since_version, version_count, category, is_control_flow |
 | `Board` | 120 (+14 real) | id, name, form_factor, price_usd, power_budget_mw, ram_kb, flash_kb, year, battery_powered |
-| `Accelerator` | 85 (+6 real) | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor |
+| `Accelerator` | 85 (+6 real) | id, name, kind, gops_int8, sram_kb, clock_mhz, opset_ceiling, energy_factor, is_cpu_fallback |
 | `Model` | 60 (+4 real) | id, name, family, task, params_k, macs_m |
 | `SoC` | 40 (+12 real) | id, name, process_nm, cpu_arch, cpu_mhz, cores |
 | `ClinicalTask` | 18 | id, name, category, latency_budget_ms, min_sensitivity |
@@ -209,26 +209,32 @@ appear as soon as a dump mentions them. Having no archetype, none of them
 carries an `opset_ceiling`, a category list, a `gops_int8` or an
 `energy_factor`.
 
-**This changes catalog answers, and it is not a rounding difference.** `EA11`
-asks which models fall back to the CPU and filters `WHERE a.kind <> "MCU-CPU"`.
-ONNX Runtime's CPU execution provider is spelled `CPU`, so it does not match the
-filter and its kernels count as *acceleration*. Measured at `--scale 1.0`:
+**This changed catalog answers, and #69 fixed it.** `EA11` asks which models
+fall back to the CPU. It used to filter `WHERE a.kind <> "MCU-CPU"`, so ONNX
+Runtime's CPU execution provider -- spelled `CPU` -- did not match, and its
+kernels counted as *acceleration*. Measured at `--scale 1.0`:
 
-| | generated layer only | both layers |
+| models EA11 reports as CPU-only | generated only | both layers |
 |---|---:|---:|
-| models EA11 reports as CPU-only | 60 | **12** |
-| top-ten operator counts | `[12, 11, 10, 10, 10, 9, 9, 9, 9, 9]` | `[1, 1, 1, ...]` |
+| old rule, `kind <> "MCU-CPU"` | 60 | **12** |
+| new rule, `is_cpu_fallback = 0` | 60 | **20** |
 
-55 of the 149 operators a generated model uses flip to "accelerated" when the
-real layer loads; 54 of those are reachable through `kind = "CPU"` alone.
-Whether a CPU execution provider should count as acceleration is a catalog
-decision rather than a documentation one -- filed as its own issue. `EA05` and
-`EA08` also group by `kind` and gain four extra rows for the same reason.
+`Accelerator.is_cpu_fallback` is now set where each accelerator is created --
+`1` for `MCU-CPU` and for ONNX Runtime's CPU provider, `0` otherwise -- so the
+classification lives with the definition instead of being inferred from a string
+in a query. The generated layer is unchanged, because `MCU-CPU` is its only CPU;
+the real layer recovers 8 models the spelling had hidden. Not all 60: CUDA and
+DirectML are genuine accelerators, so operators they implement are correctly not
+CPU-only.
+
+`EA05` and `EA08` still group by `kind` and gain four extra rows, which is a
+presentation difference rather than a wrong answer.
 
 `tests/test_accelerator_kinds.py` pins the vocabulary: that the generated layer
 uses exactly the archetype kinds, that the real layer uses none of them, that
-kinds without an archetype carry no archetype properties, and that the `CPU` /
-`MCU-CPU` mismatch above is still what it says.
+kinds without an archetype carry no archetype properties, that **every CPU is
+marked as a fallback target and no accelerator is**, and that the catalog no
+longer infers the distinction from a `kind` spelling.
 
 ### Which count is on which page
 

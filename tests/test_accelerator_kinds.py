@@ -23,23 +23,25 @@ strings, so `kind` is not the closed set of five the table implies -- and
 a dump mentions them. Having no archetype, they carry no `opset_ceiling`, no
 category list, no `gops_int8` and no `energy_factor`.
 
-**This changes catalog answers.** `EA11` asks which models fall back to the CPU
-and filters `WHERE a.kind <> "MCU-CPU"`. ONNX Runtime's CPU execution provider
-is spelled `CPU`, not `MCU-CPU`, so it does not match the filter and is counted
-as acceleration. Measured at `--scale 1.0`, seed `20260814`:
+**This changed catalog answers, and #69 fixed it.** `EA11` asks which models
+fall back to the CPU. It used to filter `WHERE a.kind <> "MCU-CPU"`, so ONNX
+Runtime's CPU execution provider -- spelled `CPU` -- did not match and its
+kernels counted as *acceleration*. Measured at `--scale 1.0`, seed `20260814`:
 
-| | generated layer only | both layers |
+| models EA11 reports CPU-only | generated only | both layers |
 |---|---:|---:|
-| models reported CPU-only | 60 | **12** |
-| top-ten operator counts | `[12, 11, 10, 10, 10, 9, 9, 9, 9, 9]` | `[1, 1, 1, ...]` |
+| old rule, `kind <> "MCU-CPU"` | 60 | **12** |
+| new rule, `is_cpu_fallback = 0` | 60 | **20** |
 
-55 of the 149 operators a generated model uses flip to "accelerated" once the
-real layer loads -- 54 of them reachable through `kind = "CPU"` alone.
+The generated layer is unchanged, because `MCU-CPU` is its only CPU. The real
+layer recovers 8 models that the spelling had hidden. Not all 60: ONNX Runtime's
+CUDA and DirectML providers are genuine accelerators, so operators they
+implement are correctly not CPU-only.
 
-Whether `EA11` should treat a CPU execution provider as acceleration is a
-catalog decision, not a documentation one, and changing the query changes the
-benchmark, the demo and the tests at once. Filed separately; this file pins the
-vocabulary so the next kind cannot arrive silently.
+`etl/generate.py` and `etl/real_layer.py` now set `is_cpu_fallback` explicitly
+rather than letting the catalog infer it from a string, so a new `ORT_DEVICES`
+entry is classified where it is created. This file pins the vocabulary so the
+next kind cannot arrive silently, and that the flag matches it.
 
 Counts are asserted as *relationships* rather than figures. The published 85 and
 91 are `--scale 1.0`; this runs smaller, and the facts worth holding -- that the
@@ -171,29 +173,84 @@ def test_kinds_without_an_archetype_carry_no_archetype_properties(fleets):
     )
 
 
-def test_ea11s_cpu_filter_does_not_match_the_real_cpu_provider(fleets):
-    """The consequence, pinned so it cannot be fixed or worsened unnoticed.
+def test_every_cpu_is_marked_as_a_fallback_target(fleets):
+    """The fix for #69, pinned in the direction that matters.
 
-    `EA11` filters `WHERE a.kind <> "MCU-CPU"`. ONNX Runtime's CPU execution
-    provider is `kind = "CPU"`, so it passes the filter and its kernels count as
-    acceleration -- which is why loading the real layer drops the models EA11
-    reports as CPU-only from 60 to 12.
+    `EA11` used to filter `WHERE a.kind <> "MCU-CPU"`, so ONNX Runtime's CPU
+    execution provider -- spelled `CPU` -- passed the filter and its kernels
+    counted as *acceleration*. Loading the real layer dropped the models EA11
+    reported as CPU-only from 60 to 12.
 
-    Asserting the mismatch rather than the row counts: the counts are scale- and
-    dump-dependent, the spelling mismatch is the mechanism. If the catalog is
-    changed to treat CPU providers as fallback, this test fails and says so.
+    It now filters `WHERE a.is_cpu_fallback = 0`, an explicit property set in
+    both layers, and the figure is 20. Not 60: ONNX Runtime's CUDA and DirectML
+    providers are genuine accelerators, so an operator they implement is
+    correctly not CPU-only.
+
+    Asserted as a property of every CPU rather than as a row count, because the
+    counts are scale- and dump-dependent while the classification is ours. The
+    previous version of this test pinned the *old* behaviour -- that a real CPU
+    provider does not match the filter -- which is exactly the assertion #69
+    exists to overturn.
     """
     _, both = fleets
-    cpu_providers = [a for a in both
-                     if a.get("provenance") == "real" and a["kind"] == "CPU"]
-    assert cpu_providers, (
-        "no real accelerator carries kind='CPU'; the EA11 interaction this "
-        "documents may be gone -- recheck docs/schema.md before deleting this"
+
+    # Checked first, and over *every* accelerator: EA11 filters
+    # `is_cpu_fallback = 0`, so a missing flag is null, does not equal 0, and is
+    # therefore treated as a fallback target -- its kernels stop counting as
+    # acceleration and the models depending on it are wrongly reported CPU-only.
+    # The two assertions below cannot see that: `a.get(...) == 1` is False for a
+    # null, so a flagless GPU passes both halves. A fourth creation site added
+    # tomorrow would land nulls with the suite still green.
+    missing = [(a["id"], a["kind"]) for a in both
+               if a.get("is_cpu_fallback") not in (0, 1)]
+    assert not missing, (
+        f"accelerators with no usable is_cpu_fallback: {missing}. EA11 filters "
+        f"`is_cpu_fallback = 0`, so null is counted as a CPU and every model "
+        f"depending on these is wrongly reported CPU-only."
     )
-    assert all(a["kind"] != "MCU-CPU" for a in cpu_providers), (
-        "a real CPU provider now matches EA11's MCU-CPU filter, so it counts as "
-        "fallback rather than acceleration. That is arguably the right answer, "
-        "but docs/schema.md and the EA11 figures say otherwise -- update both."
+
+    # Derived from the source tables rather than the literal `"CPU"`: an
+    # `ORT_DEVICES` entry spelled `CPU-OpenVINO` is still a CPU, and a test that
+    # partitions on the spelling would miss it in the same way the old query did.
+    from etl.real_layer import ORT_DEVICES
+    cpu_kinds = {"MCU-CPU"} | {kind for _n, kind, fb in ORT_DEVICES.values() if fb}
+    cpus = [a for a in both if a["kind"] in cpu_kinds]
+    assert cpus, (
+        "no accelerator of kind CPU or MCU-CPU at all; EA11's fallback question "
+        "has no target and this test proves nothing"
+    )
+    not_marked = [(a["id"], a["kind"]) for a in cpus if a.get("is_cpu_fallback") != 1]
+    assert not not_marked, (
+        f"CPUs not marked as fallback targets: {not_marked}. EA11 filters on "
+        f"`is_cpu_fallback`, so an unmarked CPU is counted as acceleration and "
+        f"the models depending on it silently disappear from the answer."
+    )
+    accelerators = [a for a in both if a["kind"] not in cpu_kinds]
+    wrongly_marked = [(a["id"], a["kind"]) for a in accelerators
+                      if a.get("is_cpu_fallback") == 1]
+    assert not wrongly_marked, (
+        f"non-CPU accelerators marked as fallback targets: {wrongly_marked}. "
+        f"That would report models as CPU-only when they are accelerated."
+    )
+
+
+def test_the_catalog_no_longer_infers_cpu_from_the_kind_spelling(fleets):
+    """The mechanism, not just the data -- so the query cannot regress quietly.
+
+    A future edit restoring `kind <> "MCU-CPU"` would pass every other test
+    here: the flag would still be correct, it would simply stop being consulted.
+    """
+    from benchmarks.queries import BY_ID
+    cypher = BY_ID["EA11"]["cypher"]
+    assert "is_cpu_fallback" in cypher, (
+        "EA11 no longer filters on `is_cpu_fallback`. If it has gone back to "
+        "comparing `kind`, ONNX Runtime's CPU provider counts as acceleration "
+        "again (#69)."
+    )
+    assert '<> "MCU-CPU"' not in cypher, (
+        'EA11 compares `kind <> "MCU-CPU"` again. That treats any CPU not '
+        'spelled MCU-CPU as an accelerator, and on this engine `<>` also '
+        "matches a null kind (engine note 8b)."
     )
 
 
