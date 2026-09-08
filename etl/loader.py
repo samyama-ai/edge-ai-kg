@@ -96,7 +96,8 @@ def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
 @click.command()
 @click.option("--url", default=None,
               help="Samyama server URL, e.g. http://127.0.0.1:8080. Omit for embedded.")
-@click.option("--graph", default="default", show_default=True, help="Target graph / tenant.")
+@click.option("--graph", default="default", show_default=True,
+              help="Target graph / tenant. Accepted and IGNORED on the OSS build -- everything lands in 'default' whatever you pass (engine note 7). Kept because the engine takes the argument and a future build may honour it.")
 @click.option("--seed", type=int, default=gen.DEFAULT_SEED, show_default=True)
 @click.option("--scale", type=float, default=1.0, show_default=True,
               help="Fleet size multiplier. 1.0 ~ 24K nodes / 73K edges.")

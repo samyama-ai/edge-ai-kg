@@ -49,7 +49,7 @@ def run_one(client, graph: str, query: dict, repeats: int) -> dict:
 @click.command()
 @click.option("--url", default=None, help="Samyama server URL. Omit for embedded.")
 @click.option("--graph", default="default", show_default=True,
-              help="Target graph / tenant. Matches the loader's default.")
+              help="Target graph / tenant. Accepted and IGNORED on the OSS build -- everything lands in 'default' whatever you pass (engine note 7). Kept because the engine takes the argument and a future build may honour it.")
 @click.option("--repeats", default=3, show_default=True)
 @click.option("--rows", default=5, show_default=True, help="Result rows to print.")
 @click.option("--only", default=None, help="Run a single query id, e.g. EA01.")
