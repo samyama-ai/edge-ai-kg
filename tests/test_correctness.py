@@ -6,6 +6,38 @@ returns rows is not evidence that it is right, so every structural claim the
 demo makes is checked here against the generator's own data.
 
 Runs against an in-process embedded engine, so no server is needed.
+
+## This file is deliberately not split (#31)
+
+#31 asked whether this file should be split by subject, expecting the batch of
+new tests around it to land here and push it past what a reviewer reads in one
+pass. **That did not happen** -- every one of those went into its own file:
+
+    $ ls tests/test_*.py | grep -v test_correctness | wc -l
+    22
+
+The count is left as a command rather than a list, because a list in prose goes
+stale (mine did, twice, before this comment was written).
+
+So the split happened, by subject, without touching this file. What is left here
+is one subject -- catalog answers checked against the `Fleet` -- plus the fixture
+they share.
+
+**Splitting what remains would cost more than it buys.** Measured: of this
+module's 24.85s, **24.06s is the `loaded` fixture** building and loading a graph,
+and the eleven tests themselves total about 0.3s. Ten of the eleven use that
+fixture. Two files means two module-scoped fixtures and two loads, roughly
+doubling this area's runtime to move ~130 lines.
+
+The seam #31 proposes -- graph integrity versus catalog answers -- also yields a
+one-test file: `test_graph_loaded_completely` is the only integrity assertion
+here, and the rest of that subject already lives in `test_id_uniqueness.py`,
+`test_provenance.py` and `test_edge_verification.py`.
+
+**Decision: one file, and the size limit does not apply here.** Revisit if a
+second subject arrives, or if a way to share the fixture across modules without
+reloading appears -- `SamyamaClient.embedded()` is per-process and in-memory, so
+today there is none.
 """
 from __future__ import annotations
 
