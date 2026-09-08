@@ -20,20 +20,37 @@ committed file tells you what changed and puts it in the review, next to the
 generator change that caused it. The documents quoting those counts can then be
 updated from the diff rather than from memory.
 
+## The generated layer is not ours alone
+
+The obvious framing -- generated is deterministic from the seed, so a mismatch
+means the generator changed -- is **wrong**, and the manifest was built on it at
+first. `etl/generate.py` creates Kernels from the ONNX operator catalogue, and
+`data/` is gitignored, so that catalogue is re-fetched from upstream rather than
+pinned. A refresh moves `Kernel` and every total derived from it while nothing in
+this repo changed.
+
+So the manifest records the catalogue's **content fingerprint** alongside `seed`
+and `scale`, and `--check` reports an upstream move as its own case rather than
+advising a re-baseline. Without that, the diff cannot answer the one question it
+exists for: did *we* change, or did upstream?
+
 ## What is deliberately not in it
 
-**No timings, no environment, no versions.** Those move for reasons unrelated to
-the graph -- a slower laptop, a different Python -- and a manifest that churns on
-noise is one people regenerate without reading. Everything here is a count that
-changes only when the graph does.
+**No timings and no environment.** Those move for reasons unrelated to the graph
+-- a slower laptop, a different Python -- and a manifest that churns on noise is
+one people regenerate without reading. The only non-count recorded is the
+fingerprint of an input the counts genuinely depend on.
 
 **The real layer is recorded but not pinned by a test.** ONNX Runtime and MLPerf
 publish on their own schedule; 734 kernel registrations became 738 during one
-week of this backlog. `--check` reports those moves so a person can see them, and
-`tests/test_build_manifest.py` asserts only the generated half, which is ours.
+week of this backlog. `--check` reports those moves so a person can see them.
+`tests/test_build_manifest.py` asserts the generated half **only when the
+catalogue fingerprint matches**, and skips otherwise -- because with a different
+input it is not testing what its name says.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -44,6 +61,28 @@ from etl import generate as gen
 from etl.loader import NODE_LABELS
 
 MANIFEST_PATH = Path(__file__).resolve().parent.parent / "docs" / "build-manifest.json"
+
+
+def catalogue_fingerprint(operators) -> dict:
+    """Identify the ONNX operator catalogue this build was derived from.
+
+    The generated layer is deterministic from the seed **given the same
+    operators** -- `etl/generate.py` builds Kernels from this catalogue, and
+    `data/` is gitignored, so it is re-fetched from upstream rather than pinned.
+    Without this, a diff cannot tell "our generator changed" from "ONNX
+    published", which is the one distinction this file exists to make.
+
+    A content fingerprint rather than a version: the cache records
+    `license`, `operator_count`, `operators` and `source`, and no version,
+    commit or fetch date to read.
+    """
+    material = "\n".join(
+        f"{o.id}\t{o.since_version}\t{o.category}" for o in sorted(
+            operators, key=lambda o: o.id))
+    return {
+        "operator_count": len(operators),
+        "fingerprint": "sha256:" + hashlib.sha256(material.encode()).hexdigest()[:16],
+    }
 
 
 def build_manifest(seed: int, scale: float) -> dict:
@@ -74,6 +113,9 @@ def build_manifest(seed: int, scale: float) -> dict:
     return {
         "seed": seed,
         "scale": scale,
+        # The upstream input the generated layer depends on. Recorded so a diff
+        # can say which of the two things moved.
+        "inputs": {"onnx_catalogue": catalogue_fingerprint(ops)},
         "nodes": {
             "generated": {k: generated_nodes[k] for k in sorted(generated_nodes)},
             "added_by_real_layer": delta(both_nodes, generated_nodes),
@@ -155,14 +197,38 @@ def main(write, check, seed, scale):
         click.echo(f"manifest matches (seed {seed}, scale {scale})")
         return
 
+    upstream_moved = recorded.get("inputs") != current.get("inputs")
+
     click.echo("the build no longer matches the committed manifest:", err=True)
     for line in differences(recorded, current):
         click.echo(line, err=True)
     click.echo("", err=True)
-    click.echo("  If the generator changed on purpose, run "
-               "`python -m etl.manifest --write` and commit the result --\n"
-               "  the diff is the list of published figures that need updating.",
-               err=True)
+
+    if upstream_moved:
+        # Reported as its own case. Telling someone to `--write` here would
+        # re-baseline to whatever upstream happened to be today and rewrite
+        # published figures that were correct for the build they describe.
+        old = (recorded.get("inputs") or {}).get("onnx_catalogue", {})
+        new = (current.get("inputs") or {}).get("onnx_catalogue", {})
+        click.echo("  THE UPSTREAM INPUT MOVED, so this is not necessarily a "
+                   "generator change.", err=True)
+        click.echo(f"    ONNX operator catalogue: "
+                   f"{old.get('operator_count')} operators "
+                   f"({old.get('fingerprint')})\n"
+                   f"                          -> "
+                   f"{new.get('operator_count')} operators "
+                   f"({new.get('fingerprint')})", err=True)
+        click.echo("    `data/` is gitignored, so the catalogue is re-fetched "
+                   "rather than pinned.\n"
+                   "    Counts above may have moved for that reason alone. "
+                   "Re-baselining with --write\n"
+                   "    is correct only if you also intend the published "
+                   "figures to follow upstream.", err=True)
+    else:
+        click.echo("  The upstream input is unchanged, so the generator changed.\n"
+                   "  Run `python -m etl.manifest --write` and commit the result "
+                   "-- the diff is\n  the list of published figures that need "
+                   "updating.", err=True)
     raise SystemExit(1)
 
 
