@@ -14,10 +14,13 @@ new tests around it to land here and push it past what a reviewer reads in one
 pass. **That did not happen** -- every one of those went into its own file:
 
     $ ls tests/test_*.py | grep -v test_correctness | wc -l
-    22
 
-The count is left as a command rather than a list, because a list in prose goes
-stale (mine did, twice, before this comment was written).
+No number is quoted, only the command. A list went stale twice before this
+comment shipped, and the number that replaced it was wrong on arrival -- taken
+from a working tree holding two other branches' untracked files. The count also
+moves with every merge, so any literal here is stale by design. The argument
+does not rest on the answer being 20 or 22; it rests on it being large, and the
+command carries that.
 
 So the split happened, by subject, without touching this file. What is left here
 is one subject -- catalog answers checked against the `Fleet` -- plus the fixture
