@@ -69,7 +69,8 @@ Neo4j's own guidance starts at **2 GB heap plus page cache**. A 248 MB process
 holding the whole graph is roughly an order of magnitude smaller, and it needs
 no server, no JVM and no install beyond `pip`.
 
-That is a real difference and it is the one worth quoting.
+That is a real difference and it is the one worth quoting — **at this size**.
+It does not hold as the graph grows: see the scale bound in the caveats below.
 
 ## Against the devices in the graph — a loss, and a large one
 
@@ -110,3 +111,8 @@ where a 2 GB JVM would not fit comfortably. Not: resident on the target.
   is untested whether that ratio holds at 10x, which is #11.
 - No comparison was *run* against Neo4j — the 2 GB figure is their published
   guidance, not something measured here. #47 is the head-to-head.
+- **The ~199 MB is a scale-1.0 figure, and the advantage is scale-bounded.**
+  Measured at `--scale 10.0` — 1,249,150 edges, 16x the published count — the
+  process holds **2,415 MB**, past the 2 GB heap line this page compares
+  against. So the win above is real at the size this repo ships and gone by
+  16x. See [`volume.md`](volume.md).

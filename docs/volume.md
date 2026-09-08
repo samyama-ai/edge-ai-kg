@@ -6,8 +6,14 @@ Every published figure in this repo is at `--scale 1.0` — 25,150 nodes and
 76,303 edges. `etl/generate.py` accepts any scale and nothing recorded what
 happens above one, while the pitch rests on volume being a strength.
 
-So it was run. Embedded build, `samyama` 0.6.1, seed `20260814`, both layers,
-median of 3 per query.
+So it was run. Embedded build, `samyama` 0.6.1, seed `20260814`, both layers.
+
+**Which command produced which column:** the node/edge counts and load times come
+from a scripted load equivalent to `python -m benchmarks.ingest`; the per-query
+latencies are the median of 3 runs of each catalog query at 1.0/2.0/5.0, and of
+**2** runs at 10.0, where a single load takes ten minutes. The `catalog total`
+column is blank at 10.0 because only four queries were timed there, not all
+sixteen — the four are listed in the EA11 table below.
 
 ## What happens as the fleet grows
 
@@ -16,7 +22,7 @@ median of 3 per query.
 | 1.0 | 25,150 | 76,303 | 19.5 s | 3,909 | 593 ms |
 | 2.0 | 48,907 | 152,717 | 43.4 s | 3,518 | 1,132 ms |
 | 5.0 | 155,660 | 505,419 | 190.0 s | 2,661 | 4,659 ms |
-| 10.0 | 366,366 | 1,249,150 | 601.6 s | 2,076 | — |
+| 10.0 | 366,366 | 1,249,150 | 601.6 s | 2,076 | not run — see below |
 
 Relative to scale 1.0:
 
@@ -77,7 +83,7 @@ Note 1 says a join bug "only appears once the cardinalities are real" and that
 rows is worthless, so `EA11` was checked against ground truth recomputed in
 Python from the `Fleet` at every scale:
 
-| `--scale` | nodes | edges | EA11 row counts | EA11 operator lists | int8 = ¼ fp32 |
+| `--scale` | nodes | edges | EA11 row counts | EA11 operator lists | EA04 canary (int8 = ¼ fp32) |
 |---:|---:|---:|---|---|---|
 | 1.0 | 25,150 | 76,303 | match | match | 0 violations |
 | 2.0 | 48,907 | 152,717 | match | match | 0 violations |
@@ -96,7 +102,7 @@ bug was found in a *different* query shape, and nothing here exercises the
 
 **Established:** the graph **loads and stays queryable at 16x the published
 size** — 366,366 nodes, 1,249,150 edges, on a laptop in one process — and is
-**verified correct against Python ground truth to 6x** (505,419 edges).
+**verified correct against Python ground truth to 505,419 edges** (x6.6).
 
 ### Memory is the real ceiling, and it qualifies the footprint claim
 
@@ -105,7 +111,8 @@ At 10.0 the process holds **2,415 MB** resident, against ~199 MB at scale 1.0
 mildly *sub*-linear.
 
 That matters because `docs/footprint.md` argues the footprint win against
-**Neo4j's 2 GB heap guidance**. At 10x this engine is *past* that line. The
+**Neo4j's 2 GB heap guidance**. At 16x the edge count this engine is *past*
+that line. The
 honest statement is therefore narrower than that page alone implies:
 
 > The footprint advantage is real **at the size this repo ships**. It is gone by
@@ -130,8 +137,8 @@ about scale 1.0 and should not be quoted without one.
 ## Reproducing
 
 ```bash
-python -m benchmarks.ingest --scale 5.0 --repeats 1
-python -m benchmarks.run_benchmark          # per-query latency
+python -m benchmarks.ingest --scale 5.0 --repeats 3   # nodes/s, edges/s, load
+python -m benchmarks.run_benchmark --repeats 3       # per-query latency
 ```
 
 `etl.download_data --scale 5.0` rebuilds `data/` at another size; note that the
