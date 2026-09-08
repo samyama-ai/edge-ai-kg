@@ -82,6 +82,25 @@ duplicates" passes and "40 + 4" does not.
 
 Volume alone is fine. 336 distinct vectors index and search without complaint.
 
+### It is not the metric
+
+Every metric panics on the same two-call reproduction:
+
+| `metric=` | duplicate add + search |
+|---|---|
+| `cosine` | **PANIC** |
+| `euclidean` | **PANIC** |
+| `l2` | **PANIC** |
+| `dot` | **PANIC** |
+| `inner_product` | **PANIC** |
+| `manhattan` | **PANIC** |
+
+Note the last three: `create_vector_index` accepted `dot`, `inner_product` and
+`manhattan` without complaint, and there is no indication any of them is a
+supported metric. **The `metric` argument is not validated** — a typo would be
+accepted silently and you would not learn which distance you actually got.
+That is worth knowing independently of the panic.
+
 ## Why that blocks this use case specifically
 
 An embedding of a **name catalogue** produces near-duplicates by construction.
@@ -121,25 +140,6 @@ The panic is in a third-party crate (`hnsw_rs 0.2.1`) rather than in Samyama's
 own code, so the likely fixes are upstream or a version bump. Worth reporting to
 `samyama-ai/samyama-graph` with the two-call reproduction above — it needs no
 graph, no data and no scale.
-
-### It is not the metric
-
-Every metric panics on the same two-call reproduction:
-
-| `metric=` | duplicate add + search |
-|---|---|
-| `cosine` | **PANIC** |
-| `euclidean` | **PANIC** |
-| `l2` | **PANIC** |
-| `dot` | **PANIC** |
-| `inner_product` | **PANIC** |
-| `manhattan` | **PANIC** |
-
-Note the last three: `create_vector_index` accepted `dot`, `inner_product` and
-`manhattan` without complaint, and there is no indication any of them is a
-supported metric. **The `metric` argument is not validated** — a typo would be
-accepted silently and you would not learn which distance you actually got.
-That is worth knowing independently of the panic.
 
 **Not investigated:** whether the panic leaves the index corrupt or is
 recoverable within the same process. Cheap follow-up for whoever picks this up.
