@@ -58,21 +58,25 @@ def counts():
     from etl import generate as gen
     from etl import onnx_catalog as oc
     from etl import real_layer
-    # Only the cache read is guarded. Wrapping the imports too would turn a
-    # genuinely missing or broken module into a skip, which is the same
-    # "passes while testing nothing" failure this file is about.
+    # The imports stay outside the guard: wrapping them would turn a genuinely
+    # missing or broken module into a skip, which is the same "passes while
+    # testing nothing" failure this file is about.
+    #
+    # The guard covers `build_real` as well as `oc.load_cached()`, because
+    # `build_real` reads two more caches of its own (`ort.load_cached()` and
+    # `tiny.load_cached()`, etl/real_layer.py). Guarding only the first meant a
+    # partially-built `data/` errored instead of skipping, contradicting the
+    # docstring above.
     try:
         ops = oc.load_cached()
+        fleet = gen.generate(seed=20260814, scale=1.0, operators=ops)
+        generated = (fleet.node_count, fleet.edge_count)
+        real_layer.build_real(fleet, ops)
+        real_only = gen.Fleet(seed=0, scale=1.0)
+        real_layer.build_real(real_only, ops)
     except FileNotFoundError:
         pytest.skip("run `python -m etl.download_data` first")
-
-    fleet = gen.generate(seed=20260814, scale=1.0, operators=ops)
-    generated = (fleet.node_count, fleet.edge_count)
-    real_layer.build_real(fleet, ops)
     both = (fleet.node_count, fleet.edge_count)
-
-    real_only = gen.Fleet(seed=0, scale=1.0)
-    real_layer.build_real(real_only, ops)
     return {
         "generated": generated,
         "both": both,
@@ -81,22 +85,42 @@ def counts():
     }
 
 
+# `25,150 nodes` -- the number then the unit, as prose.
+PROSE_FIGURE = re.compile(r"([\d]{1,3}(?:,[\d]{3})+)\s*(nodes|edges)")
+
+# `| nodes | 1,240 |` -- a two-cell table row, unit first. Added because the
+# real-layer counts in README.md and DATASET_CARD.md are published this way, and
+# those are the *upstream-derived* figures this file's docstring says will drift.
+# Missing them meant the test passed while leaving the highest-risk published
+# numbers unguarded.
+TABLE_FIGURE = re.compile(r"^\|\s*(nodes|edges)\s*\|\s*([\d]{1,3}(?:,[\d]{3})+)\s*\|",
+                          re.MULTILINE)
+
+
 def figures_in(relative_path: str) -> set[tuple[int, str]]:
     """`(number, unit)` pairs a document publishes, e.g. `(25150, "nodes")`.
 
-    Only counts written as `N nodes` / `N edges` with a thousands separator, so
-    a stray four-digit number in prose is not read as a claim about the graph.
+    Two forms are recognised: prose (`25,150 nodes`) and the two-cell table row
+    (`| nodes | 1,240 |`).
 
-    The consequence, which the reason above does not cover: **a published count
-    below 1,000 is invisible to every test in this file.** No node or edge total
-    is that small today, and widening the pattern would start matching prose
-    like "16 node labels", so this is a deliberate blind spot rather than an
-    oversight.
+    Two blind spots, both deliberate and both stated so they are choices rather
+    than oversights:
+
+    1. **A published count below 1,000 is invisible.** The thousands separator
+       is what distinguishes a graph total from prose like "16 node labels".
+       No node or edge total is that small today.
+    2. **A number with no adjacent unit is invisible** -- for example
+       `docs/schema.md`'s "those add 2,478 more", where the unit is three lines
+       earlier. Matching bare numbers would mean matching every figure in every
+       document, so these are left to
+       `tests/test_schema_docs.py`, which parses that page's tables structurally
+       and would fail if 2,478 stopped being the sum of its `(+M real)` column.
     """
     text = (ROOT / relative_path).read_text(encoding="utf-8")
-    found = set()
-    for match in re.finditer(r"([\d]{1,3}(?:,[\d]{3})+)\s*(nodes|edges)", text):
-        found.add((int(match.group(1).replace(",", "")), match.group(2)))
+    found = {(int(m.group(1).replace(",", "")), m.group(2))
+             for m in PROSE_FIGURE.finditer(text)}
+    found |= {(int(m.group(2).replace(",", "")), m.group(1))
+              for m in TABLE_FIGURE.finditer(text)}
     return found
 
 
@@ -143,6 +167,13 @@ def test_every_published_figure_matches_some_layer_of_the_graph(counts):
     Fails naming the document and both numbers. A figure that matches *no*
     layer is either stale or invented, and the message says which layers were
     considered so the fix is obvious.
+
+    `known` pools all four layers, so a document publishing the real-only count
+    where the both-layer count belongs still passes here. That is a deliberate
+    tradeoff rather than an omission --
+    `test_the_docs_agree_with_each_other_on_the_headline` covers the case that
+    matters, and pinning every figure to its own layer would make this test
+    fail whenever a page legitimately quotes more than one.
     """
     # Pairs, not a flat bag of numbers. Flattening ignored the unit, so
     # `25,150 edges` in a document passed because 25,150 is a valid *node*
