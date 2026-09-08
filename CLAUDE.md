@@ -57,6 +57,9 @@ python -m demo.questions --only EA01 EA06 --fast
 python -m benchmarks.run_benchmark --only EA01 --rows 20
 python -m etl.loader --layers real      # load only the public-source subgraph
 python -m etl.loader --no-verify        # skip the post-load edge count
+
+python -m etl.manifest --check          # has the build moved since docs/build-manifest.json?
+python -m etl.manifest --write          # re-record it, then commit the diff
 python -m mcp_server.server             # 7 MCP tools over the graph
 ```
 

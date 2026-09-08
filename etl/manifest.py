@@ -50,6 +50,7 @@ input it is not testing what its name says.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections import Counter
@@ -75,14 +76,48 @@ def catalogue_fingerprint(operators) -> dict:
     A content fingerprint rather than a version: the cache records
     `license`, `operator_count`, `operators` and `source`, and no version,
     commit or fetch date to read.
+
+    **Every field, not the ones the generator reads.** An earlier version
+    fingerprinted `(id, since_version, category)`, which were the fields
+    `etl/generate.py` was known to consult. That is the wrong coupling: which
+    fields are load-bearing is a property of `generate.py`, invisible from here,
+    and free to change without anything failing. It had already drifted --
+    `generate.py:370` gates kernel creation on `is_control_flow`, which was not
+    in the material, so a catalogue that flipped it would move `Kernel` and
+    every total derived from it while the fingerprint stayed byte-identical.
+
+    That is worse than recording no fingerprint at all. `--check` would report
+    *"the upstream input is unchanged, so the generator changed"* and advise a
+    re-baseline, and someone would rewrite five documents' published figures to
+    an upstream move believing it was theirs. A missing fingerprint asserts no
+    cause; a wrong one asserts the wrong cause confidently.
+
+    Hashing the whole record removes the coupling instead of tracking it. The
+    cost is fingerprint churn on fields the generator ignores today
+    (`version_count`, `name`, `domain`) -- which is the safe direction: it
+    over-reports upstream movement, and over-reporting sends a human to look
+    rather than sending them to re-baseline.
     """
     material = "\n".join(
-        f"{o.id}\t{o.since_version}\t{o.category}" for o in sorted(
-            operators, key=lambda o: o.id))
+        "\t".join(str(v) for v in dataclasses.astuple(o))
+        for o in sorted(operators, key=lambda o: o.id))
     return {
+        "method": FINGERPRINT_METHOD,
         "operator_count": len(operators),
         "fingerprint": "sha256:" + hashlib.sha256(material.encode()).hexdigest()[:16],
     }
+
+
+# Bump when `catalogue_fingerprint`'s material changes.
+#
+# Recorded because a change of *method* is otherwise indistinguishable from a
+# change of *input*: both are "the hash differs". Widening the material from
+# three fields to all seven -- the fix for the review on #92 -- moved the
+# fingerprint on an identical 205-operator catalogue, and `--check` duly
+# announced "THE UPSTREAM INPUT MOVED", which was false. Without this the same
+# false report would recur on every future change to the material, and the one
+# distinction this module exists to make would be wrong in a third way.
+FINGERPRINT_METHOD = "sha256/all-fields/1"
 
 
 def build_manifest(seed: int, scale: float) -> dict:
@@ -193,18 +228,56 @@ def main(write, check, seed, scale):
     if not MANIFEST_PATH.exists():
         raise SystemExit(f"{MANIFEST_PATH} does not exist; run --write first")
     recorded = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+    # `--check` compares against a manifest built at a *recorded* seed and
+    # scale, so being handed different ones is not a comparison -- it is two
+    # different worlds, and every count differs. The diff would be enormous,
+    # headed by a `~ seed:` line that explains it only if you read to the end.
+    # Refuse instead of printing it.
+    for name, given, was in (("seed", seed, recorded.get("seed")),
+                             ("scale", scale, recorded.get("scale"))):
+        if was is not None and given != was:
+            raise SystemExit(
+                f"--check was given --{name} {given}, but the manifest records "
+                f"{name} {was}. Those describe different graphs, so the diff "
+                f"would be noise. Drop the flag to check the recorded build, or "
+                f"run --write --{name} {given} to re-record at this {name}."
+            )
+
     if recorded == current:
         click.echo(f"manifest matches (seed {seed}, scale {scale})")
         return
 
-    upstream_moved = recorded.get("inputs") != current.get("inputs")
+    old_cat = (recorded.get("inputs") or {}).get("onnx_catalogue") or {}
+    new_cat = (current.get("inputs") or {}).get("onnx_catalogue") or {}
+    # A method change moves the hash on an identical catalogue, so it must be
+    # ruled out before the difference can be read as upstream movement.
+    method_changed = old_cat.get("method") != new_cat.get("method")
+    upstream_moved = (not method_changed
+                      and recorded.get("inputs") != current.get("inputs"))
 
     click.echo("the build no longer matches the committed manifest:", err=True)
     for line in differences(recorded, current):
         click.echo(line, err=True)
     click.echo("", err=True)
 
-    if upstream_moved:
+    if method_changed:
+        # Third case, and it must come first: a method change moves the hash on
+        # an identical catalogue, so reading it as upstream movement would be
+        # wrong in the same way the missing fingerprint was.
+        click.echo("  THE FINGERPRINT METHOD CHANGED, so the hashes are not "
+                   "comparable.", err=True)
+        click.echo(f"    method: {old_cat.get('method') or '(none recorded)'} "
+                   f"-> {new_cat.get('method')}", err=True)
+        click.echo(f"    operator_count: {old_cat.get('operator_count')} -> "
+                   f"{new_cat.get('operator_count')}"
+                   + ("  (unchanged, so the catalogue itself probably did not "
+                      "move)" if old_cat.get("operator_count")
+                      == new_cat.get("operator_count") else ""), err=True)
+        click.echo("    Re-record with --write. Any *count* differences above "
+                   "are still real and\n    still need reading -- only the "
+                   "fingerprint line is explained by this.", err=True)
+    elif upstream_moved:
         # Reported as its own case. Telling someone to `--write` here would
         # re-baseline to whatever upstream happened to be today and rewrite
         # published figures that were correct for the build they describe.

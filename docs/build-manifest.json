@@ -41,7 +41,8 @@
   },
   "inputs": {
     "onnx_catalogue": {
-      "fingerprint": "sha256:00cad0d747872e80",
+      "fingerprint": "sha256:aefaab49540bee6b",
+      "method": "sha256/all-fields/1",
       "operator_count": 205
     }
   },

@@ -166,3 +166,72 @@ def test_the_manifest_records_the_input_it_was_derived_from(recorded):
     )
     assert catalogue.get("fingerprint", "").startswith("sha256:"), catalogue
     assert isinstance(catalogue.get("operator_count"), int), catalogue
+
+
+def test_every_operator_field_moves_the_fingerprint():
+    """Changing *any* field of any operator must change the fingerprint.
+
+    This is the guard the first version needed and did not have. It
+    fingerprinted `(id, since_version, category)` -- the fields
+    `etl/generate.py` was known to read -- and had already missed
+    `is_control_flow`, which `generate.py:370` gates kernel creation on. Nothing
+    failed, because no test asserted the coupling.
+
+    Which fields the generator consults is not knowable from `manifest.py`, so
+    the assertion here is deliberately not "the load-bearing fields are covered"
+    -- it is "all of them are". A field added to `Operator` tomorrow is covered
+    without anyone remembering this file exists; a fingerprint narrowed back to
+    a hand-picked subset fails here.
+
+    The failure mode being prevented is the confident-and-wrong one: an
+    unfingerprinted field moves, `--check` reports "the upstream input is
+    unchanged, so the generator changed", and someone re-baselines five
+    documents' published figures to an upstream refresh.
+    """
+    import dataclasses
+
+    from etl.onnx_catalog import Operator
+
+    base = Operator(id="op:ai.onnx:conv", name="Conv", domain="ai.onnx",
+                    since_version=11, version_count=3, category="convolution",
+                    is_control_flow=False)
+    original = manifest.catalogue_fingerprint([base])["fingerprint"]
+
+    mutations = {
+        "id": "op:ai.onnx:convtranspose",
+        "name": "ConvTranspose",
+        "domain": "com.microsoft",
+        "since_version": 12,
+        "version_count": 4,
+        "category": "activation",
+        "is_control_flow": True,
+    }
+    fields = [f.name for f in dataclasses.fields(Operator)]
+    assert set(mutations) == set(fields), (
+        f"`Operator` gained or lost a field: {sorted(set(fields) ^ set(mutations))}. "
+        f"Add it to `mutations` with a value different from the base operator, so "
+        f"this test keeps covering every field."
+    )
+
+    for field, new_value in mutations.items():
+        moved = dataclasses.replace(base, **{field: new_value})
+        assert manifest.catalogue_fingerprint([moved])["fingerprint"] != original, (
+            f"changing `{field}` left the catalogue fingerprint unchanged. "
+            f"`--check` would then report an upstream move as a generator change "
+            f"and advise re-baselining the published figures."
+        )
+
+
+def test_the_fingerprint_is_stable_across_operator_ordering():
+    """Otherwise it moves when upstream reorders a table, which is not a change."""
+    import dataclasses
+
+    from etl.onnx_catalog import Operator
+
+    a = Operator(id="op:ai.onnx:abs", name="Abs", domain="ai.onnx",
+                 since_version=13, version_count=2, category="elementwise",
+                 is_control_flow=False)
+    b = dataclasses.replace(a, id="op:ai.onnx:conv", name="Conv",
+                            category="convolution")
+    assert (manifest.catalogue_fingerprint([a, b])["fingerprint"]
+            == manifest.catalogue_fingerprint([b, a])["fingerprint"])
