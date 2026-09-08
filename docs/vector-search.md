@@ -90,16 +90,19 @@ Volume alone is fine. 336 distinct vectors index and search without complaint.
 This is a separate finding from the panic, and useful on its own.
 
 Every metric panics on the same two-call reproduction, so the panic is not
-metric-specific:
+metric-specific. Each row below runs in a **fresh process** -- recoverability
+after a panic is uninvestigated, so sharing one would make rows 2-6
+order-dependent -- and `index accepted` is recorded separately from the panic,
+so "accepted without complaint" is a measurement rather than an inference:
 
-| `metric=` | duplicate add + search |
-|---|---|
-| `cosine` | **PANIC** |
-| `euclidean` | **PANIC** |
-| `l2` | **PANIC** |
-| `dot` | **PANIC** |
-| `inner_product` | **PANIC** |
-| `manhattan` | **PANIC** |
+| `metric=` | index accepted | duplicate add + search |
+|---|---|---|
+| `cosine` | yes | **PanicException** |
+| `euclidean` | yes | **PanicException** |
+| `l2` | yes | **PanicException** |
+| `dot` | yes | **PanicException** |
+| `inner_product` | yes | **PanicException** |
+| `manhattan` | yes | **PanicException** |
 
 Note the last three: `create_vector_index` accepted `dot`, `inner_product` and
 `manhattan` without complaint, and there is no indication any of them is a
@@ -110,8 +113,8 @@ That is worth knowing independently of the panic.
 ## Why that blocks this use case specifically
 
 An embedding of a **name catalogue** produces near-duplicates by construction.
-Measured on this graph's 376 operators with a 64-dimension character-trigram
-embedding:
+Measured on this graph's 376 operators with a 64-dimension character 3- and
+4-gram embedding:
 
 ```
 376 operators -> 344 distinct embeddings
@@ -121,6 +124,11 @@ embedding:
   collision: ['Conv', 'Conv', 'Conv']
 ```
 
+Every one of the 376 rows has a **distinct `id`** -- `--collisions` prints that
+alongside the counts -- so a shared *name* is a real collision across domains,
+not a row counted twice. `AveragePool` appears as `op:ai.onnx:averagepool`,
+`op:com.microsoft.nchwc:averagepool` and `op:com.ms.internal.nhwc:averagepool`.
+
 `376 - 344 = 32` is the number of *surplus* rows; the 58 is how many operators
 sit in a group with at least one other. Those are the same operator name at
 several opset versions and domains — real rows in this graph, not an artefact of
@@ -128,9 +136,17 @@ the embedding.
 
 **Deduplicating exact vectors is not enough.** The experiment holds out 40
 operators as "unseen", leaving 336 to index; those 336 collapse to **307**
-distinct embeddings. Every one of the 307 `add_vector` calls succeeded and
-**`vector_search` then panicked** — so vectors that are merely *close* trip the
-same assertion.
+distinct embeddings. **All 307 `add_vector` calls succeeded, and
+`vector_search` then panicked on the 9th unseen operator queried** — so vectors
+that are merely *close* trip the same assertion. Reproduce with
+`python -m benchmarks.vector_probe --holdout`:
+
+```
+held out 40; 336 remain -> 307 distinct embeddings
+add_vector: 307 accepted, none failed
+vector_search: 8 of 40 unseen operators queried, then
+               PanicException: assertion failed: c.dist_to_ref <= 0.
+```
 
 (344 and 307 are counts of different sets: 344 distinct embeddings across all
 376 operators, 307 across the 336 that remain after the hold-out. Both are
