@@ -1,0 +1,102 @@
+{
+  "edges": {
+    "added_by_real_layer": {
+      "HAS_SOC": 14,
+      "IMPLEMENTS": 738,
+      "MADE_BY": 26,
+      "MEASURES": 73,
+      "ON_BOARD": 73,
+      "PROVIDED_BY": 738,
+      "RUNS_ON": 738,
+      "SOLVES": 4,
+      "TARGETS": 3,
+      "USES_ACCELERATOR": 11,
+      "VIA_RUNTIME": 60
+    },
+    "both_layers_total": 76303,
+    "generated": {
+      "CERTIFIED_FOR": 104,
+      "FEEDS": 14,
+      "GOVERNED_BY": 22,
+      "HAS_ACCELERATOR": 85,
+      "HAS_SOC": 120,
+      "IMPLEMENTS": 21844,
+      "MADE_BY": 160,
+      "NEXT_STAGE": 40,
+      "OF_VARIANT": 1440,
+      "ON_BOARD": 1440,
+      "PRECEDES": 60,
+      "PROVIDED_BY": 21844,
+      "REQUIRES_SENSOR": 51,
+      "RUNS_ON": 21844,
+      "SOLVES": 60,
+      "TARGETS": 426,
+      "TRAINED_ON": 82,
+      "USES_ACCELERATOR": 1440,
+      "USES_OPERATOR": 1069,
+      "VARIANT_OF": 240,
+      "VIA_RUNTIME": 1440
+    },
+    "generated_total": 73825
+  },
+  "inputs": {
+    "onnx_catalogue": {
+      "fingerprint": "sha256:aefaab49540bee6b",
+      "method": "sha256/all-fields/1",
+      "operator_count": 205
+    }
+  },
+  "labels_declared": [
+    "Accelerator",
+    "BenchmarkTask",
+    "Board",
+    "Certification",
+    "ClinicalTask",
+    "Dataset",
+    "Deployment",
+    "Kernel",
+    "Model",
+    "ModelVariant",
+    "Operator",
+    "Runtime",
+    "Sensor",
+    "SignalStage",
+    "SoC",
+    "Vendor"
+  ],
+  "nodes": {
+    "added_by_real_layer": {
+      "Accelerator": 6,
+      "BenchmarkTask": 4,
+      "Board": 14,
+      "Deployment": 73,
+      "Kernel": 738,
+      "Model": 4,
+      "Operator": 171,
+      "Runtime": 6,
+      "SoC": 12,
+      "Vendor": 7
+    },
+    "both_layers_total": 25150,
+    "generated": {
+      "Accelerator": 85,
+      "Board": 120,
+      "Certification": 6,
+      "ClinicalTask": 18,
+      "Dataset": 12,
+      "Deployment": 1440,
+      "Kernel": 21844,
+      "Model": 60,
+      "ModelVariant": 240,
+      "Operator": 205,
+      "Runtime": 7,
+      "Sensor": 14,
+      "SignalStage": 16,
+      "SoC": 40,
+      "Vendor": 8
+    },
+    "generated_total": 24115
+  },
+  "scale": 1.0,
+  "seed": 20260814
+}
