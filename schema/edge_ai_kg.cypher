@@ -67,7 +67,7 @@ CREATE INDEX ON :BenchmarkTask(id);
 // Traced to the queries that need them; tests/test_schema_indexes.py fails if
 // an index is added here that nothing filters on.
 CREATE INDEX ON :Operator(name);              // EA06; mcp kernel_blast_radius
-CREATE INDEX ON :Accelerator(kind);           // EA11; mcp fallback_audit, operator_coverage
+CREATE INDEX ON :Accelerator(kind);           // mcp fallback_audit, operator_coverage
 CREATE INDEX ON :ModelVariant(precision);     // EA07; mcp boards_for_task, device_path
 CREATE INDEX ON :Deployment(provenance);      // EA14
 CREATE INDEX ON :Kernel(provenance);          // EA15
@@ -107,6 +107,14 @@ CREATE INDEX ON :Kernel(execution_provider);  // EA13
 //   Deployment(fits)                 EA06, EA07, demo/demo.py
 //   Deployment(latency_ms)           EA03
 //   Board(battery_powered)           demo/demo.py
+//   Accelerator(is_cpu_fallback)     EA11 -- see below
+//
+// `Accelerator(is_cpu_fallback)` is the newest of these and was measured on its
+// own (#69): adding it moved EA11 from 105.6ms to 115.5ms and the whole catalog
+// from 541ms to 615ms -- *slower*, because `Accelerator` has 91 rows and the
+// index is overhead the scan does not need. EA11 stopped filtering
+// `Accelerator(kind)` at the same time, which is why that index now cites only
+// the two MCP tools.
 //
 // `tests/test_schema_indexes.py` holds this list to the queries, in both
 // directions: an index nothing filters on fails, and a *new* filtered property
