@@ -44,11 +44,31 @@ def fresh(recorded):
 
 
 def test_the_generated_layer_matches_the_manifest(fresh, recorded):
-    """Ours, deterministic from the seed. A mismatch is a generator change.
+    """Deterministic from the seed *given the same operator catalogue*.
 
-    Fails with the same per-key diff the CLI prints, so the failure names the
-    published figures that need updating rather than only that something moved.
+    That qualification is the whole of it, and the first version of this test
+    lacked it. `etl/generate.py` builds Kernels from the ONNX catalogue and
+    `data/` is gitignored, so a refresh moves `Kernel` -- and `generated_total`,
+    and everything derived from them -- with nothing in this repo changing.
+
+    Skipped rather than failed when the fingerprint differs: with a different
+    input this is not testing what its name says, and a red test on a checkout
+    whose only fault is a fresher `data/` reads as the repo's fault. The CLI
+    reports the upstream move loudly, which is where a person should see it.
+
+    Fails with the same per-key diff the CLI prints, so a genuine generator
+    change names the published figures that need updating.
     """
+    mine_in = (recorded.get("inputs") or {}).get("onnx_catalogue")
+    theirs_in = (fresh.get("inputs") or {}).get("onnx_catalogue")
+    if mine_in != theirs_in:
+        pytest.skip(
+            f"the ONNX operator catalogue moved since the manifest was written "
+            f"({mine_in} -> {theirs_in}), so the generated layer is not "
+            f"comparable. Run `python -m etl.manifest --check` for the full "
+            f"report, and --write only if the published figures should follow "
+            f"upstream."
+        )
     # `both_layers_total` is excluded as well as `added_by_real_layer`: it is
     # generated + real, so pinning it pins the upstream half by the back door.
     # Verified rather than assumed -- simulating an upstream-only move (four
@@ -128,3 +148,21 @@ def test_the_totals_agree_with_the_per_key_counts(recorded):
             f"{section}: generated {block['generated_total']:,} + real {added:,} "
             f"!= both_layers_total {block['both_layers_total']:,}"
         )
+
+
+def test_the_manifest_records_the_input_it_was_derived_from(recorded):
+    """Without this the diff cannot say which side moved (#29, Tarun's review).
+
+    The generated counts depend on the ONNX operator catalogue, which is
+    re-fetched rather than pinned. A manifest recording only `seed` and `scale`
+    claims a determinism it does not have.
+    """
+    catalogue = (recorded.get("inputs") or {}).get("onnx_catalogue")
+    assert catalogue, (
+        "the manifest records no `inputs.onnx_catalogue`. The generated layer "
+        "is built from that catalogue and `data/` is gitignored, so without a "
+        "fingerprint a diff cannot distinguish a generator change from an "
+        "upstream refresh."
+    )
+    assert catalogue.get("fingerprint", "").startswith("sha256:"), catalogue
+    assert isinstance(catalogue.get("operator_count"), int), catalogue
