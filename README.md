@@ -11,7 +11,9 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 ![Edge AI KG — 16 questions answered](demo/edgeai-questions.gif)
 
-*All 16 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The last four run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh).*
+*All 16 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The last four run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+
+*Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
 ---
 
