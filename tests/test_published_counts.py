@@ -136,6 +136,44 @@ def unexplained(relative_path: str,
 NO_GENERATED_FIGURES: set[str] = set()
 
 
+# Figures that describe a *different artifact* than the current build, so no
+# layer of the graph holds them and that is correct.
+#
+# Deliberately narrow, and each entry carries its reason. The temptation on a
+# failure here is to add the number and move on, which would turn this file into
+# a list of numbers someone once saw. An entry is only defensible when the
+# document says, in the same breath, what the figure is a count *of*.
+PUBLISHED_ELSEWHERE: dict[tuple[str, int, str], str] = {
+    ("README.md", 25_145, "nodes"):
+        "the published kg-snapshots-v9 .sgsnap, exported from an earlier build",
+    ("README.md", 76_291, "edges"):
+        "the published kg-snapshots-v9 .sgsnap, exported from an earlier build",
+    ("DATASET_CARD.md", 25_145, "nodes"):
+        "the published kg-snapshots-v9 .sgsnap, exported from an earlier build",
+    ("DATASET_CARD.md", 76_291, "edges"):
+        "the published kg-snapshots-v9 .sgsnap, exported from an earlier build",
+}
+
+
+def test_every_exempted_figure_is_still_published():
+    """`PUBLISHED_ELSEWHERE` cannot outlive the text it excuses.
+
+    Without this the list only ever grows: a figure gets corrected in the
+    document, its exemption stays, and the next figure that happens to collide
+    with that number is waved through. An exemption is a claim about a specific
+    sentence, so it fails when that sentence goes.
+    """
+    stale = [f"{doc}: {number:,} {unit} ({why})"
+             for (doc, number, unit), why in PUBLISHED_ELSEWHERE.items()
+             if (number, unit) not in figures_in(doc)]
+    assert not stale, (
+        "PUBLISHED_ELSEWHERE excuses figures these documents no longer publish:\n  "
+        + "\n  ".join(stale)
+        + "\n\nRemove the entries. An exemption that outlives its sentence "
+          "silently excuses the next figure that happens to match."
+    )
+
+
 def test_the_generated_layer_figures_are_exact(counts):
     """Ours, deterministic from the seed. A mismatch here is a bug, not drift.
 
@@ -184,6 +222,8 @@ def test_every_published_figure_matches_some_layer_of_the_graph(counts):
     problems = []
     for doc in sorted(set(GENERATED_DOCS) | set(BOTH_LAYER_DOCS)):
         for number, unit in sorted(unexplained(doc, known)):
+            if (doc, number, unit) in PUBLISHED_ELSEWHERE:
+                continue
             problems.append(f"{doc}: publishes {number:,} {unit}")
     assert not problems, (
         "figures published in the docs that no layer of the graph holds:\n  "

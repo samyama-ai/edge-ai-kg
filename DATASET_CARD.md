@@ -247,10 +247,15 @@ one command.
 
 ### Prebuilt snapshot
 
-A `.sgsnap` of the full graph (~970 KB gzipped) is published at
+A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
-and imports in under a second. All 16 catalog queries are verified against the
-imported snapshot.
+and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
+2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries
+were verified to return rows against the imported snapshot.
+
+Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
+below a fresh build's 25,150 / 76,303: it was exported from an earlier build and
+the upstream inputs are not pinned.
 
 ---
 

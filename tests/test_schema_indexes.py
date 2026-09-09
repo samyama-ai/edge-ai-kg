@@ -76,6 +76,10 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
     "benchmarks/queries.py",
+    # Its Cypher is two count queries used to decide whether the graph is empty;
+    # they name no property, so they justify no index. Scanned because the
+    # guard's contract is "every file with Cypher is read".
+    "benchmarks/snapshot.py",
     "benchmarks/vector_probe.py",
     "demo/demo.py",
     "demo/questions.py",

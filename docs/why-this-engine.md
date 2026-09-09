@@ -249,8 +249,11 @@ are to build the graph inside your process — as every demo and test here does 
 or to run the HTTP server and pay a network hop instead.
 
 So the fair statement is: **zero-install and instant to start, and you pay for
-the data every process.** A snapshot import is the escape hatch from that and is
-still unmeasured (#45).
+the data every process.** A snapshot import is the escape hatch from that, and
+it is now measured: **0.31 s** against a fresh server versus 24.4 s to build the
+same graph, about 80x (#45, `python -m benchmarks.snapshot`). The escape hatch
+is real — but it is HTTP-only, so it does not help the in-process case this
+paragraph is about. Embedded still pays the ~25 s per process.
 
 ## 5. What this engine actually has, measured
 
@@ -264,7 +267,7 @@ Kept short deliberately: the claims that can be reproduced today.
 | ~52K nodes/s, ~3.1K edges/s ingest | **Measured, no command on this branch** | figures from #10, which adds the `benchmarks.ingest` module that reproduces them |
 | `id` indexes are load-critical — 10.6x | **Measured** | #18 |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
-| Snapshot import "well under a second" | **Unmeasured** | #45 |
+| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** | #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
 | Graph + vector in one binary | **Available, measured; unused in this repo** | #48 |
