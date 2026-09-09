@@ -242,7 +242,7 @@ python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
 ```
 
 **Import takes 0.31 s** — median of 5 runs against a fresh server 1.7.0,
-`kg-snapshots-v9`, range 0.23–0.40 s, measured 2026-09-09 (#45). Building the
+`kg-snapshots-v9`, range 0.225–0.396 s, measured 2026-09-09 (#45). Building the
 same graph with `python -m etl.loader` takes **24.4 s**, so the snapshot is
 about **80× faster**.
 

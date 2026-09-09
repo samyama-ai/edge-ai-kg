@@ -26,10 +26,24 @@ is restoring a Neo4j *backup*, which this repo has not measured (#47).
 ## Three things measured here that the flow depends on
 
 **Import appends; it does not replace.** Importing into a graph that already
-holds data leaves both -- 25,150 nodes became 50,295 on the second import,
-measured. The README's flow starts from a fresh server, so it is correct as
-written, but re-running it against a live one silently doubles the graph. This
-command therefore refuses to time an import into a non-empty graph.
+holds data leaves both. Measured on one container, twice, because the two cases
+differ in a way that matters:
+
+| | nodes | edges |
+|---|---:|---:|
+| after 1st import | 25,150 | 76,303 |
+| **A:** 2nd import, nothing deleted | **50,300** | **152,606** |
+| **B:** 2nd import, after `delete_graph` | 25,150 | **152,606** |
+
+In **A** both double, and any sanity check catches it. **B** is the dangerous
+one and the one this command has to survive: the nodes were deleted and put
+back, so the count returns to 25,150 while the edges accumulate. A node-count
+check passes and everything looks fine. See the `delete_graph` section below --
+the two rows are the same experiment seen from either side.
+
+The README's flow starts from a fresh server, so it is correct as written; it is
+re-running it against a live one that silently doubles the graph. This command
+refuses to time an import into a non-empty graph.
 
 **`status()` under-reports after a delete, so emptiness is checked by query.**
 After `delete_graph("default")` the server reported `nodes=0, edges=152594`
@@ -49,8 +63,9 @@ survives it") reaching `delete_graph` and reaching *edges*. Measured:
 | after 2nd import | 25,150 / **152,606** | 25,150 / 152,606 |
 
 The graph queries as empty and then the deleted edges come back the moment nodes
-carrying their ids exist again -- 76,303 old plus 76,303 new. Nodes do not
-double, so a node-count check passes and everything looks fine.
+carrying their ids exist again -- 76,303 old plus 76,303 new. **Nodes do not
+double here**, unlike case A above, because they really were deleted; so a
+node-count check passes and everything looks fine.
 
 An earlier version of this command used `delete_graph` between `--repeats` and
 duly reported five clean-looking timings over a graph reaching 381,515 edges.
@@ -116,7 +131,7 @@ def time_export(url: str, path: Path) -> tuple[float, int]:
     return elapsed, len(response.content)
 
 
-def _restart(command: str, url: str, client) -> None:
+def _restart(command: str, url: str) -> None:
     """Run the user's restart command, then wait for the server to answer again.
 
     Waiting on `/api/status` rather than sleeping a fixed time: a container
@@ -163,6 +178,15 @@ def _report(label: str, times: list[float]) -> None:
 def main(url, path, export_to, repeats, verify_queries, restart_cmd):
     if not path and not export_to:
         raise SystemExit("give --file to time an import, or --export to time an export")
+    if path and export_to:
+        # They are mutually exclusive by construction, not by preference:
+        # --export needs a graph with something in it, and timing an import
+        # needs an empty one. Together they always die at the second check,
+        # after the export has already run. Refuse up front instead.
+        raise SystemExit(
+            "--export and --file cannot run in one invocation: --export needs a "
+            "loaded graph and timing an import needs an empty one. Export first, "
+            "restart the server, then time the import against the fresh one.")
     client = _client(url)
     click.echo(f"server {client.status().version} at {url}")
 
@@ -217,7 +241,7 @@ def main(url, path, export_to, repeats, verify_queries, restart_cmd):
                 f"{', '.join(f'{t:.3f}s' for t in times)}")
 
         if run < repeats:
-            _restart(restart_cmd, url, client)
+            _restart(restart_cmd, url)
 
     _report(f"import of {path.name} ({path.stat().st_size:,} bytes)", times)
 

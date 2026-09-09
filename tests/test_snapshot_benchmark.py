@@ -75,7 +75,7 @@ def run(monkeypatch, client, snapfile, *args, times=None):
     monkeypatch.setattr(snapshot, "_client", lambda url: client)
     supplied = list(times or [0.25] * 10)
     monkeypatch.setattr(snapshot, "time_import", lambda url, path: supplied.pop(0))
-    monkeypatch.setattr(snapshot, "_restart", lambda cmd, url, client: None)
+    monkeypatch.setattr(snapshot, "_restart", lambda cmd, url: None)
     return CliRunner().invoke(
         snapshot.main,
         ["--url", "http://x", "--file", str(snapfile), *args])
@@ -139,6 +139,22 @@ def test_export_refuses_when_there_is_nothing_to_export(monkeypatch, tmp_path):
         snapshot.main, ["--url", "http://x", "--export", str(tmp_path / "o.sgsnap")])
     assert result.exit_code != 0
     assert "nothing to export" in result.output
+
+
+def test_export_and_import_cannot_run_together(monkeypatch, snapfile, tmp_path):
+    """They are mutually exclusive by construction, not by preference.
+
+    `--export` needs a graph with something in it; timing an import needs an
+    empty one. Passing both always died at the second check, *after* the export
+    had already run and written a file. It now refuses up front.
+    """
+    monkeypatch.setattr(snapshot, "_client", lambda url: FakeClient([(25_150, 76_303)]))
+    result = CliRunner().invoke(snapshot.main, [
+        "--url", "http://x", "--file", str(snapfile),
+        "--export", str(tmp_path / "o.sgsnap")])
+    assert result.exit_code != 0
+    assert "cannot run in one invocation" in result.output
+    assert not (tmp_path / "o.sgsnap").exists(), "it refused after exporting"
 
 
 def test_it_asks_for_something_to_do():
