@@ -136,6 +136,94 @@ def unexplained(relative_path: str,
 NO_GENERATED_FIGURES: set[str] = set()
 
 
+# Figures that describe a *different artifact* than the current build, so no
+# layer of the graph holds them and that is correct.
+#
+# Deliberately narrow, and each entry carries its reason. The temptation on a
+# failure here is to add the number and move on, which would turn this file into
+# a list of numbers someone once saw. An entry is only defensible when the
+# document says, in the same breath, what the figure is a count *of*.
+# Each entry is `(doc, number, unit) -> marker`, and the marker must appear on
+# the *same line* as the figure.
+#
+# The line requirement is not decoration. 25,145 / 76,291 are the exact numbers
+# this file was written to catch: `test_published_counts`'s own docstring
+# records them as the #17 drift, quoted as the build's counts when the build
+# held 25,150 / 76,303. A file-wide exemption would re-legitimise that bug
+# verbatim -- a document could revert to publishing 25,145 as its headline and
+# this guard would wave it through, because the number also appears once in a
+# snapshot sentence. Tying the exemption to the sentence keeps it an exemption
+# for *that claim* rather than for the number.
+PUBLISHED_ELSEWHERE: dict[tuple[str, int, str], str] = {
+    ("README.md", 25_145, "nodes"): "snapshot",
+    ("README.md", 76_291, "edges"): "snapshot",
+    ("DATASET_CARD.md", 25_145, "nodes"): "snapshot",
+    ("DATASET_CARD.md", 76_291, "edges"): "snapshot",
+}
+
+
+def exempt_lines(relative_path: str, number: int, unit: str, marker: str) -> list[str]:
+    """Lines publishing `number unit` that also carry `marker`."""
+    text = (ROOT / relative_path).read_text(encoding="utf-8")
+    formatted = f"{number:,}"
+    return [line for line in text.splitlines()
+            if formatted in line and unit in line and marker.lower() in line.lower()]
+
+
+def is_exempt(relative_path: str, number: int, unit: str) -> bool:
+    marker = PUBLISHED_ELSEWHERE.get((relative_path, number, unit))
+    return bool(marker) and bool(exempt_lines(relative_path, number, unit, marker))
+
+
+def test_every_exempted_figure_is_still_published():
+    """`PUBLISHED_ELSEWHERE` cannot outlive the text it excuses.
+
+    Without this the list only ever grows: a figure gets corrected in the
+    document, its exemption stays, and the next figure that happens to collide
+    with that number is waved through. An exemption is a claim about a specific
+    sentence, so it fails when that sentence goes.
+    """
+    stale = [f"{doc}: {number:,} {unit} (expected a line mentioning {marker!r})"
+             for (doc, number, unit), marker in PUBLISHED_ELSEWHERE.items()
+             if not exempt_lines(doc, number, unit, marker)]
+    assert not stale, (
+        "PUBLISHED_ELSEWHERE excuses figures no longer published on a line that "
+        "explains them:\n  " + "\n  ".join(stale)
+        + "\n\nRemove the entries. An exemption that outlives its sentence "
+          "silently excuses the next figure that happens to match."
+    )
+
+
+def test_an_exempted_figure_is_not_excused_elsewhere_in_the_same_document(counts):
+    """A snapshot figure must not double as the document's headline count.
+
+    25,145 / 76,291 are the #17 drift exactly -- quoted as the build's counts
+    when the build held 25,150 / 76,303. The exemption exists for one sentence
+    about the published `.sgsnap`; this asserts it has not become licence to
+    publish those numbers as the graph's own.
+    """
+    both_nodes, both_edges = counts["both"]
+    problems = []
+    for (doc, number, unit), marker in PUBLISHED_ELSEWHERE.items():
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        formatted = f"{number:,}"
+        carrying = [line for line in text.splitlines()
+                    if formatted in line and unit in line]
+        unexplained_lines = [line.strip()[:90] for line in carrying
+                             if marker.lower() not in line.lower()]
+        if unexplained_lines:
+            problems.append(f"{doc}: {formatted} {unit} also appears without "
+                            f"{marker!r} on: {unexplained_lines}")
+        # And the document must still publish the real figure, so a revert
+        # cannot satisfy the exemption by deleting the true one.
+        current = both_nodes if unit == "nodes" else both_edges
+        if (current, unit) not in figures_in(doc):
+            problems.append(f"{doc}: no longer publishes the build's own "
+                            f"{current:,} {unit}, so the exempted {formatted} "
+                            f"is the only figure of its kind on the page")
+    assert not problems, "\n  ".join(["", *problems])
+
+
 def test_the_generated_layer_figures_are_exact(counts):
     """Ours, deterministic from the seed. A mismatch here is a bug, not drift.
 
@@ -184,6 +272,8 @@ def test_every_published_figure_matches_some_layer_of_the_graph(counts):
     problems = []
     for doc in sorted(set(GENERATED_DOCS) | set(BOTH_LAYER_DOCS)):
         for number, unit in sorted(unexplained(doc, known)):
+            if is_exempt(doc, number, unit):
+                continue
             problems.append(f"{doc}: publishes {number:,} {unit}")
     assert not problems, (
         "figures published in the docs that no layer of the graph holds:\n  "

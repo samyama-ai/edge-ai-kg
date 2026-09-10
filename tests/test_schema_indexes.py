@@ -76,6 +76,12 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
     "benchmarks/queries.py",
+    # Its Cypher is two count queries used to decide whether the graph is empty.
+    # They do name a property -- `count(n.id)` -- but only in a `RETURN`, never
+    # in a `WHERE`, so they justify no index under this file's rule that only a
+    # filter counts as a user. Scanned because the guard's contract is "every
+    # file with Cypher is read", not "every file that might justify an index".
+    "benchmarks/snapshot.py",
     "benchmarks/vector_probe.py",
     "demo/demo.py",
     "demo/questions.py",

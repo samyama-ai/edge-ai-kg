@@ -224,9 +224,9 @@ check.
 
 ## Load it without building it
 
-A prebuilt `.sgsnap` snapshot of the full graph (25,150 nodes / 76,303 edges,
-both layers, ~970 KB gzipped) is published on the engine repo's releases, so you
-can skip the ETL entirely:
+A prebuilt `.sgsnap` snapshot of the graph (both layers, 992 KB — the file is
+itself gzip, 10.8 MB uncompressed) is published on the engine repo's releases,
+so you can skip the ETL entirely:
 
 ```bash
 # 1. start the engine (from a samyama-graph checkout)
@@ -241,8 +241,42 @@ curl -X POST -F "file=@edge-ai-kg.sgsnap" http://127.0.0.1:8080/api/snapshot/imp
 python -m benchmarks.run_benchmark --url http://127.0.0.1:8080
 ```
 
-Import takes well under a second. All 16 catalog queries are verified to work
-against the imported snapshot, not just against a freshly-loaded graph.
+**Import takes 0.31 s** — median of 5 runs against a fresh server 1.7.0,
+`kg-snapshots-v9`, range 0.225–0.396 s, measured 2026-09-09 (#45). Building the
+same graph with `python -m etl.loader` takes **24.4 s**, so the snapshot is
+about **80× faster**.
+
+That comparison is only fair if you say what each one does: a `.sgsnap` is
+**serialised internal state**, and the loader is a **build** — it renders
+Cypher, parses it, mints ids and constructs indexes. The snapshot is faster
+because it skips all of that, which also means it can only reproduce a graph
+someone already built. The honest counterpart on the Neo4j side is restoring a
+backup, not `LOAD CSV`; that has not been measured (#47).
+
+Two things worth knowing before you quote the number:
+
+- **The download is slower than the import.** Fetching the 992 KB file took
+  1.14 s here — about four times the import it precedes.
+- **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,150 /
+  76,303 a fresh build produces. It was exported from a slightly earlier build,
+  and `data/` is not pinned (see `docs/build-manifest.json`).
+
+All 16 catalog queries were verified to return rows against the imported
+snapshot, not just against a freshly-loaded graph — re-check with
+`--verify-queries` below.
+
+Reproduce, including the export side (0.63 s, 989 KB):
+
+```bash
+python -m benchmarks.snapshot --url http://127.0.0.1:8080 \
+  --file edge-ai-kg.sgsnap --repeats 5 --verify-queries \
+  --restart-cmd '<command that restarts your server with an empty data dir>'
+```
+
+**Import appends, it does not replace.** Running the import twice against one
+server leaves both copies — 76,303 edges became 152,606. The flow above starts
+from a fresh server so it is correct as written; the benchmark refuses to time
+an import into a non-empty graph for the same reason.
 
 Export your own after any change:
 
