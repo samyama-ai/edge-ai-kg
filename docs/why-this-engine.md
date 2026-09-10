@@ -261,17 +261,18 @@ Kept short deliberately: the claims that can be reproduced today.
 
 | Claim | Status | How |
 |---|---|---|
-| Runs in-process, no server, no install beyond `pip` | **Measured** | 2.5 ms cold to first query; every test and demo does it |
-| Embedded mode does not persist — every process reloads | **Measured** | #4; ~25 s for this graph |
+| Runs in-process, no server, no install beyond `pip` | **Measured** — 2.6 ms cold to first query | `python -m benchmarks.ingest --cold-start` |
+| Embedded mode does not persist — every process reloads | **Measured** — ~25 s for this graph | `python -m benchmarks.ingest` (#4) |
 | Apache-2.0, embeddable and redistributable | **Quoted** | [`LICENSE`](../LICENSE) |
-| ~52K nodes/s, ~3.1K edges/s ingest | **Measured, no command on this branch** | figures from #10, which adds the `benchmarks.ingest` module that reproduces them |
-| `id` indexes are load-critical — 10.6x | **Measured** | #18 |
+| ~48K nodes/s, ~3.0K edges/s ingest | **Measured** | `python -m benchmarks.ingest` |
+| `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
+| | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
-| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** | #45 |
+| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** | `python -m benchmarks.snapshot --file kg.sgsnap` (#45) |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
-| Graph + vector in one binary | **Available, measured; unused in this repo** | #48 |
-| PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | — |
+| Graph + vector in one binary | **Available, measured; unused in this repo** | `python -m benchmarks.vector_probe --repro` (#48) |
+| PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | [`client-api.md`](client-api.md); **no command in this repo** |
 
 ---
 

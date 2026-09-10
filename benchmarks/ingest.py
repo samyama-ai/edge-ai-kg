@@ -115,7 +115,7 @@ def patterns_per_statement(edges, batch: int) -> float:
 
 
 def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
-                  graph: str, patterns: float) -> dict:
+                  graph: str, patterns: float, skip_indexes: bool = False) -> dict:
     """One clean load into a reset graph. Returns seconds and rates."""
     client = client_factory()
     # Reset first, exactly as `etl/loader.py` does. Embedded hides the need for
@@ -128,8 +128,13 @@ def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
     reset_graph(client, graph)
     # The loader's own routine rather than a copy of it. Applied before every
     # timed load and outside the timer: without the id indexes, edge creation is
-    # ~10x slower (#18), which would swamp everything measured here.
-    apply_schema(client, graph)
+    # much slower (#18), which would swamp everything measured here.
+    #
+    # `--no-indexes` skips it deliberately, which is the only way to reproduce
+    # that claim rather than take it on trust. `docs/why-this-engine.md` states
+    # the ratio; before this flag existed nothing in the repo produced it.
+    if not skip_indexes:
+        apply_schema(client, graph)
 
     t0 = time.perf_counter()
     for label in NODE_LABELS:
@@ -173,12 +178,47 @@ def median_of(runs: list[dict], key: str):
 @click.option("--node-batch", default=250, show_default=True, type=int)
 @click.option("--edge-batch", default=None, type=int,
               help="Defaults to etl.helpers.create_edges' own default.")
+@click.option("--cold-start", is_flag=True,
+              help="Time constructing an embedded client and answering one "
+                   "trivial query, which is the in-process claim "
+                   "`docs/why-this-engine.md` leads with. Loads nothing.")
+@click.option("--no-indexes", is_flag=True,
+              help="Load without `apply_schema`, to reproduce the index-"
+                   "criticality figure `docs/why-this-engine.md` publishes. "
+                   "Every endpoint lookup becomes a scan; this is a measurement, "
+                   "not a mode anyone should load in.")
 @click.option("--sweep-edge-batch", is_flag=True,
               help="Time a range of edge batch sizes instead of one load.")
 @click.option("--json-out", type=click.Path(), default=None)
 def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
-         sweep_edge_batch, json_out):
+         cold_start, no_indexes, sweep_edge_batch, json_out):
     import inspect
+
+    if cold_start:
+        # Constructing the client and answering one query, with nothing loaded.
+        # Separately timed because the claim is about *starting*, and any load
+        # would bury a millisecond figure under twenty-five seconds.
+        samples = []
+        for _ in range(max(repeats, 5)):
+            start = time.perf_counter()
+            client = connect(url)
+            client.query("RETURN 1", graph)
+            samples.append((time.perf_counter() - start) * 1000)
+        # The first run is the only cold one. Everything after it reuses an
+        # already-imported extension in the same process, so a median over all
+        # of them measures "construct another client", not "start". Reporting
+        # only the median would have quietly replaced a 2.5 ms claim with 0.02.
+        click.echo(f"cold start -> first query "
+                   f"({'embedded' if url is None else url})")
+        click.echo(f"  cold (first in this process)  {samples[0]:.2f} ms")
+        if len(samples) > 1:
+            warm = samples[1:]
+            click.echo(f"  warm (same process, {len(warm)} runs)  "
+                       f"median {statistics.median(warm):.2f} ms")
+            click.echo("  The claim in docs/why-this-engine.md is the cold "
+                       "figure. A fresh\n  process is the only way to measure "
+                       "it -- re-run this command for another.")
+        return
     if edge_batch is None:
         edge_batch = inspect.signature(create_edges).parameters["batch"].default
 
@@ -198,12 +238,17 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
     batches = ([40, 50, 60, 75, 100, 200] if sweep_edge_batch else [edge_batch])
     results = []
 
+    if no_indexes:
+        click.echo("  NO INDEXES: `apply_schema` skipped, so every endpoint "
+                   "lookup is a scan.\n  Compare against a normal run -- that "
+                   "ratio is the index-criticality figure.")
     if sweep_edge_batch:
         click.echo(f"{'edge batch':>11}{'median s':>10}{'edges/s':>10}"
                    f"{'pat/stmt':>10}{'ms/stmt':>9}")
     for batch in batches:
         patterns = round(patterns_per_statement(fleet.edges, batch), 1)
-        runs = [time_one_load(factory, fleet, node_batch, batch, graph, patterns)
+        runs = [time_one_load(factory, fleet, node_batch, batch, graph, patterns,
+                              skip_indexes=no_indexes)
                 for _ in range(repeats)]
         entry = dict(runs[0])
         entry["edge_seconds"] = median_of(runs, "edge_seconds")
