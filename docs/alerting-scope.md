@@ -3,6 +3,12 @@
 Answers the scoping question in #33, and the three decisions it defers to:
 #34 (location), #38 (alert/rule/threshold state), #39 (ownership).
 
+**Read [`alerting.md`](alerting.md) first.** It answers #41 under the same
+tracking issue and establishes the half that matters most: the graph is *not* an
+alerting product, measured by absence — no `timestamp`, no threshold, no rule
+anywhere in the schema. This page does not re-argue that. It takes it as settled
+and decides which of the remaining questions this repo builds.
+
 #33 asks it plainly: *a company puts a sensor somewhere. How do they get an
 alert when something is wrong, and can the graph help at all?* It also says
 **nothing is built until the decision exists**, which is why this page comes
@@ -25,7 +31,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
-| #35 | blast radius: what stops with this sensor | no | **take** |
+| #35 | blast radius: what stops with this sensor | no | **take** — in review (#96) |
 | #36 | root cause versus symptom | no | **take** |
 | #37 | silent degradation against a latency budget | no | **take** |
 | #40 | which certifications a failure implicates | no | **take** |
@@ -53,7 +59,11 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35` is delivered: `EA17` (#96).
+`#35` is **not** delivered on `main`. `EA17` is written and reviewed in #96,
+which is open at the time of writing; until it merges the catalog is
+`EA01`-`EA16` and this row is a decision to take the work, not a claim that it
+is done. `tests/test_alerting_scope.py` pins that distinction rather than
+trusting this sentence.
 
 ## Why the three are declined
 
@@ -61,9 +71,14 @@ That is the alerting theme and the hero question meeting in one row.
 
 `Sensor` carries `modality`, `sample_rate_hz`, `channels`, `adc_bits`. `Board`
 carries a form factor and a price. **Nothing anywhere carries a place**, and the
-one near-miss is worth naming so nobody mistakes it for one: `Vendor.country`
-(`DE`, `IN`, `JP`, `UK`, `US`) is where a *vendor* is headquartered, not where
-anything is installed.
+one near-miss is worth naming so nobody mistakes it for one: `Vendor.country` is
+where a *vendor* is headquartered, not where anything is installed.
+
+It is also thinner than it looks. Only the 8 **synthetic** vendors carry a value
+(`DE`, `IN`, `JP`, `UK`, `US`); all 7 real-layer vendors — Qualcomm,
+STMicroelectronics, Bosch and the rest — carry `""`, because no upstream source
+supplies it. So the one property that resembles a location is empty for every
+row that is real.
 
 Three reasons not to add it:
 

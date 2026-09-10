@@ -345,7 +345,8 @@ upstream sources.
 
 Three things a reader may reasonably expect and will not find. Each was decided
 rather than overlooked, with the reasoning in
-[`docs/alerting-scope.md`](docs/alerting-scope.md):
+[`docs/alerting-scope.md`](docs/alerting-scope.md) and the wider
+can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
 - **No physical location.** Nothing carries a site, zone, room or coordinate.
   `Vendor.country` is where a vendor is headquartered, not where anything is

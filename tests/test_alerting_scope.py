@@ -29,26 +29,68 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "alerting-scope.md"
 
-# Substrings that would indicate a physical-location property. `country` is
-# deliberately absent: `Vendor.country` exists, means where a vendor is
-# headquartered, and the document says so explicitly. Listing it here would
-# either fail on a legitimate property or require an exception that reads like a
-# loophole.
-LOCATION_HINTS = ("site", "zone", "room", "building", "floor", "location",
-                  "latitude", "longitude", "geo", "address", "region", "city",
-                  "place", "rack", "ward", "premises")
+# Words that would indicate a physical-location property, matched as whole
+# tokens rather than substrings. Substring matching had `city` inside
+# `capacity`, `site` inside `website`, `rack` inside `track`, `place` inside
+# `placement` and `zone` inside `ozone` -- so a `flash_capacity_kb` or a
+# `Vendor.website` would fail this suite with a message telling the developer to
+# revisit a decision about physical location, which is worse than not checking.
+#
+# `country` is deliberately absent: `Vendor.country` exists, means where a
+# vendor is headquartered, and the document says so. Listing it here would need
+# an exception that reads like a loophole.
+LOCATION_WORDS = frozenset((
+    "site", "sites", "zone", "zones", "room", "rooms", "building", "buildings",
+    "floor", "floors", "location", "locations", "latitude", "longitude", "lat",
+    "lon", "geo", "address", "region", "city", "place", "rack", "ward",
+    "premises", "campus", "facility",
+))
 
 DECLINED_LABELS = {
+    # #34 -- physical location. Labels as well as properties: a `Location` node
+    # carrying only `{id, name}` trips no property hint, so guarding one and not
+    # the other left the decision reversible in silence.
     "Site": "#34 — physical location",
     "Zone": "#34 — physical location",
+    "Location": "#34 — physical location",
+    "Room": "#34 — physical location",
+    "Building": "#34 — physical location",
+    "Facility": "#34 — physical location",
+    "Campus": "#34 — physical location",
+    "Ward": "#34 — physical location",
     "Team": "#39 — ownership",
     "Contact": "#39 — ownership",
+    "Owner": "#39 — ownership",
+    "Person": "#39 — ownership",
+    "Asset": "#39 — ownership",
     "Organisation": "#39 — ownership",
     "Organization": "#39 — ownership",
     "Alert": "#38 — alerting state",
     "Rule": "#38 — alerting state",
     "Threshold": "#38 — alerting state",
 }
+
+# The same decisions expressed as edges. A relationship between two already
+# permitted labels needs no new label, so `DECLINED_LABELS` cannot see it --
+# an `OWNS` edge from `Vendor` to `Board` would make `DATASET_CARD.md`'s "no
+# team, contact or `OWNS` edge" false with the suite green.
+DECLINED_EDGES = {
+    "DEPLOYED_AT": "#34 — physical location",
+    "LOCATED_AT": "#34 — physical location",
+    "INSTALLED_AT": "#34 — physical location",
+    "OWNS": "#39 — ownership",
+    "OWNED_BY": "#39 — ownership",
+    "RESPONSIBLE_FOR": "#39 — ownership",
+    "ALERTS": "#38 — alerting state",
+    "TRIGGERS": "#38 — alerting state",
+}
+
+
+def tokens(name: str) -> set[str]:
+    """`flash_capacity_kb` -> {flash, capacity, kb}. Splits on `_`, `-` and case."""
+    import re
+
+    return {t.lower() for t in re.split(r"[_\-\s]+|(?<=[a-z])(?=[A-Z])", name) if t}
 
 
 @pytest.fixture(scope="module")
@@ -57,12 +99,15 @@ def fleet():
     from etl import onnx_catalog as oc
     from etl import real_layer
 
+    # All three cached sources, not just the ONNX catalogue: `build_real` calls
+    # `ort.load_cached()` and `tiny.load_cached()` itself, so a partial
+    # `etl.download_data` gave a raw traceback instead of the intended skip.
     try:
         ops = oc.load_cached()
+        built = gen.generate(seed=20260814, scale=1.0, operators=ops)
+        real_layer.build_real(built, ops)
     except FileNotFoundError:
         pytest.skip("run `python -m etl.download_data` first")
-    built = gen.generate(seed=20260814, scale=1.0, operators=ops)
-    real_layer.build_real(built, ops)
     return built
 
 
@@ -88,12 +133,28 @@ def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
     )
 
 
+def test_no_edge_type_this_repo_decided_not_to_add_has_appeared(fleet):
+    """Labels are not the only way to reverse these decisions.
+
+    An `OWNS` edge between `Vendor` and `Board`, or a `DEPLOYED_AT` between
+    `Deployment` and something existing, needs no new label -- so the label
+    guard cannot see it, and `DATASET_CARD.md`'s "no team, contact or `OWNS`
+    edge" would be false with the suite green.
+    """
+    present = {rel for _sl, _s, rel, _tl, _t, _p in fleet.edges}
+    added = {rel: why for rel, why in DECLINED_EDGES.items() if rel in present}
+    assert not added, (
+        f"edge types this repo decided not to add are now in the graph: {added}. "
+        f"Update docs/alerting-scope.md and DATASET_CARD.md, or drop the edge."
+    )
+
+
 def test_nothing_carries_a_physical_location(fleet):
     """The claim `#34` rests on, and the one most likely to go quietly stale."""
     found = [f"{label}.{prop}"
              for label, rows in fleet.nodes.items() if rows
              for prop in sorted(properties_of(fleet, label))
-             if any(hint in prop.lower() for hint in LOCATION_HINTS)]
+             if tokens(prop) & LOCATION_WORDS]
     assert not found, (
         f"location-like properties appeared: {found}. docs/alerting-scope.md "
         f"says nothing carries a place, and DATASET_CARD.md repeats it. Revisit "
@@ -101,15 +162,44 @@ def test_nothing_carries_a_physical_location(fleet):
     )
 
 
-def test_vendor_country_is_still_the_only_near_miss(fleet):
-    """Named in the document so nobody mistakes it for a deployment location."""
+def test_vendor_country_is_the_only_near_miss_and_is_empty_where_it_is_real(fleet):
+    """Named in the document so nobody mistakes it for a deployment location.
+
+    Two claims, because the earlier version of this test made neither. It was
+    called `..._is_still_the_only_near_miss` and never checked uniqueness, and
+    its value assertion passed if a single vendor out of fifteen carried one.
+    """
     assert "country" in properties_of(fleet, "Vendor"), (
         "`Vendor.country` is gone. docs/alerting-scope.md calls it out as the "
         "one near-miss a reader might take for a location; if it no longer "
         "exists, that paragraph is answering a question nobody has."
     )
-    countries = {row.get("country") for row in fleet.nodes["Vendor"]}
-    assert countries - {""}, "Vendor.country is present but empty everywhere"
+
+    # Uniqueness: no *other* label may carry a country-like property, or the
+    # document's "the one near-miss" is wrong.
+    others = [f"{label}.{prop}"
+              for label, rows in fleet.nodes.items() if rows and label != "Vendor"
+              for prop in sorted(properties_of(fleet, label))
+              if prop.lower() in ("country", "nation", "territory")]
+    assert not others, (
+        f"docs/alerting-scope.md calls `Vendor.country` *the* near-miss; "
+        f"{others} now qualify too."
+    )
+
+    # And the split the document publishes: populated on the synthetic vendors,
+    # empty on every real one, because no upstream supplies it.
+    by_provenance = {}
+    for row in fleet.nodes["Vendor"]:
+        by_provenance.setdefault(row.get("provenance"), set()).add(row.get("country"))
+    assert by_provenance.get("real") == {""}, (
+        f"real-layer vendors now carry a country: {by_provenance.get('real')}. "
+        f"docs/alerting-scope.md says the one location-like property is empty "
+        f"for every row that is real."
+    )
+    assert by_provenance.get("synthetic", set()) - {""}, (
+        "synthetic vendors carry no country at all, so the document's example "
+        "values are describing nothing"
+    )
 
 
 def test_the_takeable_questions_are_still_buildable_on_this_schema(fleet):
@@ -136,6 +226,13 @@ def test_the_takeable_questions_are_still_buildable_on_this_schema(fleet):
     ):
         if prop not in properties_of(fleet, label):
             missing.append(f"{issue}: {label}.{prop}")
+
+    # The join the document lists as verified. Without it #37's properties exist
+    # and cannot be brought together, so the table would stay green while
+    # ceasing to be a measurement.
+    missing.extend(f"#37 silent degradation: Deployment->ClinicalTask needs {edge}"
+                   for edge in ("OF_VARIANT", "VARIANT_OF", "SOLVES")
+                   if edge not in edges)
 
     assert not missing, (
         "docs/alerting-scope.md takes these on because today's schema already "
