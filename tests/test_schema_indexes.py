@@ -16,7 +16,9 @@ Measured before removing them, embedded engine at `--scale 1.0`:
 
 So the `id` indexes are load-*critical* -- `etl/helpers.py` resolves every edge
 endpoint with `WHERE v.id = ...`, and without the index each of 76,303 edges
-costs a label scan, a **10.6x** slowdown. The non-id indexes are the opposite:
+costs a label scan -- **10.6x** slower on `samyama` 0.6.1 and **6.4x** on
+1.7.1, reproducible with `python -m benchmarks.ingest --no-indexes`. The
+non-id indexes are the opposite:
 ~1.5s of load, about 6%, for queries that finish in milliseconds. Removing the
 five changed no catalog row and no query time outside noise (+9ms summed across
 all 16, against 562ms).
@@ -263,7 +265,8 @@ def test_every_label_has_an_id_index():
     assert not missing, (
         f"labels with no id index: {sorted(missing)}. etl/helpers.py resolves "
         f"edge endpoints with `WHERE v.id = ...`; without the index each edge "
-        f"costs a label scan (measured 10.6x slower to load)."
+        f"costs a label scan (measured 10.6x slower to load on 0.6.1, 6.4x "
+        f"on 1.7.1 -- `python -m benchmarks.ingest --no-indexes`)."
     )
     extra = indexed - set(NODE_LABELS)
     assert not extra, f"id index on a label the loader never writes: {sorted(extra)}"

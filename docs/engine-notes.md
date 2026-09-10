@@ -535,6 +535,8 @@ batches: total patterns actually *fall* as batches grow (51,112 at 250 vs 56,823
 at 50) while time doubles, which is what rules out pattern count as the driver.
 
 **The `id` indexes dominate everything above.** Without them the same edge load
-takes 234s instead of 22s, a 10.6x penalty, because each endpoint lookup becomes
+takes 234s instead of 22s, a 10.6x penalty on `samyama` 0.6.1 -- re-measured at
+**6.4x** on 1.7.1 (161s against 25s), reproducible with
+`python -m benchmarks.ingest --no-indexes` -- because each endpoint lookup becomes
 a label scan (#18). The numbers here all assume `schema/edge_ai_kg.cypher` has
 been applied.

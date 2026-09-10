@@ -33,7 +33,8 @@ patterns**. Measured at `--scale 1.0` on the embedded build:
 `O(p^2)` at the larger sizes. Below ~40 the per-statement overhead takes over
 again, so the curve has a floor rather than trending to zero.
 
-Node batching, by contrast, is **flat**: 52-53K/s at every size from 100 to
+Node batching, by contrast, is **flat**: ~48K/s on 1.7.1 (52-53K when this was
+written on 0.6.1) at every size from 100 to
 2000, because a node `CREATE` looks nothing up. That contrast is the finding --
 the gap is not "writes are slow", it is the endpoint lookup.
 
@@ -114,6 +115,20 @@ def patterns_per_statement(edges, batch: int) -> float:
     return total / statements if statements else 0.0
 
 
+def _supports_show_indexes(client, graph: str) -> bool:
+    """Whether this build answers `SHOW INDEXES` at all.
+
+    Returned rather than raised: on a build that cannot report its indexes the
+    check is impossible, and the caller falls back to trusting the embedded
+    guarantee. That is stated in `--no-indexes`'s help rather than hidden.
+    """
+    try:
+        client.query("SHOW INDEXES", graph)
+    except Exception:  # noqa: BLE001 - any refusal means "cannot check"
+        return False
+    return True
+
+
 def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
                   graph: str, patterns: float, skip_indexes: bool = False) -> dict:
     """One clean load into a reset graph. Returns seconds and rates."""
@@ -133,7 +148,25 @@ def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
     # `--no-indexes` skips it deliberately, which is the only way to reproduce
     # that claim rather than take it on trust. `docs/why-this-engine.md` states
     # the ratio; before this flag existed nothing in the repo produced it.
-    if not skip_indexes:
+    if skip_indexes:
+        # Skipping `apply_schema` is not the same as having no indexes.
+        # `reset_graph` issues `DETACH DELETE`, which drops no index, and the
+        # schema file has no DROP path -- so against a server that has ever had
+        # a normal load, this would time a fully indexed load while printing
+        # "NO INDEXES" and yield a ~1.0x ratio. Embedded is safe because each
+        # `SamyamaClient.embedded()` is a fresh in-memory graph; anything else
+        # is refused rather than measured wrongly.
+        indexes = client.query("SHOW INDEXES", graph).records \
+            if _supports_show_indexes(client, graph) else None
+        if indexes:
+            raise SystemExit(
+                f"--no-indexes was given but the target already has "
+                f"{len(indexes)} index(es). `DETACH DELETE` does not drop them "
+                f"and this repo has no DROP path, so the run would time an "
+                f"indexed load and label it unindexed. Use an embedded target "
+                f"(omit --url), or start the server with an empty data "
+                f"directory.")
+    else:
         apply_schema(client, graph)
 
     t0 = time.perf_counter()
@@ -194,12 +227,20 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
          cold_start, no_indexes, sweep_edge_batch, json_out):
     import inspect
 
+    if cold_start and (json_out or sweep_edge_batch):
+        raise SystemExit(
+            "--cold-start measures client construction and one query; it loads "
+            "nothing, so --json-out and --sweep-edge-batch have nothing to "
+            "report on. An earlier version accepted them and exited 0 without "
+            "writing the file, which a CI step would read as success.")
     if cold_start:
         # Constructing the client and answering one query, with nothing loaded.
         # Separately timed because the claim is about *starting*, and any load
         # would bury a millisecond figure under twenty-five seconds.
         samples = []
-        for _ in range(max(repeats, 5)):
+        # `repeats` as given. `max(repeats, 5)` silently overrode an explicit
+        # `--repeats 1`, and the first run is the only cold one anyway.
+        for _ in range(repeats):
             start = time.perf_counter()
             client = connect(url)
             client.query("RETURN 1", graph)
@@ -239,6 +280,17 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
     results = []
 
     if no_indexes:
+        # Checked before the banner: printing "NO INDEXES" and then refusing
+        # reads as a contradiction.
+        probe = factory()
+        if _supports_show_indexes(probe, graph) and probe.query(
+                "SHOW INDEXES", graph).records:
+            raise SystemExit(
+                "--no-indexes was given but the target already has indexes. "
+                "`DETACH DELETE` does not drop them and this repo has no DROP "
+                "path, so the run would time an indexed load and label it "
+                "unindexed. Use an embedded target (omit --url), or start the "
+                "server with an empty data directory.")
         click.echo("  NO INDEXES: `apply_schema` skipped, so every endpoint "
                    "lookup is a scan.\n  Compare against a normal run -- that "
                    "ratio is the index-criticality figure.")

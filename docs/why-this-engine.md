@@ -228,7 +228,7 @@ so no tuning flag on the other side overturns it.
 | `from samyama import SamyamaClient` | 1.9 ms |
 | `SamyamaClient.embedded()` | 0.0 ms |
 | first query answered | 0.6 ms |
-| **cold interpreter to first answer** | **2.5 ms** |
+| **cold interpreter to first answer** | **2.6 ms** |
 
 No server, no JVM, no Docker, no port, nothing to start. Neo4j cannot do this at
 any speed: it is a server process, and nothing in that family runs *inside* the
@@ -241,7 +241,7 @@ difference between a graph that can sit next to the model and one that cannot.
 empty graph. So `python -m etl.loader` with no `--url` loads a graph and then
 throws it away — it is a timing exercise, not a way to prepare data (#4).
 
-That reframes the 2.5 ms honestly: it is the time to a *usable engine*, not to
+That reframes the 2.6 ms honestly: it is the time to a *usable engine*, not to
 a *loaded graph*. Querying **this** graph in a fresh process means loading it
 first, which is ~25 s at `--scale 1.0` — the figure `python -m etl.loader`
 prints on its `[4/4] loading edges` line. The options
@@ -268,10 +268,10 @@ Kept short deliberately: the claims that can be reproduced today.
 | `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
 | | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
-| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** | `python -m benchmarks.snapshot --file kg.sgsnap` (#45) |
+| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot`; see [`neo4j-comparison.md`](neo4j-comparison.md) and #45 for the full invocation |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
-| Graph + vector in one binary | **Available, measured; unused in this repo** | `python -m benchmarks.vector_probe --repro` (#48) |
+| Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --repro` (#48) |
 | PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | [`client-api.md`](client-api.md); **no command in this repo** |
 
 ---
