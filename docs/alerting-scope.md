@@ -62,8 +62,10 @@ That is the alerting theme and the hero question meeting in one row.
 `#35` is **not** delivered on `main`. `EA17` is written and reviewed in #96,
 which is open at the time of writing; until it merges the catalog is
 `EA01`-`EA16` and this row is a decision to take the work, not a claim that it
-is done. `tests/test_alerting_scope.py` pins that distinction rather than
-trusting this sentence.
+is done. `tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
+pins that distinction rather than trusting this sentence: it fails if `EA17`
+joins `benchmarks/queries.py` while this paragraph still says it has not, and
+fails the other way if the paragraph goes but the catalog is still `EA01`-`EA16`.
 
 ## Why the three are declined
 

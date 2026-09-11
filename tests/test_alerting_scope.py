@@ -42,8 +42,13 @@ DOC = ROOT / "docs" / "alerting-scope.md"
 LOCATION_WORDS = frozenset((
     "site", "sites", "zone", "zones", "room", "rooms", "building", "buildings",
     "floor", "floors", "location", "locations", "latitude", "longitude", "lat",
-    "lon", "geo", "address", "region", "city", "place", "rack", "ward",
-    "premises", "campus", "facility",
+    "lon", "geo", "gps", "address", "region", "district", "city", "place",
+    "rack", "ward", "premise", "premises", "campus", "facility",
+    # `docs/alerting-scope.md` and `DATASET_CARD.md` both say "nothing carries a
+    # site, zone, room or coordinate" -- so `coordinate` has to be here, and a
+    # `Deployment.gps_coordinates` or `Board.postcode` would otherwise make the
+    # central claim false with the suite green.
+    "coordinate", "coordinates", "postcode", "postal",
 ))
 
 DECLINED_LABELS = {
@@ -122,9 +127,44 @@ def test_the_decision_document_exists():
     )
 
 
+def test_the_pending_claim_about_ea17_matches_the_catalog():
+    """The doc says `#35` is not delivered and that a test pins it. This is it.
+
+    Without this the sentence is unenforced -- and the page asserts enforcement,
+    which is worse than silence. If #96 merges, `EA17` joins the catalog and
+    "the catalog is `EA01`-`EA16`" becomes false with the suite green; if #96 is
+    abandoned, the sentence stays correct and this keeps passing.
+
+    Keyed on the catalog rather than on the PR's state, because the catalog is
+    what the sentence actually claims and is the thing this repo can see.
+    """
+    from benchmarks.queries import BY_ID
+
+    text = DOC.read_text(encoding="utf-8")
+    claims_pending = "not** delivered on `main`" in text
+    delivered = "EA17" in BY_ID
+
+    if delivered and claims_pending:
+        raise AssertionError(
+            "`EA17` is in the catalog, so #96 has landed, but "
+            "docs/alerting-scope.md still says `#35` is not delivered and the "
+            "catalog is EA01-EA16. Update the sentence and the verdict table."
+        )
+    if not delivered and not claims_pending:
+        raise AssertionError(
+            "`EA17` is not in the catalog, but docs/alerting-scope.md no longer "
+            "says `#35` is pending. Either the sentence was removed too early "
+            "or the query was reverted."
+        )
+
+
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
     """#34, #38 and #39 were declined. A label appearing means that was reversed."""
-    present = {label for label, rows in fleet.nodes.items() if rows}
+    # Every declared label, not only the populated ones. A `Site` gated behind a
+    # layer or a scale threshold would yield zero rows at this fixture's seed
+    # and scale, reversing the #34 decision in the schema while this reported
+    # nothing.
+    present = set(fleet.nodes)
     added = {label: why for label, why in DECLINED_LABELS.items() if label in present}
     assert not added, (
         f"labels this repo decided not to add are now in the graph: {added}. "
@@ -155,6 +195,14 @@ def test_nothing_carries_a_physical_location(fleet):
              for label, rows in fleet.nodes.items() if rows
              for prop in sorted(properties_of(fleet, label))
              if tokens(prop) & LOCATION_WORDS]
+    # Edges carry properties too -- the 6th tuple element -- and a
+    # `(:Deployment)-[:ON_BOARD {site: "plant-2"}]->(:Board)` would put a place
+    # in the graph without adding a property to any node. Scanning only nodes
+    # left that hole open.
+    found += sorted({f"{rel}.{prop}"
+                     for _sl, _s, rel, _tl, _t, props in fleet.edges
+                     for prop in (props or {})
+                     if tokens(prop) & LOCATION_WORDS})
     assert not found, (
         f"location-like properties appeared: {found}. docs/alerting-scope.md "
         f"says nothing carries a place, and DATASET_CARD.md repeats it. Revisit "
