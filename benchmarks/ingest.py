@@ -74,6 +74,7 @@ import time
 from pathlib import Path
 
 import click
+from click.core import ParameterSource
 
 from etl.helpers import chunked, create_edges, create_nodes
 from etl.loader import NODE_LABELS, apply_schema, reset_graph
@@ -115,22 +116,37 @@ def patterns_per_statement(edges, batch: int) -> float:
     return total / statements if statements else 0.0
 
 
-def _supports_show_indexes(client, graph: str) -> bool:
-    """Whether this build answers `SHOW INDEXES` at all.
+def existing_indexes(client, graph: str, url: str | None):
+    """Indexes on the target, or `[]` when an empty graph is guaranteed anyway.
 
-    Returned rather than raised: on a build that cannot report its indexes the
-    check is impossible, and the caller falls back to trusting the embedded
-    guarantee. That is stated in `--no-indexes`'s help rather than hidden.
+    One round trip, and no silent fallback. An earlier version returned "can
+    this build answer `SHOW INDEXES`?" and, on a build that refuses, let the run
+    continue -- which handed a fully indexed load to the caller under a
+    "NO INDEXES" banner and a ~1.0x ratio that read as "indexes do not matter".
+    A build that cannot report its indexes is a build on which `--no-indexes`
+    cannot be honest, so it is refused rather than assumed.
+
+    Embedded is the one exception, and not by trust: `SamyamaClient.embedded()`
+    constructs a fresh in-memory graph per process, so there is nothing for a
+    prior load to have left behind.
     """
     try:
-        client.query("SHOW INDEXES", graph)
-    except Exception:  # noqa: BLE001 - any refusal means "cannot check"
-        return False
-    return True
+        return client.query("SHOW INDEXES", graph).records
+    except Exception as exc:  # any refusal at all means "cannot check"
+        if url is None:
+            return []
+        raise SystemExit(
+            f"--no-indexes needs to verify the target has no indexes, and "
+            f"{url} refused `SHOW INDEXES` ({type(exc).__name__}). `DETACH "
+            f"DELETE` does not drop indexes and this repo has no DROP path, so "
+            f"continuing would time an indexed load and label it unindexed. "
+            f"Use an embedded target (omit --url), or start the server with an "
+            f"empty data directory.") from exc
 
 
 def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
-                  graph: str, patterns: float, skip_indexes: bool = False) -> dict:
+                  graph: str, patterns: float, skip_indexes: bool = False,
+                  url: str | None = None) -> dict:
     """One clean load into a reset graph. Returns seconds and rates."""
     client = client_factory()
     # Reset first, exactly as `etl/loader.py` does. Embedded hides the need for
@@ -156,8 +172,7 @@ def time_one_load(client_factory, fleet, node_batch: int, edge_batch: int,
         # "NO INDEXES" and yield a ~1.0x ratio. Embedded is safe because each
         # `SamyamaClient.embedded()` is a fresh in-memory graph; anything else
         # is refused rather than measured wrongly.
-        indexes = client.query("SHOW INDEXES", graph).records \
-            if _supports_show_indexes(client, graph) else None
+        indexes = existing_indexes(client, graph, url)
         if indexes:
             raise SystemExit(
                 f"--no-indexes was given but the target already has "
@@ -206,8 +221,10 @@ def median_of(runs: list[dict], key: str):
 @click.option("--seed", default=20260814, show_default=True, type=int)
 @click.option("--layers", type=click.Choice(["all", "generated", "real"]),
               default="all", show_default=True)
-@click.option("--repeats", default=1, show_default=True,
-              help="Loads per configuration; the median is reported.")
+@click.option("--repeats", default=1, show_default=True, type=click.IntRange(1),
+              help="Loads per configuration; the median is reported. With "
+                   "--cold-start, runs after the first are the warm "
+                   "comparison, so 5 is the useful value there.")
 @click.option("--node-batch", default=250, show_default=True, type=int)
 @click.option("--edge-batch", default=None, type=int,
               help="Defaults to etl.helpers.create_edges' own default.")
@@ -223,16 +240,29 @@ def median_of(runs: list[dict], key: str):
 @click.option("--sweep-edge-batch", is_flag=True,
               help="Time a range of edge batch sizes instead of one load.")
 @click.option("--json-out", type=click.Path(), default=None)
-def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
+@click.pass_context
+def main(ctx, url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
          cold_start, no_indexes, sweep_edge_batch, json_out):
     import inspect
 
-    if cold_start and (json_out or sweep_edge_batch):
-        raise SystemExit(
-            "--cold-start measures client construction and one query; it loads "
-            "nothing, so --json-out and --sweep-edge-batch have nothing to "
-            "report on. An earlier version accepted them and exited 0 without "
-            "writing the file, which a CI step would read as success.")
+    if cold_start:
+        # Every option --cold-start cannot act on, not just the two that used to
+        # be named. It loads no fleet, so --scale/--seed/--layers describe a
+        # graph never built, and --node-batch/--edge-batch/--no-indexes describe
+        # a load never run. Accepting them printed a 2.5 ms figure that looked
+        # like an answer to whatever was asked, which is worse than refusing.
+        IGNORED = ("json_out", "sweep_edge_batch", "scale", "seed", "layers",
+                   "no_indexes", "node_batch", "edge_batch")
+        given = [p for p in IGNORED
+                 if ctx.get_parameter_source(p) is not ParameterSource.DEFAULT]
+        if given:
+            raise SystemExit(
+                "--cold-start times constructing a client and answering one "
+                "trivial query. It loads nothing, so it cannot act on "
+                + ", ".join("--" + p.replace("_", "-") for p in given)
+                + ". Drop those flags, or drop --cold-start. An earlier version "
+                "accepted them and exited 0, which a CI step would read as "
+                "success.")
     if cold_start:
         # Constructing the client and answering one query, with nothing loaded.
         # Separately timed because the claim is about *starting*, and any load
@@ -281,10 +311,11 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
 
     if no_indexes:
         # Checked before the banner: printing "NO INDEXES" and then refusing
-        # reads as a contradiction.
-        probe = factory()
-        if _supports_show_indexes(probe, graph) and probe.query(
-                "SHOW INDEXES", graph).records:
+        # reads as a contradiction. `time_one_load` re-checks per load, which is
+        # where the guarantee has to hold; this is the fail-fast copy, so it
+        # reuses one client and one round trip rather than opening a throwaway
+        # connection and asking twice.
+        if existing_indexes(factory(), graph, url):
             raise SystemExit(
                 "--no-indexes was given but the target already has indexes. "
                 "`DETACH DELETE` does not drop them and this repo has no DROP "
@@ -300,7 +331,7 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
     for batch in batches:
         patterns = round(patterns_per_statement(fleet.edges, batch), 1)
         runs = [time_one_load(factory, fleet, node_batch, batch, graph, patterns,
-                              skip_indexes=no_indexes)
+                              skip_indexes=no_indexes, url=url)
                 for _ in range(repeats)]
         entry = dict(runs[0])
         entry["edge_seconds"] = median_of(runs, "edge_seconds")
@@ -310,6 +341,9 @@ def main(url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
         entry["nodes_per_s"] = (round(fleet.node_count / entry["node_seconds"])
                                 if entry["node_seconds"] else None)
         entry["repeats"] = repeats
+        # Recorded, because two JSON files that differ only by this flag differ
+        # by a factor of six and nothing in the file said which was which.
+        entry["no_indexes"] = no_indexes
         results.append(entry)
 
         if sweep_edge_batch:

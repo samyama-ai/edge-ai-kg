@@ -39,8 +39,12 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "why-this-engine.md"
 
-# `python -m benchmarks.x`, `pytest tests/y.py`
-COMMAND = re.compile(r"`(python -m [\w.]+|pytest [\w/.:]+)")
+# `python -m benchmarks.x --flag`, `pytest tests/y.py`. The flags are captured
+# too: the module path was the only thing checked, so `--cold-start` could be
+# deleted from `benchmarks/ingest.py` and the row citing it stayed green -- the
+# file still existed. A command that does not accept the flag the page prints is
+# not a reproduction.
+COMMAND = re.compile(r"`(python -m [\w.]+(?:\s+--[\w-]+)*|pytest [\w/.:]+)")
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\([^)]+\)")
 
 
@@ -75,6 +79,26 @@ def claims_table() -> list[tuple[str, str, str]]:
     return rows
 
 
+def click_options(module: str) -> set[str] | None:
+    """The long options the module's click command declares, or `None`.
+
+    Asked of click rather than grepped for the literal string: a flag mentioned
+    in a docstring, a help text or a `raise SystemExit` message would satisfy a
+    grep while `main()` rejected it, which is the failure this is here to catch.
+    """
+    import importlib
+
+    import click
+
+    mod = importlib.import_module(module)
+    command = next((v for v in vars(mod).values()
+                    if isinstance(v, click.Command)), None)
+    if command is None:
+        return None
+    return {opt for param in command.params for opt in param.opts
+            if opt.startswith("--")}
+
+
 def test_every_measured_claim_names_a_command_that_exists():
     """#43: "every claim in it is reproducible by a command in the repo"."""
     problems = []
@@ -92,11 +116,26 @@ def test_every_measured_claim_names_a_command_that_exists():
             continue
         for command in found:
             if command.startswith("python -m "):
-                module = command[len("python -m "):]
+                module, *flags = command[len("python -m "):].split()
                 path = ROOT / (module.replace(".", "/") + ".py")
                 if not path.exists():
                     problems.append(f"{claim!r}: `{command}` -- "
                                     f"{path.relative_to(ROOT)} does not exist")
+                    continue
+                declared = click_options(module)
+                for flag in flags:
+                    # `declared is None` means the module has no click command
+                    # to ask -- reported, not skipped, because a silent skip is
+                    # how the module-only check stayed green for so long.
+                    if declared is None:
+                        problems.append(f"{claim!r}: `{command}` -- {module} "
+                                        f"exposes no click command, so `{flag}` "
+                                        f"cannot be checked")
+                        break
+                    if flag not in declared:
+                        problems.append(
+                            f"{claim!r}: `{command}` -- {module} does not accept "
+                            f"`{flag}`. It accepts {sorted(declared)}.")
             else:
                 target = command.split(" ", 1)[1].split("::")[0]
                 if not (ROOT / target).exists():

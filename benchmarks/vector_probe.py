@@ -119,8 +119,12 @@ def main(repro, metrics, collisions, holdout, seed, scale):
         r = run_repro()
         click.echo(f"index accepted: {r['index_accepted']}")
         click.echo(f"same normalised vector added twice -> {r['outcome']}: {r['detail']}")
-        click.echo("expected on samyama 0.6.1: PanicException "
+        click.echo("on samyama 0.6.1 this was: PanicException "
                    "(assertion failed: c.dist_to_ref <= 0.)")
+        if r["outcome"] == "ok":
+            click.echo("It did not happen here, so this run is evidence the "
+                       "vector index works\non the installed build -- not "
+                       "evidence of the 0.6.1 defect.")
 
     if metrics:
         # Each metric in its own process. The page records that recoverability
@@ -247,14 +251,36 @@ def main(repro, metrics, collisions, holdout, seed, scale):
                 break
         click.echo(f"vector_search: {searched} of {len(held)} unseen operators queried"
                    + (f", then {search_failed}" if search_failed else ", none failed"))
-        click.echo(HOLDOUT_TAIL)
+        click.echo(holdout_tail(add_failed, search_failed))
 
 
-HOLDOUT_TAIL = """
-This is the measurement the argument rests on: exact duplicates removed, every
-add accepted, and the search still panics -- so vectors that are merely *close*
-trip the same assertion, and deduping is not a workaround.
-"""
+def holdout_tail(add_failed: str | None, search_failed: str | None) -> str:
+    """The conclusion, read off the run rather than written into the module.
+
+    This tail used to be a constant ending "and the search still panics". On
+    `samyama` 1.7.1 nothing panics -- so the command printed "none failed" and
+    then, four lines later, asserted the opposite, with the false half in the
+    prose a reader quotes. A hardcoded conclusion is not a measurement; it is
+    the previous measurement, surviving the thing it described.
+    """
+    if search_failed:
+        return (
+            "\nThis is the measurement the argument rests on: exact duplicates "
+            "removed, every\nadd accepted, and the search still fails "
+            f"({search_failed}) -- so vectors that are\nmerely *close* trip the "
+            "same assertion, and deduping is not a workaround.\n")
+    if add_failed:
+        return (
+            "\nThe search was never reached: `add_vector` failed first "
+            f"({add_failed}).\nThat is a different defect from the one "
+            "docs/vector-search.md describes, which\nsurvived every add and "
+            "failed on search. Re-read the page before citing this run.\n")
+    return (
+        "\nNothing failed on this build. Every add was accepted and every "
+        "hold-out search\nanswered -- so the defect docs/vector-search.md "
+        "records (a panic on vectors that\nare merely *close*) does not "
+        "reproduce here, and that page is describing an\nolder engine. Check "
+        "the installed version before citing either.\n")
 
 
 if __name__ == "__main__":

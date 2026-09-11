@@ -221,7 +221,10 @@ embedded, so neither competes on the axis this repo cares about.
 This is the one differentiator that is **architectural rather than a benchmark**,
 so no tuning flag on the other side overturns it.
 
-**Measured**, median of 5 cold processes — a fresh interpreter each time:
+**Measured**, median of 5 cold processes — a fresh interpreter each time. Each
+row is the median of its own five samples, so the three do not add up to the
+total: 1.9 + 0.0 + 0.6 = 2.5, and the end-to-end median is 2.6. The
+end-to-end figure is the claim; the rows say where the time goes.
 
 | step | median |
 |---|---:|
@@ -229,6 +232,11 @@ so no tuning flag on the other side overturns it.
 | `SamyamaClient.embedded()` | 0.0 ms |
 | first query answered | 0.6 ms |
 | **cold interpreter to first answer** | **2.6 ms** |
+
+`python -m benchmarks.ingest --cold-start` prints the cold figure for **one**
+process; the table is the median of five, which means five separate runs of that
+command. Adding `--repeats 5` prints the warm figure alongside, which is the
+thing this claim is *not* — it is there so the two cannot be confused.
 
 No server, no JVM, no Docker, no port, nothing to start. Neo4j cannot do this at
 any speed: it is a server process, and nothing in that family runs *inside* the
@@ -271,7 +279,8 @@ Kept short deliberately: the claims that can be reproduced today.
 | Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot`; see [`neo4j-comparison.md`](neo4j-comparison.md) and #45 for the full invocation |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
-| Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --repro` (#48) |
+| Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --holdout` (#48) |
+| | | `--repro` is the *defect* reproduction, not the capability: it was cited here to show vector search works, which is the opposite of what its name and output say. On 1.7.1 neither panics any more, and both commands now report which way the run went instead of asserting the 0.6.1 outcome. |
 | PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | [`client-api.md`](client-api.md); **no command in this repo** |
 
 ---
