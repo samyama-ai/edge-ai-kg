@@ -23,7 +23,6 @@ The comparison harness that uses this loader, and the timings themselves, are
 separate: see `benchmarks/compare_neo4j.py` and its tests.
 """
 from __future__ import annotations
-from __future__ import annotations
 
 import types
 
