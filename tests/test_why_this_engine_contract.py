@@ -75,7 +75,15 @@ def claims_table() -> list[tuple[str, str, str]]:
             f"skipping the row would exempt it from every check here."
         )
         rows.append(tuple(cells))
-    assert len(rows) >= 8, f"only {len(rows)} claim rows parsed; the table shape changed"
+    # Counted on rows with a claim. Continuation rows -- `| | | detail |`,
+    # carrying a second line of `How` for the row above -- were counted toward
+    # this floor, so a table of six real claims and two continuations passed a
+    # check meant to require eight claims.
+    claims = [r for r in rows if r[0]]
+    assert len(claims) >= 8, (
+        f"only {len(claims)} claim rows parsed ({len(rows)} table rows "
+        f"including continuations); the table shape changed"
+    )
     return rows
 
 
@@ -91,12 +99,18 @@ def click_options(module: str) -> set[str] | None:
     import click
 
     mod = importlib.import_module(module)
-    command = next((v for v in vars(mod).values()
-                    if isinstance(v, click.Command)), None)
-    if command is None:
+    # `main`, by name. `next(v for v in vars(mod).values() if isinstance(...))`
+    # depends on definition order and would silently check an *imported*
+    # command if a module ever imported one from elsewhere -- reporting the
+    # flags of the wrong program.
+    command = getattr(mod, "main", None)
+    if not isinstance(command, click.Command):
         return None
-    return {opt for param in command.params for opt in param.opts
-            if opt.startswith("--")}
+    declared = {opt for param in command.params for opt in param.opts
+                if opt.startswith("--")}
+    # `--help` is added by click to every command and is not in `params`, so a
+    # row citing it is reproducible even though nothing declares it.
+    return declared | {"--help"}
 
 
 def test_every_measured_claim_names_a_command_that_exists():
@@ -109,10 +123,16 @@ def test_every_measured_claim_names_a_command_that_exists():
             continue
         found = COMMAND.findall(how)
         if not found:
-            if "no command" in how.lower():
-                continue                   # an admission is allowed; silence is not
-            problems.append(f"{claim!r}: labelled Measured, names no command "
-                            f"and does not admit it has none -- How = {how!r}")
+            # No exemption. This used to pass any row whose `How` contained the
+            # substring "no command" -- so a row could be labelled **Measured**,
+            # which the page defines as "a command in this repo produces the
+            # number", and then say in the same cell that no command exists.
+            # Any future row could take that exit by typing three words. A row
+            # with no command is **Quoted**, which is a label the page offers.
+            problems.append(f"{claim!r}: labelled Measured, which this page "
+                            f"defines as 'a command in this repo produces the "
+                            f"number', and names none -- How = {how!r}. If "
+                            f"there is no command, the label is Quoted.")
             continue
         for command in found:
             if command.startswith("python -m "):
@@ -142,6 +162,35 @@ def test_every_measured_claim_names_a_command_that_exists():
                     problems.append(f"{claim!r}: `{command}` -- {target} does not exist")
     assert not problems, (
         "docs/why-this-engine.md claims to be reproducible and is not:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_every_doc_link_in_the_claims_table_resolves():
+    """A pointer to a page that does not exist is not a reproduction either.
+
+    The snapshot row named its command and then sent the reader to
+    `neo4j-comparison.md` "for the full invocation". `docs/` had no such file --
+    it is created on another branch. So the one row admitting it needs an
+    invocation this repo does not carry pointed at a page this repo does not
+    carry, on a page whose whole argument is that a pointer to nowhere is not
+    evidence. The command check walked straight past it: `COMMAND` matches only
+    backticked `python -m` and `pytest`, and nothing looked at link targets.
+
+    External links are not fetched -- that would make the suite depend on the
+    network. Only repo-relative targets are resolved.
+    """
+    problems = []
+    for claim, _status, how in claims_table():
+        for target in re.findall(r"\]\(([^)]+)\)", how):
+            if target.startswith(("http://", "https://", "#", "mailto:")):
+                continue
+            path = (DOC.parent / target.split("#")[0]).resolve()
+            if not path.exists():
+                problems.append(f"{claim or '(continuation row)'}: "
+                                f"links to {target!r}, which does not exist")
+    assert not problems, (
+        "docs/why-this-engine.md links to files that are not here:\n  "
         + "\n  ".join(problems)
     )
 

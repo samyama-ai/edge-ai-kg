@@ -265,7 +265,18 @@ paragraph is about. Embedded still pays the ~25 s per process.
 
 ## 5. What this engine actually has, measured
 
-Kept short deliberately: the claims that can be reproduced today.
+Kept short deliberately. Three status labels, and they mean different things:
+
+- **Measured** — a command in this repo produces the number. Every such row
+  names one, and `tests/test_why_this_engine_contract.py` checks the command
+  exists and accepts the flags printed here.
+- **Quoted** — true of the engine, documented elsewhere, with no command here
+  to show it. The row says where it comes from.
+- **Unmeasured** — an open question, with the issue that would settle it.
+
+The distinction matters because the first two used to share a label: a row
+could say **Measured** and then admit in its own `How` column that no command
+existed, and the contract test was written to permit exactly that phrasing.
 
 | Claim | Status | How |
 |---|---|---|
@@ -276,12 +287,12 @@ Kept short deliberately: the claims that can be reproduced today.
 | `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
 | | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
-| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot`; see [`neo4j-comparison.md`](neo4j-comparison.md) and #45 for the full invocation |
+| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
 | Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --holdout` (#48) |
 | | | `--repro` is the *defect* reproduction, not the capability: it was cited here to show vector search works, which is the opposite of what its name and output say. On 1.7.1 neither panics any more, and both commands now report which way the run went instead of asserting the 0.6.1 outcome. |
-| PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | [`client-api.md`](client-api.md); **no command in this repo** |
+| PageRank / WCC / SCC / triangle count | **Quoted** — available, unused by the catalog | [`client-api.md`](client-api.md); no command in this repo |
 
 ---
 

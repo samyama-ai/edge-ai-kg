@@ -263,7 +263,7 @@ def main(ctx, url, graph, scale, seed, layers, repeats, node_batch, edge_batch,
                 + ". Drop those flags, or drop --cold-start. An earlier version "
                 "accepted them and exited 0, which a CI step would read as "
                 "success.")
-    if cold_start:
+
         # Constructing the client and answering one query, with nothing loaded.
         # Separately timed because the claim is about *starting*, and any load
         # would bury a millisecond figure under twenty-five seconds.
