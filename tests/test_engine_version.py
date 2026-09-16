@@ -348,32 +348,41 @@ def test_the_engine_actually_imported_is_new_enough(engine):
 
 
 def test_note_11_does_not_reproduce_on_the_running_engine(engine):
-    """The behaviour, not the version string -- note 11 is silent when it is back."""
-    engine.query(
-        'CREATE (:VGrp {id: "v1", k: "A"}), (:VGrp {id: "v2", k: "A"}), '
-        '(:VGrp {id: "v3", k: "B"}), (:VGrp {id: "v4", k: "B"})',
-        GRAPH,
-    )
-    cypher = (
-        'MATCH (g:VGrp) '
-        'WITH g.k AS k, sum(CASE WHEN g.k = "A" THEN 1 ELSE 0 END) AS hits '
-        'WHERE hits > 0 '
-        'RETURN k, hits ORDER BY k'
-    )
-    rows = engine.query(cypher, GRAPH).records
-    assert [tuple(r) for r in rows] == [("A", 2)], (
-        f"`WHERE hits > 0` did not filter group B out: {rows}. That is engine "
-        "note 11 -- the aggregate is a float again and the predicate is dropped."
-    )
-    # `("A", 2.0) == ("A", 2)` in Python, so the assertion above passes on a
-    # build that returns a float *and* filters correctly. The dropped WHERE is
-    # the harm, but the float type is the mechanism, and this module's argument
-    # is that behaviour beats a version string -- so pin the mechanism too.
-    # `not isinstance(..., bool)`: `True` is an `int` in Python, and an engine
-    # returning a boolean for a `sum()` would pass an isinstance check while
-    # being exactly the type confusion note 11 is about.
-    assert isinstance(rows[0][1], int) and not isinstance(rows[0][1], bool), (
-        f"the aggregate came back as {type(rows[0][1]).__name__}, not int. That "
-        "is note 11's mechanism; the predicate happens to have been applied "
-        "here, but EA04's `WHERE int8_hits > 0` is one literal away from silence."
-    )
+    """The behaviour, not the version string -- note 11 is silent when it is back.
+
+    Cleans up in `finally`. The module fixture resets at teardown, so today the
+    four `:VGrp` nodes harm nothing -- but this is the last test in the file by
+    position only, and a test added after it would inherit them. Being last is
+    not a property worth depending on.
+    """
+    try:
+        engine.query(
+            'CREATE (:VGrp {id: "v1", k: "A"}), (:VGrp {id: "v2", k: "A"}), '
+            '(:VGrp {id: "v3", k: "B"}), (:VGrp {id: "v4", k: "B"})',
+            GRAPH,
+        )
+        cypher = (
+            'MATCH (g:VGrp) '
+            'WITH g.k AS k, sum(CASE WHEN g.k = "A" THEN 1 ELSE 0 END) AS hits '
+            'WHERE hits > 0 '
+            'RETURN k, hits ORDER BY k'
+        )
+        rows = engine.query(cypher, GRAPH).records
+        assert [tuple(r) for r in rows] == [("A", 2)], (
+            f"`WHERE hits > 0` did not filter group B out: {rows}. That is engine "
+            "note 11 -- the aggregate is a float again and the predicate is dropped."
+        )
+        # `("A", 2.0) == ("A", 2)` in Python, so the assertion above passes on a
+        # build that returns a float *and* filters correctly. The dropped WHERE is
+        # the harm, but the float type is the mechanism, and this module's argument
+        # is that behaviour beats a version string -- so pin the mechanism too.
+        # `not isinstance(..., bool)`: `True` is an `int` in Python, and an engine
+        # returning a boolean for a `sum()` would pass an isinstance check while
+        # being exactly the type confusion note 11 is about.
+        assert isinstance(rows[0][1], int) and not isinstance(rows[0][1], bool), (
+            f"the aggregate came back as {type(rows[0][1]).__name__}, not int. That "
+            "is note 11's mechanism; the predicate happens to have been applied "
+            "here, but EA04's `WHERE int8_hits > 0` is one literal away from silence."
+        )
+    finally:
+        _reset(engine)
