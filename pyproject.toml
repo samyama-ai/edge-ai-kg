@@ -78,6 +78,21 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # this comparison goes through this module.
 "benchmarks/neo4j_client.py" = ["S310"]
 
+# BLE001 in four places in this file, not only the two that measure whether a
+# statement parses (notes 5 and 6): the version label is read in a `try` so a
+# renamed field cannot stop the run, and the per-probe guard in `main` turns an
+# unexpected failure into one UNSOUND verdict instead of ending the sweep. All
+# four sit on a call into the engine, which raises untyped errors
+# (`RuntimeError("Query error: ...")`) for anything from unsupported Cypher to
+# an unreachable server. There is no narrower class.
+#
+# No S110 here. An earlier version of this comment claimed one for "a reset
+# that fails must not mask the note", but nothing in the file swallows an
+# exception with `pass`: a failed reset raises `ResetFailed`, which `main`
+# turns into an UNSOUND verdict. The ignore was unused and its stated reason
+# described a mechanism the file does not use.
+"benchmarks/engine_notes_probe.py" = ["BLE001"]
+
 # S101: asserts are what a test is. S110: cleanup between fixtures is
 # best-effort by design -- failing to delete leftover nodes must not mask the
 # assertion the test exists to make. PERF203: the catalog sweep catches

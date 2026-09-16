@@ -75,6 +75,13 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
+    # Listed because it holds Cypher, not because it justifies an index: its
+    # queries are engine-note reproductions over throwaway labels (`:RBd`,
+    # `:VGrp`), so they name no property the schema indexes. Scanning it is
+    # still correct -- the guard's contract is "every file with Cypher is read",
+    # and exempting one on the grounds that it *looks* irrelevant is how the
+    # `demo/demo.py` gap happened.
+    "benchmarks/engine_notes_probe.py",
     # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint
     # lookups that filter on `id`, which every label already indexes.
     "benchmarks/neo4j_client.py",
