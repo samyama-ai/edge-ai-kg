@@ -51,8 +51,12 @@ jobs:
           echo "python : $(python3 --version 2>&1 || echo 'none')"
           echo "os     : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
 
-      # `samyama` publishes only a macOS wheel plus an sdist, so Linux builds
-      # the Rust extension from source. On a bare runner that fails twice --
+      # Kept as a fallback, not because it is needed today. Since #56 raised
+      # the floor to `samyama` 1.7.1 -- which publishes
+      # `samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl` -- pip takes the
+      # wheel on this runner and builds nothing. It matters again if pip ever
+      # resolves the sdist (a non-x86_64 runner, or glibc older than 2.38):
+      # 0.6.1 shipped only a macOS wheel, and a bare runner then fails twice,
       # first on a missing linker, then on zstd-sys bindgen not finding
       # stddef.h. clang supplies the builtin headers; see CLAUDE.md.
       - name: Install build prerequisites

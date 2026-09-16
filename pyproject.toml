@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Edge AI deployment knowledge graph (boards, accelerators, ONNX kernels, quantized models) built on Samyama"
 requires-python = ">=3.10"
 dependencies = [
-    "samyama>=0.6.0",
+    # >=1.7.1 is a floor, not a preference: 0.6.x fails engine notes 10 and 11
+    # (a second WITH's alias, and sum(CASE) typing) and panics the HNSW index on
+    # near-duplicate vectors. 1.7.1 matches the 1.7.0 server the notes were
+    # measured against. See #56.
+    "samyama>=1.7.1",
     "requests>=2.31",
     "rich>=13.0",
     "click>=8.0",
@@ -13,7 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.16,<0.17"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.16,<0.17",
+    # `tomllib` is 3.11+, and this project supports 3.10.
+    # `tests/test_engine_version.py` reads this file to check the samyama
+    # floor; without a reader it had to skip, and a `skipif` is a setup-phase
+    # skip that `--no-skips` turns into a failure -- so a developer on 3.10
+    # reproducing a CI failure got a hard error about `etl.download_data`
+    # instead of the thing they were chasing.
+    "tomli; python_version < '3.11'",
+]
 
 [tool.setuptools.packages.find]
 include = ["etl*", "mcp_server*", "benchmarks*", "demo*"]
