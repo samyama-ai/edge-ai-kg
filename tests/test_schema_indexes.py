@@ -75,6 +75,9 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
+    # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint
+    # lookups that filter on `id`, which every label already indexes.
+    "benchmarks/neo4j_client.py",
     "benchmarks/queries.py",
     # Its Cypher is two count queries used to decide whether the graph is empty.
     # They do name a property -- `count(n.id)` -- but only in a `RETURN`, never

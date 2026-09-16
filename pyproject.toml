@@ -73,6 +73,11 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # running the benchmark, not from data.
 "benchmarks/snapshot.py" = ["BLE001", "PERF203", "S602"]
 
+# S310: the Neo4j URL is typed by whoever runs the comparison, like `--url`
+# everywhere else here; there is no untrusted input to sanitise. All HTTP in
+# this comparison goes through this module.
+"benchmarks/neo4j_client.py" = ["S310"]
+
 # S101: asserts are what a test is. S110: cleanup between fixtures is
 # best-effort by design -- failing to delete leftover nodes must not mask the
 # assertion the test exists to make. PERF203: the catalog sweep catches
