@@ -17,7 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.16,<0.17"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.16,<0.17",
+    # `tomllib` is 3.11+, and this project supports 3.10.
+    # `tests/test_engine_version.py` reads this file to check the samyama
+    # floor; without a reader it had to skip, and a `skipif` is a setup-phase
+    # skip that `--no-skips` turns into a failure -- so a developer on 3.10
+    # reproducing a CI failure got a hard error about `etl.download_data`
+    # instead of the thing they were chasing.
+    "tomli; python_version < '3.11'",
+]
 
 [tool.setuptools.packages.find]
 include = ["etl*", "mcp_server*", "benchmarks*", "demo*"]

@@ -36,10 +36,12 @@ import pytest
 try:                                   # tomllib is 3.11+; pyproject allows 3.10
     import tomllib
 except ModuleNotFoundError:            # pragma: no cover - depends on interpreter
-    try:
-        import tomli as tomllib
-    except ModuleNotFoundError:
-        tomllib = None
+    # `tomli` is a declared dev dependency under 3.11, so this import is the
+    # fallback rather than a hope. The third branch that set `tomllib = None`
+    # is gone with the `skipif` it fed: there is no supported interpreter where
+    # neither reader exists, and a sentinel for an unreachable case is a branch
+    # nobody can test.
+    import tomli as tomllib
 
 MIN_ENGINE = (1, 7, 1)
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,7 +146,7 @@ def _reset(client):
     client.query("MATCH (n) DETACH DELETE n", GRAPH)
 
 
-def test_two_embedded_clients_do_not_share_a_graph():
+def test_two_embedded_clients_do_not_share_a_graph(engine):
     """`_reset` assumes this, and it was only ever stated in a comment.
 
     That module-scoped fixture runs `MATCH (n) DETACH DELETE n` on an embedded
@@ -155,29 +157,43 @@ def test_two_embedded_clients_do_not_share_a_graph():
 
     The second client is taken **without** a reset: with one, this could not
     fail, because the reset would empty a shared graph on the way out and the
-    count would read zero either way.
+    count would read zero either way. Only the second, though -- the first
+    comes from the `engine` fixture, so a missing extension skips in setup and
+    `--no-skips` can still convert it. Building both inline put this one test
+    outside the guarantee the module docstring claims for all of them.
+
+    `count(n)` rather than `count(n.id)`: on a genuinely shared graph a node
+    with no `id` would be invisible to the property count, and this is asking
+    whether *anything* is there.
     """
-    try:
-        from samyama import SamyamaClient
+    from samyama import SamyamaClient  # the fixture already proved this imports
 
-        first = SamyamaClient.embedded()
-    except Exception as exc:  # pragma: no cover
-        pytest.skip(f"embedded Samyama engine unavailable: {exc}")
-
+    first = engine
     first.query('CREATE (:Indep {id:"a"})', GRAPH)
-    second = SamyamaClient.embedded()
-    held = second.query("MATCH (n) RETURN count(n.id)", GRAPH).records
-    assert (held[0][0] if held else 0) == 0, (
-        f"a second embedded client sees {held} from the first, so `_reset` "
-        f"here would wipe another module's graph"
-    )
-    second.query("MATCH (n) DETACH DELETE n", GRAPH)
-    survived = first.query("MATCH (n:Indep) RETURN count(n.id)", GRAPH).records
-    assert survived[0][0] == 1, (
-        "the second client's DETACH DELETE removed the first client's node -- "
-        "the independence `_reset`'s docstring claims does not hold"
-    )
-    first.query("MATCH (n) DETACH DELETE n", GRAPH)
+    try:
+        # Only the *second* client is built inline, and that is the whole
+        # reason this test avoided the fixture: it must not be reset, or a
+        # shared graph would be emptied on the way out and the count below
+        # would read zero either way. The first client can come from `engine`,
+        # which skips in setup -- so this test no longer escapes `--no-skips`,
+        # which it did while constructing both itself.
+        second = SamyamaClient.embedded()
+        held = second.query("MATCH (n) RETURN count(n)", GRAPH).records
+        assert (held[0][0] if held else 0) == 0, (
+            f"a second embedded client sees {held} from the first, so `_reset` "
+            f"here would wipe another module's graph"
+        )
+        second.query("MATCH (n) DETACH DELETE n", GRAPH)
+        survived = first.query("MATCH (n:Indep) RETURN count(n)", GRAPH).records
+        assert survived[0][0] == 1, (
+            "the second client's DETACH DELETE removed the first client's node "
+            "-- the independence `_reset`'s docstring claims does not hold"
+        )
+    finally:
+        # `finally`, or a failing assertion above leaves `:Indep` behind for
+        # every later test in this module -- and the fixture resets between
+        # modules, not between tests.
+        first.query("MATCH (n) DETACH DELETE n", GRAPH)
 
 
 def test_parse_reads_versions_the_way_the_comparison_needs():
@@ -235,7 +251,11 @@ def _floor_of(spec: str) -> str | None:
     body = spec.split(";", 1)[0]                       # drop any marker
     # `===` before `==` before `=`; longest operator first, or `===1.7.1` reads
     # as `==` with a floor of `=1.7.1`.
-    match = re.search(r"(===|==|>=|~=|>)\s*([^,\s\]]+)", body)
+    # `)` is excluded too: `samyama (>=1.7.1)` is legal PEP 508, and without it
+    # the floor came back as `"1.7.1)"`. `_parse` stops at the first
+    # non-digit, so the answer was right by accident -- which is worse than
+    # wrong, because nothing would have surfaced it.
+    match = re.search(r"(===|==|>=|~=|>)\s*([^,\s\])]+)", body)
     if not match:
         return None
     return match.group(2).removesuffix(".*")
@@ -267,9 +287,19 @@ def test_requirement_parsing_survives_the_shapes_a_pyproject_may_use():
                  # the author to add the floor they already had.
                  "samyama==1.7.1",
                  "samyama===1.7.1",
-                 "samyama<2,==1.7.1"):
+                 "samyama<2,==1.7.1",
+                 # Legal PEP 508, and the floor read as `"1.7.1)"` until the
+                 # closing paren joined the excluded characters.
+                 "samyama (>=1.7.1)",
+                 "samyama (>=1.7.1) ; python_version>='3.10'"):
         assert _name_of(spec) == "samyama", spec
-        assert _parse(_floor_of(spec)).satisfies(MIN_ENGINE), spec
+        floor = _floor_of(spec)
+        # Bound first: `_parse(None)` is a TypeError, which would report a
+        # missing floor as a crash in the parser. Every spec above has one, so
+        # this cannot fire today -- it fails legibly when someone adds a case
+        # that does not.
+        assert floor is not None, f"no floor read from {spec!r}"
+        assert _parse(floor).satisfies(MIN_ENGINE), spec
 
     # `==1.7.*` guarantees only 1.7, which is below MIN_ENGINE -- read, and
     # correctly judged insufficient rather than missing.
@@ -283,8 +313,6 @@ def test_requirement_parsing_survives_the_shapes_a_pyproject_may_use():
     assert not _parse(_floor_of("samyama~=0.6.0")).satisfies(MIN_ENGINE)
 
 
-@pytest.mark.skipif(tomllib is None,
-                    reason="no TOML reader: Python < 3.11 without `tomli`")
 def test_pyproject_floor_is_at_least_the_version_that_fixed_notes_10_and_11():
     with open(ROOT / "pyproject.toml", "rb") as fh:
         pyproject = tomllib.load(fh)
