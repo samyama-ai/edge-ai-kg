@@ -30,11 +30,16 @@ def pytest_runtest_makereport(item, call):
     """Convert skips to failures under `--no-skips`.
 
     `xfail` is deliberately exempt. pytest reports an xfailed test as skipped
-    with a `wasxfail` attribute, and this suite has six of them -- the three
-    `test_correctness.py` marks for #56, where the embedded and HTTP builds
-    disagree. Those are *expected* outcomes that CI should tolerate; a
-    `pytest.skip` for a missing `data/` is not. Failing on both would make the
-    option unusable here and it would simply be turned off.
+    with a `wasxfail` attribute, and this suite has some -- currently the
+    `test_demo_recording.py` marks for #30, where the recording predates the
+    build. (It also carried six for #56 -- in `test_correctness.py`, four
+    parameters across two parametrised sweeps plus the whole-test mark on
+    `test_ea04_quantization_unlock_is_not_a_cartesian_product`; and in
+    `tests/test_empty_answers.py`, `test_ea01_zero_row_case` -- until the
+    embedded engine was pinned to `samyama>=1.7.1` and they all came off.) Those
+    are *expected* outcomes that CI should tolerate; a `pytest.skip` for a
+    missing `data/` is not. Failing on both would make the option unusable here
+    and it would simply be turned off.
     """
     outcome = yield
     report = outcome.get_result()

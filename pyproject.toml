@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Edge AI deployment knowledge graph (boards, accelerators, ONNX kernels, quantized models) built on Samyama"
 requires-python = ">=3.10"
 dependencies = [
-    "samyama>=0.6.0",
+    # >=1.7.1 is a floor, not a preference: 0.6.x fails engine notes 10 and 11
+    # (a second WITH's alias, and sum(CASE) typing) and panics the HNSW index on
+    # near-duplicate vectors. 1.7.1 matches the 1.7.0 server the notes were
+    # measured against. See #56.
+    "samyama>=1.7.1",
     "requests>=2.31",
     "rich>=13.0",
     "click>=8.0",
