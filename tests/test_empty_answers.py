@@ -68,7 +68,20 @@ from etl.helpers import create_edges, create_nodes
 GRAPH = "default"
 
 
+@pytest.fixture
 def engine():
+    """A fresh embedded client, skipping in **setup** if there is not one.
+
+    A fixture rather than a helper called from the test body. The skip is the
+    reason: `conftest.py` turns setup-phase skips into failures under
+    `--no-skips`, and only setup-phase ones -- so while this was a plain
+    function, a CI job with no engine skipped all three of these regressions
+    and the suite reported green. That is the failure `--no-skips` exists to
+    catch, in the module whose subject is answers that are empty for the wrong
+    reason.
+
+    Function-scoped, so each test gets its own client and its own graph.
+    """
     try:
         from samyama import SamyamaClient
         client = SamyamaClient.embedded()
@@ -78,10 +91,16 @@ def engine():
     # merely add rows -- ids repeat across fixtures, and `create_edges` resolves
     # endpoints with `WHERE v.id = ...`, so each variable would bind twice and
     # `CREATE` would emit the cartesian product. Reset regardless.
-    try:
-        client.query("MATCH (n) DETACH DELETE n", GRAPH)
-    except Exception:
-        pass
+    client.query("MATCH (n) DETACH DELETE n", GRAPH)
+    # Verified, not assumed. The reset used to swallow its own failure, so a
+    # build that would not empty a graph produced a count assertion failing for
+    # a reason the message did not mention -- and these tests are all exact
+    # counts.
+    held = client.query("MATCH (n) RETURN count(n)", GRAPH).records
+    assert (held[0][0] if held else 0) == 0, (
+        f"reset left {held} in `{GRAPH}`; every assertion in this module is an "
+        f"exact count, so they would fail for a reason none of them names"
+    )
     return client
 
 
@@ -89,13 +108,12 @@ def run(client, query_id: str):
     return client.query(BY_ID[query_id]["cypher"].strip(), GRAPH).records
 
 
-def fleet_with_coverage(*, hardswish_is_cpu_only: bool):
+def fleet_with_coverage(client, *, hardswish_is_cpu_only: bool):
     """One model using two operators, both implemented somewhere.
 
     With `hardswish_is_cpu_only`, the only kernel for `HardSwish` runs on the
     `MCU-CPU`, which is the case EA11 exists to find.
     """
-    client = engine()
     create_nodes(client, GRAPH, "Model",
                  [{"id": "m1", "name": "covered-model", "family": "cnn"}])
     # Note 8: `props_map` drops absent keys, and the columnar store survives
@@ -129,9 +147,8 @@ def fleet_with_coverage(*, hardswish_is_cpu_only: bool):
     return client
 
 
-def onnx_runtime_with(*, cuda_implements_it: bool):
+def onnx_runtime_with(client, *, cuda_implements_it: bool):
     """One `ai.onnx` operator with a CPU kernel, and optionally a CUDA one."""
-    client = engine()
     create_nodes(client, GRAPH, "Operator",
                  [{"id": "op1", "name": "Conv", "category": "convolution",
                    "domain": "ai.onnx"}])
@@ -145,18 +162,18 @@ def onnx_runtime_with(*, cuda_implements_it: bool):
     return client
 
 
-def test_ea11_is_empty_when_every_operator_is_accelerated():
+def test_ea11_is_empty_when_every_operator_is_accelerated(engine):
     """The answer is none, and none is correct."""
-    rows = run(fleet_with_coverage(hardswish_is_cpu_only=False), "EA11")
+    rows = run(fleet_with_coverage(engine, hardswish_is_cpu_only=False), "EA11")
     assert not rows, (
         f"every operator has a non-MCU-CPU kernel, so no model is CPU-only; "
         f"EA11 returned {rows}"
     )
 
 
-def test_ea11_finds_the_model_when_an_operator_is_cpu_only():
+def test_ea11_finds_the_model_when_an_operator_is_cpu_only(engine):
     """The control. Without this, the assertion above proves nothing."""
-    rows = run(fleet_with_coverage(hardswish_is_cpu_only=True), "EA11")
+    rows = run(fleet_with_coverage(engine, hardswish_is_cpu_only=True), "EA11")
     assert len(rows) == 1, f"expected exactly the one CPU-only model, got {rows}"
     model, _family, count, operators = rows[0]
     assert (model, count, list(operators)) == ("covered-model", 1, ["HardSwish"]), (
@@ -164,22 +181,22 @@ def test_ea11_finds_the_model_when_an_operator_is_cpu_only():
     )
 
 
-def test_ea13_is_empty_when_cuda_implements_everything():
-    rows = run(onnx_runtime_with(cuda_implements_it=True), "EA13")
+def test_ea13_is_empty_when_cuda_implements_everything(engine):
+    rows = run(onnx_runtime_with(engine, cuda_implements_it=True), "EA13")
     assert not rows, (
         f"CUDA implements the only ai.onnx operator, so nothing is CPU-only; "
         f"EA13 returned {rows}"
     )
 
 
-def test_ea13_finds_the_operator_when_cuda_does_not():
-    rows = run(onnx_runtime_with(cuda_implements_it=False), "EA13")
+def test_ea13_finds_the_operator_when_cuda_does_not(engine):
+    rows = run(onnx_runtime_with(engine, cuda_implements_it=False), "EA13")
     assert len(rows) == 1 and rows[0][0] == "Conv", (
         f"expected Conv to be reported as CPU-only, got {rows}"
     )
 
 
-def ea01_fixture(*, covered_by_the_audited_accelerator: bool):
+def ea01_fixture(client, *, covered_by_the_audited_accelerator: bool):
     """The audited model and accelerator, with one operator either covered or not.
 
     **The ids must be `model:00000` and `accel:00001`.** `EA01` hardcodes them
@@ -188,11 +205,13 @@ def ea01_fixture(*, covered_by_the_audited_accelerator: bool):
     opening `MATCH` binding nothing, and the query returns `[]` for every graph
     -- which is what an earlier version of this test did, passing vacuously.
 
-    `engine()` resets the graph first, so there is no generated fleet to collide
-    with; reusing the generator's id shape is safe and is the only way the query
-    sees the fixture at all.
+    The `engine` fixture resets the graph first, so there is no generated
+    fleet to collide with; reusing the generator's id shape is safe and is the
+    only way the query sees the fixture at all.
+
+    Takes the client rather than making one: the skip for a missing engine has
+    to happen in setup, which is what `--no-skips` converts (#106).
     """
-    client = engine()
     create_nodes(client, GRAPH, "Model",
                  [{"id": "model:00000", "name": "audited-model", "family": "cnn"}])
     # Note 8: a key omitted here can report a *previous* load's value rather
@@ -214,21 +233,21 @@ def ea01_fixture(*, covered_by_the_audited_accelerator: bool):
     return client
 
 
-def test_ea01_zero_row_case():
+def test_ea01_zero_row_case(engine):
     """An accelerator implementing everything must produce an empty audit.
 
     This is the hero question's own zero-row case, which #27 asks for and which
     could not be asserted while engine note 10 made `EA01` raise on the embedded
     build. #56 pinned the engine to `samyama>=1.7.1` and the query runs.
     """
-    rows = run(ea01_fixture(covered_by_the_audited_accelerator=True), "EA01")
+    rows = run(ea01_fixture(engine, covered_by_the_audited_accelerator=True), "EA01")
     assert rows == [], (
         f"the audited accelerator has a kernel for the model's only operator, "
         f"so the fallback audit must be empty; EA01 returned {rows}"
     )
 
 
-def test_ea01_finds_the_operator_when_the_audited_accelerator_lacks_a_kernel():
+def test_ea01_finds_the_operator_when_the_audited_accelerator_lacks_a_kernel(engine):
     """The control. Without it the assertion above proves nothing.
 
     An earlier version of the zero-row test used ids the query does not filter
@@ -237,7 +256,7 @@ def test_ea01_finds_the_operator_when_the_audited_accelerator_lacks_a_kernel():
     assertion in this module is paired for exactly that reason; `EA01` was the
     one that had no pair, which is how the vacuity survived review.
     """
-    rows = run(ea01_fixture(covered_by_the_audited_accelerator=False), "EA01")
+    rows = run(ea01_fixture(engine, covered_by_the_audited_accelerator=False), "EA01")
     assert len(rows) == 1, (
         f"the only kernel runs on accel:00002, not the audited accel:00001, so "
         f"Conv must be reported as falling back; EA01 returned {rows}"
