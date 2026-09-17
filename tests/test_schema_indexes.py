@@ -75,11 +75,20 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
-    # Listed because it holds Cypher, not because it justifies an index: its
-    # queries are engine-note reproductions over throwaway labels (`:RBd`,
-    # `:VGrp`), so they name no property the schema indexes. Scanning it is
-    # still correct -- the guard's contract is "every file with Cypher is read",
-    # and exempting one on the grounds that it *looks* irrelevant is how the
+    # Listed because it holds Cypher, and the entry is inert -- but not for
+    # the reason an earlier version of this comment gave. It said the probe
+    # uses only throwaway labels, naming `:VGrp`, which appears nowhere in that
+    # file; and notes 2 and 3 build real `:Board` and `:Deployment` rows and
+    # read `form_factor` and `latency_ms` off them.
+    #
+    # What makes the entry inert is that none of those real-label queries
+    # carries a `WHERE`. This file counts a property as *used* only when
+    # something filters on it, so the probe justifies no index -- while its
+    # throwaway labels, which do carry `WHERE` clauses, name nothing the schema
+    # indexes.
+    #
+    # Scanned regardless: the guard's contract is "every file with Cypher is
+    # read", and exempting one because it *looks* irrelevant is how the
     # `demo/demo.py` gap happened.
     "benchmarks/engine_notes_probe.py",
     # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint

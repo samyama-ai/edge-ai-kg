@@ -68,9 +68,15 @@ def _reset(client):
     """
     try:
         client.query("MATCH (n) DETACH DELETE n", GRAPH)
-        left = client.query("MATCH (n) RETURN count(n)", GRAPH).records[0][0]
+        records = client.query("MATCH (n) RETURN count(n)", GRAPH).records
     except Exception as exc:
         raise ResetFailed(f"reset failed; later verdicts are unsound: {exc}") from exc
+    # `records[0][0]` was inside the `try`. An engine returning no rows for an
+    # aggregate over an empty graph -- which is the *successful* case here --
+    # would raise IndexError, get caught, and be re-raised as a failed reset,
+    # marking every probe below UNSOUND for having worked. Read outside, with
+    # "no rows" meaning zero.
+    left = records[0][0] if records else 0
     if left:
         raise ResetFailed(
             f"reset ran without error and left {left:,} nodes; later verdicts "
@@ -209,34 +215,48 @@ def _does_not_parse(client, cypher: str):
 def note_5(client, scale):
     """Negated pattern predicates do not parse."""
     _reset(client)
-    _rows(client, 'CREATE (:N {id:"n1"})')
-    return _does_not_parse(client, 'MATCH (n:N) WHERE NOT (n)-[:R]->() RETURN n.id')
+    _rows(client, 'CREATE (:N5 {id:"n1"})')
+    return _does_not_parse(client, 'MATCH (n:N5) WHERE NOT (n)-[:R]->() RETURN n.id')
 
 
 def note_6(client, scale):
     """`CREATE CONSTRAINT ... REQUIRE ... IS UNIQUE` does not parse.
 
-    If it ever *does* parse, the constraint outlives this probe: `_reset` is
-    `DETACH DELETE`, which removes nodes and not schema. Every probe below
-    would then run against a graph with a uniqueness constraint on `:N(id)`
-    that nothing put there deliberately. So a parse is followed by a drop
-    attempt, and a drop that fails is reported rather than left behind.
+    On 1.7.1 it **does** parse, and the constraint is really created --
+    `SHOW CONSTRAINTS` lists it. There is then no way to remove it: neither
+    `DROP CONSTRAINT FOR (n:N6) REQUIRE ...` nor the older
+    `DROP CONSTRAINT ON (n:N6) ASSERT ...` parses. `_reset` is `DETACH DELETE`,
+    which removes nodes and not schema, so the constraint outlives this probe.
+
+    That is contained rather than unsound, and only because `:N6` belongs to
+    this probe alone: nothing below touches that label, so a uniqueness
+    constraint on it cannot change another verdict. The drop is still
+    attempted, and its failure is reported in the detail line rather than
+    swallowed -- "created and cannot be removed" is worth knowing, and it is
+    the reason per-probe labels are not decoration.
     """
     _reset(client)
     parsed, detail = _does_not_parse(
-        client, 'CREATE CONSTRAINT FOR (n:N) REQUIRE n.id IS UNIQUE')
+        client, 'CREATE CONSTRAINT FOR (n:N6) REQUIRE n.id IS UNIQUE')
     if parsed is True:
         try:
-            _rows(client, 'DROP CONSTRAINT FOR (n:N) REQUIRE n.id IS UNIQUE')
+            _rows(client, 'DROP CONSTRAINT FOR (n:N6) REQUIRE n.id IS UNIQUE')
         except Exception as exc:
-            return None, (f"the constraint parsed ({detail}) and could not be "
-                          f"dropped ({type(exc).__name__}), so it outlives this "
-                          f"probe and every verdict below is unsound")
+            detail = (f"{detail}; created and left behind -- no DROP syntax "
+                      f"parses ({type(exc).__name__}). Contained: `:N6` is "
+                      f"used by no other probe")
     return parsed, detail
 
 
 def note_8(client, scale):
-    """Deleted property columns resurrect onto new nodes."""
+    """Deleted property columns resurrect onto new nodes.
+
+    `:P` is this probe's own label, and every probe owns its labels -- which is
+    what keeps a resurrected column from leaking into the next verdict. Note 8
+    is a *column* behaviour, so `_reset` counting nodes cannot detect it; the
+    isolation is the guard. `:N` was shared by notes 4b and 5 until this was
+    written down, so notes 5 and 6 now use `:N5` and `:N6`.
+    """
     _reset(client)
     _rows(client, 'CREATE (:P {id:"p1", doomed:"ghost"})')
     _reset(client)                      # DETACH DELETE, which note 8 says is not a reset
@@ -245,17 +265,19 @@ def note_8(client, scale):
     # Every row, not `got[0]`: if the reset above did not actually delete `p1`
     # the survivor may sort either way, and reading one row would report the
     # behaviour of whichever happened to come first.
+    # `p1` surviving would mean the delete did not run, which is a different
+    # finding from the property surviving it -- and only the second is note 8.
+    # That case used to be handled here and is now unreachable: `_reset` above
+    # verifies the graph is empty and raises `ResetFailed` first, so reaching
+    # this line with `p1` present is impossible. The guarantee moved rather
+    # than disappeared; an `assert` keeps it findable if `_reset` ever loosens.
+    if any(r[0] != "p2" for r in got):
+        raise ResetFailed(
+            f"`p1` survived a reset that reported success: {got}. `_reset` "
+            f"should have raised first; if it stopped verifying, this probe is "
+            f"measuring a delete that did not run and calling it note 8.")
     resurrected = [list(r) for r in got if r[1] is not None]
-    unexpected = [list(r) for r in got if r[0] != "p2"]
-    detail = f"{[list(r) for r in got]}"
-    if unexpected:
-        # UNSOUND, not STILL REPRODUCES. The delete not running and the property
-        # surviving the delete are different findings, and only the second is
-        # note 8. Reporting the first as the second would be a false positive
-        # for the exact behaviour this probe exists to detect.
-        return None, (f"{detail}  <- `p1` survived the reset, so the delete did "
-                      f"not run and this says nothing about note 8")
-    return not resurrected, detail
+    return not resurrected, f"{[list(r) for r in got]}"
 
 
 def note_8b(client, scale):
