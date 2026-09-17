@@ -38,6 +38,11 @@ import click
 
 GRAPH = "default"
 
+# Below this, note 1's cartesian product is not distinguishable from its
+# correct answer: at n models the wrong answer is n*n rows and the right one
+# is n, which coincide at 1 and are adjacent at 2.
+MIN_SCALE = 10
+
 
 def _engine():
     from samyama import SamyamaClient
@@ -88,6 +93,41 @@ def _rows(client, cypher):
     return client.query(cypher, GRAPH).records
 
 
+def verdict_for(ok):
+    """`True` -> FIXED, `False` -> STILL REPRODUCES, `None` -> UNSOUND.
+
+    Its own function so it can be tested. Inline in `main` it was unreachable
+    from anything: a swapped `True`/`False` branch changed every line the probe
+    prints and not one test result, because nothing exercised `main` at all.
+
+    `None` is the third state and the reason this is not a boolean: a probe
+    that cannot tell -- a dead engine, a fixture that did not land, note 8
+    showing through note 8b -- must not report either answer.
+    """
+    if ok is None:
+        return "UNSOUND"
+    return "FIXED" if ok else "STILL REPRODUCES"
+
+
+def _built(client, label: str, expected: int):
+    """Raise unless the fixture for this probe actually landed.
+
+    Every verdict below reads a row count or a row order. An engine that
+    accepted the `CREATE`s and stored nothing would hand back the empty answer
+    each of those comparisons treats as success -- `[] == sorted([])`,
+    `set() == set()` -- so FIXED would mean "did not error" rather than "gave
+    the right answer". This is the difference, and it is checked once here
+    rather than trusted five times.
+    """
+    got = _rows(client, f"MATCH (n:{label}) RETURN count(n.id)")
+    held = got[0][0] if got else 0
+    if held != expected:
+        raise ResetFailed(
+            f"built {expected} :{label} rows and the graph holds {held}. The "
+            f"verdict below reads this fixture, so it would be measuring an "
+            f"empty graph rather than the behaviour.")
+
+
 def note_1(client, scale: int):
     """A trailing bound variable in a second MATCH is not joined -> cartesian product."""
     from etl.helpers import create_edges, create_nodes
@@ -135,8 +175,13 @@ def note_3(client, scale):
     _reset(client)
     for i, v in enumerate([10.9, 12.7, 7.5, 9.0, 3.2, 20.1]):
         _rows(client, f'CREATE (:Deployment {{id:"d{i}", latency_ms:{v}}})')
+    _built(client, "Deployment", 6)
     got = [r[0] for r in
            _rows(client, 'MATCH (d:Deployment) RETURN d.latency_ms AS a ORDER BY a ASC')]
+    # Both halves. `[] == sorted([])` is true, so "is it sorted" alone reports
+    # FIXED for an engine that returned nothing at all.
+    if len(got) != 6:
+        return None, f"expected 6 rows back, got {len(got)}: {got}"
     return got == sorted(got), f"{got}"
 
 
@@ -150,10 +195,17 @@ def note_3b(client, scale):
     _reset(client)
     # Same first key, different second key -- so only the second key can order
     # these, and a dropped second key leaves them in insertion order.
-    for i, (a, b) in enumerate([(1, 3), (1, 1), (1, 2)]):
+    # Six rows, not three. With three, a dropped second key still comes back
+    # sorted by luck one run in six, which is a false FIXED at a rate nobody
+    # would notice. Six makes it 1 in 720, and the insertion order below is
+    # deliberately the reverse of the sorted one.
+    for i, (a, b) in enumerate([(1, 6), (1, 5), (1, 4), (1, 3), (1, 2), (1, 1)]):
         _rows(client, f'CREATE (:S {{id:"s{i}", a:{a}, b:{b}}})')
+    _built(client, "S", 6)
     got = [r[0] for r in _rows(
         client, 'MATCH (s:S) WITH s.a AS a, s.b AS b ORDER BY a ASC, b ASC RETURN b')]
+    if len(got) != 6:
+        return None, f"expected 6 rows back, got {len(got)}: {got}"
     return got == sorted(got), f"second key gave {got}, sorted would be {sorted(got)}"
 
 
@@ -216,7 +268,22 @@ def note_5(client, scale):
     """Negated pattern predicates do not parse."""
     _reset(client)
     _rows(client, 'CREATE (:N5 {id:"n1"})')
-    return _does_not_parse(client, 'MATCH (n:N5) WHERE NOT (n)-[:R]->() RETURN n.id')
+    _built(client, "N5", 1)
+    parses, detail = _does_not_parse(
+        client, 'MATCH (n:N5) WHERE NOT (n)-[:R]->() RETURN n.id')
+    if parses is not True:
+        return parses, detail
+    # Parsing is not the claim. This note is why the catalog writes every
+    # anti-join as `OPTIONAL MATCH ... count() = 0`, and someone reading FIXED
+    # will drop that workaround -- so the negated pattern has to return the
+    # right rows, not merely be accepted. `n1` has no `:R`, so it must come
+    # back.
+    got = [r[0] for r in _rows(
+        client, 'MATCH (n:N5) WHERE NOT (n)-[:R]->() RETURN n.id')]
+    if got != ["n1"]:
+        return False, (f"the negated pattern parsed but answered {got}, want "
+                       f"['n1'] -- accepted and wrong is worse than refused")
+    return True, "parsed, and returned the one node with no :R edge"
 
 
 def note_6(client, scale):
@@ -239,6 +306,19 @@ def note_6(client, scale):
     parsed, detail = _does_not_parse(
         client, 'CREATE CONSTRAINT FOR (n:N6) REQUIRE n.id IS UNIQUE')
     if parsed is True:
+        # Parsing is not the claim: the note exists because `id` uniqueness is
+        # a loader invariant rather than an enforced constraint, and someone
+        # reading FIXED will stop maintaining the invariant. So the constraint
+        # has to *reject a duplicate*. An engine that accepts the statement and
+        # enforces nothing is the worst outcome here and the one this catches.
+        _rows(client, 'CREATE (:N6 {id:"dup"})')
+        enforced, why = _does_not_parse(client, 'CREATE (:N6 {id:"dup"})')
+        if enforced is True:
+            held = _rows(client, 'MATCH (n:N6) RETURN count(n.id)')
+            return False, (f"the constraint was accepted and enforces nothing: "
+                           f"a duplicate `id` inserted, {held[0][0] if held else 0} "
+                           f"rows now hold it")
+        detail = f"{detail}, and a duplicate id is rejected ({why[:40]})"
         try:
             _rows(client, 'DROP CONSTRAINT FOR (n:N6) REQUIRE n.id IS UNIQUE')
         except Exception as exc:
@@ -300,8 +380,19 @@ def note_8b(client, scale):
         return None, (f"`null` was created without `kind` and came back with "
                       f"{planted[0][0]!r} -- that is note 8 resurrecting a "
                       f"property column, so this run says nothing about 8b")
+    # A positive control first: `<>` has to match something, or `got == set()`
+    # below is satisfied by an engine that returns nothing for every
+    # comparison, and the note would read FIXED on a build where `<>` is
+    # broken outright.
+    control = {r[0] for r in
+               _rows(client, 'MATCH (q:Q) WHERE q.kind <> "GPU" RETURN q.id')}
+    if control != {"has"}:
+        return None, (f"`kind <> \"GPU\"` matched {sorted(control)}, want "
+                      f"['has'] -- `<>` is not working at all here, so the "
+                      f"null case below would say nothing about note 8b")
     got = {r[0] for r in _rows(client, 'MATCH (q:Q) WHERE q.kind <> "NPU" RETURN q.id')}
-    return got == set(), f"`kind <> \"NPU\"` matched {sorted(got)}; want no rows"
+    return got == set(), (f"`kind <> \"GPU\"` matched ['has'] as it should; "
+                          f"`kind <> \"NPU\"` matched {sorted(got)}, want none")
 
 
 def note_9(client, scale):
@@ -339,10 +430,20 @@ PROBES = [
 
 
 @click.command()
-@click.option("--scale", default=0, type=int,
+@click.option("--scale", default=0, type=click.IntRange(min=0),
               help="Models on one board for note 1. Its own text says a small "
-                   "reproduction proves nothing, so note 1 is INCONCLUSIVE without this.")
+                   "reproduction proves nothing, so note 1 is INCONCLUSIVE "
+                   "without this, and anything under 10 is refused: at --scale "
+                   "1 the cartesian product and the correct answer are the "
+                   "same one row, so it would report FIXED for a broken join.")
 def main(scale):
+    if scale and scale < MIN_SCALE:
+        raise SystemExit(
+            f"--scale {scale} cannot settle note 1: at that size the cartesian "
+            f"product and the correct answer are {scale * scale} and {scale} "
+            f"rows, which are the same number at 1 and adjacent at 2. Use at "
+            f"least {MIN_SCALE}; the note's own write-up uses 300.")
+
     client = _engine()
     # Reported, not relied on: `status()` is not a documented contract and an
     # engine that changes the field name should not stop the probe from running.
@@ -370,18 +471,15 @@ def main(scale):
             except ResetFailed as exc:
                 verdict, bucket, detail = "UNSOUND", unsound, str(exc)
             except Exception as exc:
-                # Per-probe, so one unexpected failure does not abort the run and
-                # hide the eight verdicts after it. A probe that cannot run is a
+                # Per-probe, so one unexpected failure does not abort the run
+                # and hide the ten after it. A probe that cannot run is a
                 # result too -- it is just not a result about the engine note.
                 verdict, bucket = "ERROR", unsound
                 detail = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0]}"
             else:
-                if ok is None:
-                    verdict, bucket = "UNSOUND", unsound
-                elif ok:
-                    verdict, bucket = "FIXED", fixed
-                else:
-                    verdict, bucket = "STILL REPRODUCES", reproduces
+                verdict = verdict_for(ok)
+                bucket = {"FIXED": fixed, "STILL REPRODUCES": reproduces,
+                          "UNSOUND": unsound}[verdict]
         bucket.append(number)
         click.echo(f"note {number}  {verdict}")
         click.echo(f"          {title}")

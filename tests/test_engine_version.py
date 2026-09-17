@@ -122,7 +122,8 @@ def engine():
         pytest.skip(f"embedded Samyama engine unavailable: {exc}")
     # Every other embedded module resets first; this one must too, and must also
     # clean up. Without a reset it is not idempotent -- a second run in one
-    # process sees eight :VGrp nodes and `hits` becomes 4, failing its own
+    # process sees eight :VGrp nodes -- the fixture creates four -- and `hits`
+    # becomes 4, failing its own
     # assertion with a message that reads as a note-11 regression.
     _reset(client)
     yield client
@@ -185,7 +186,7 @@ def test_two_embedded_clients_do_not_share_a_graph(engine):
         )
         second.query("MATCH (n) DETACH DELETE n", GRAPH)
         survived = first.query("MATCH (n:Indep) RETURN count(n)", GRAPH).records
-        assert survived[0][0] == 1, (
+        assert survived and survived[0][0] == 1, (
             "the second client's DETACH DELETE removed the first client's node "
             "-- the independence `_reset`'s docstring claims does not hold"
         )
