@@ -382,7 +382,25 @@ def test_every_catalog_query_runs_and_returns_rows(loaded, qid, request):
         assert recs, f"{qid} returned no rows"
 
 
-def test_ea04_shape_is_not_a_cartesian_product():
+@pytest.fixture
+def embedded_client():
+    """A fresh embedded client, skipping in **setup**.
+
+    The purpose-built fixture tests below constructed their own and called
+    `pytest.skip` from the body. `conftest.py` converts only setup-phase skips
+    under `--no-skips`, so on a machine without the extension those regressions
+    were skipped and the suite reported green -- which is the state that option
+    exists to make impossible.
+    """
+    try:
+        from samyama import SamyamaClient
+
+        return SamyamaClient.embedded()
+    except Exception as exc:  # pragma: no cover
+        pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+
+
+def test_ea04_shape_is_not_a_cartesian_product(embedded_client):
     """Purpose-built regression test for the v1.7.0 self-join bug.
 
     One board carries an fp32 (does not fit) and an int8 (fits) deployment for
@@ -390,12 +408,7 @@ def test_ea04_shape_is_not_a_cartesian_product():
     variants -- 2 rows. The buggy join shapes return 4, pairing model A's fp32
     with model B's int8. See docs/engine-notes.md item 1.
     """
-    try:
-        from samyama import SamyamaClient
-        client = SamyamaClient.embedded()
-    except Exception as exc:  # pragma: no cover
-        pytest.skip(f"embedded Samyama engine unavailable: {exc}")
-
+    client = embedded_client
     g = "default"
     for label in ("XBoard", "XModel", "XVariant", "XDeploy"):
         try:
