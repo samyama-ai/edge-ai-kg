@@ -341,6 +341,23 @@ upstream sources.
 - Absence of a kernel in the table does not always mean an operator cannot run —
   ORT can decompose or fall back in ways the registration table does not show.
 
+### Not in this dataset, by decision
+
+Three things a reader may reasonably expect and will not find. Each was decided
+rather than overlooked, with the reasoning in
+[`docs/alerting-scope.md`](docs/alerting-scope.md) and the wider
+can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
+
+- **No physical location.** Nothing carries a site, zone, room or coordinate.
+  `Vendor.country` is where a vendor is headquartered, not where anything is
+  installed. No upstream source supplies deployment location, so a `Site` spine
+  would be invented wholesale (#34).
+- **No ownership.** No team, contact or `OWNS` edge — same reason. Note also
+  that `Operator` is already taken here and means an ONNX operator (#39).
+- **No alerting state.** No `Alert`, `Rule` or `Threshold`. Thresholding a
+  reading and sending a message is a time-series and notification concern; this
+  graph's contribution is the *context* an alert carries, not the alert (#38).
+
 ### Known limitations
 
 1. **Heavily skewed to `Kernel`** — 22,578 of 25,150 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.

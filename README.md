@@ -355,7 +355,7 @@ benchmarks/   the 16-query catalog + runner
 mcp_server/   7 MCP tools shaped around deployment questions
 demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
-docs/         schema, data provenance, engine notes
+docs/         schema, data provenance, engine notes, scope decisions
 DATASET_CARD.md  HF-style card: structure, provenance, intended + out-of-scope uses
 tests/        ~100 tests: parsing, fleet + real-layer invariants, query correctness
 ```
