@@ -221,14 +221,22 @@ embedded, so neither competes on the axis this repo cares about.
 This is the one differentiator that is **architectural rather than a benchmark**,
 so no tuning flag on the other side overturns it.
 
-**Measured**, median of 5 cold processes — a fresh interpreter each time:
+**Measured**, median of 5 cold processes — a fresh interpreter each time. Each
+row is the median of its own five samples, so the three do not add up to the
+total: 1.9 + 0.0 + 0.6 = 2.5, and the end-to-end median is 2.6. The
+end-to-end figure is the claim; the rows say where the time goes.
 
 | step | median |
 |---|---:|
 | `from samyama import SamyamaClient` | 1.9 ms |
 | `SamyamaClient.embedded()` | 0.0 ms |
 | first query answered | 0.6 ms |
-| **cold interpreter to first answer** | **2.5 ms** |
+| **cold interpreter to first answer** | **2.6 ms** |
+
+`python -m benchmarks.ingest --cold-start` prints the cold figure for **one**
+process; the table is the median of five, which means five separate runs of that
+command. Adding `--repeats 5` prints the warm figure alongside, which is the
+thing this claim is *not* — it is there so the two cannot be confused.
 
 No server, no JVM, no Docker, no port, nothing to start. Neo4j cannot do this at
 any speed: it is a server process, and nothing in that family runs *inside* the
@@ -241,7 +249,7 @@ difference between a graph that can sit next to the model and one that cannot.
 empty graph. So `python -m etl.loader` with no `--url` loads a graph and then
 throws it away — it is a timing exercise, not a way to prepare data (#4).
 
-That reframes the 2.5 ms honestly: it is the time to a *usable engine*, not to
+That reframes the 2.6 ms honestly: it is the time to a *usable engine*, not to
 a *loaded graph*. Querying **this** graph in a fresh process means loading it
 first, which is ~25 s at `--scale 1.0` — the figure `python -m etl.loader`
 prints on its `[4/4] loading edges` line. The options
@@ -257,21 +265,34 @@ paragraph is about. Embedded still pays the ~25 s per process.
 
 ## 5. What this engine actually has, measured
 
-Kept short deliberately: the claims that can be reproduced today.
+Kept short deliberately. Three status labels, and they mean different things:
+
+- **Measured** — a command in this repo produces the number. Every such row
+  names one, and `tests/test_why_this_engine_contract.py` checks the command
+  exists and accepts the flags printed here.
+- **Quoted** — true of the engine, documented elsewhere, with no command here
+  to show it. The row says where it comes from.
+- **Unmeasured** — an open question, with the issue that would settle it.
+
+The distinction matters because the first two used to share a label: a row
+could say **Measured** and then admit in its own `How` column that no command
+existed, and the contract test was written to permit exactly that phrasing.
 
 | Claim | Status | How |
 |---|---|---|
-| Runs in-process, no server, no install beyond `pip` | **Measured** | 2.5 ms cold to first query; every test and demo does it |
-| Embedded mode does not persist — every process reloads | **Measured** | #4; ~25 s for this graph |
+| Runs in-process, no server, no install beyond `pip` | **Measured** — 2.6 ms cold to first query | `python -m benchmarks.ingest --cold-start` |
+| Embedded mode does not persist — every process reloads | **Measured** — ~25 s for this graph | `python -m benchmarks.ingest` (#4) |
 | Apache-2.0, embeddable and redistributable | **Quoted** | [`LICENSE`](../LICENSE) |
-| ~52K nodes/s, ~3.1K edges/s ingest | **Measured, no command on this branch** | figures from #10, which adds the `benchmarks.ingest` module that reproduces them |
-| `id` indexes are load-critical — 10.6x | **Measured** | #18 |
+| ~48K nodes/s, ~3.0K edges/s ingest | **Measured** | `python -m benchmarks.ingest` |
+| `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
+| | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
-| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** | #45 |
+| Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
-| Graph + vector in one binary | **Available, measured; unused in this repo** | #48 |
-| PageRank / WCC / SCC / triangle count | **Measured** — available, unused by the catalog | — |
+| Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --holdout` (#48) |
+| | | `--repro` is the *defect* reproduction, not the capability: it was cited here to show vector search works, which is the opposite of what its name and output say. On 1.7.1 neither panics any more, and both commands now report which way the run went instead of asserting the 0.6.1 outcome. |
+| PageRank / WCC / SCC / triangle count | **Quoted** — available, unused by the catalog | [`client-api.md`](client-api.md); no command in this repo |
 
 ---
 
