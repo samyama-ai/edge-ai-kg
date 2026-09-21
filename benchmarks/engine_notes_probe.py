@@ -31,8 +31,10 @@ into trouble in the first place.
 
 **Note 1 needs `--scale`.** Its own text warns that "a passing 6-node
 reproduction proves nothing", because the join bug appears once cardinalities
-are real. The default fixture is exactly such a 6-node reproduction and is
-reported as INCONCLUSIVE unless `--scale` is given.
+are real. So without `--scale` note 1 is not run at all and is reported
+INCONCLUSIVE. With it, the CLI refuses anything under `MIN_SCALE` (10), where
+the wrong and right answers are too close to tell apart; `note_1` itself also
+returns UNSOUND below 2, but only as a guard for callers that skip the CLI.
 """
 from __future__ import annotations
 

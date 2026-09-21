@@ -157,6 +157,8 @@ class _NullMatchingEngine:
     """A build where note 8b reproduces: `<>` matches a node with no `kind`."""
 
     def query(self, statement, graph):
+        if "count(n.id)" in statement:                  # `built`: both nodes landed
+            return types.SimpleNamespace(records=[[2]])
         if 'q.id = "null" RETURN q.kind' in statement:
             return types.SimpleNamespace(records=[[None]])
         if "<>" in statement:
@@ -176,4 +178,68 @@ def test_note_8b_reports_a_reproduction_as_one_not_as_unsound():
     and return UNSOUND -- so the probe could never say STILL REPRODUCES.
     """
     ok, detail = cases.note_8b(_NullMatchingEngine(), 0)
+    assert ok is False, detail
+
+
+class _Empty:
+    """Accepts every statement and answers every one with no rows."""
+
+    def query(self, statement, graph):
+        return types.SimpleNamespace(records=[])
+
+
+class _IgnoresCreate:
+    """Accepts every `CREATE` and stores nothing, answering reads as an empty graph would.
+
+    Differs from `_Empty` where it matters: an aggregate over nothing is one
+    row holding 0, not no rows at all, which is what `built` and note 6's
+    count actually see from a real engine that dropped the writes.
+    """
+
+    def query(self, statement, graph):
+        if "count(" in statement:
+            return types.SimpleNamespace(records=[[0]])
+        return types.SimpleNamespace(records=[])
+
+
+@pytest.mark.parametrize("engine", [_Empty, _IgnoresCreate], ids=lambda e: e.__name__)
+@pytest.mark.parametrize("probe", cases.PROBES, ids=lambda p: f"note_{p[0]}")
+def test_no_probe_reports_fixed_against_an_engine_that_stored_nothing(engine, probe):
+    """FIXED has to mean "gave the right answer", never "did not error".
+
+    One test over every probe, because the per-probe guards are easy to lose
+    one at a time: deleting the `built()` calls, forcing note 8 to FIXED,
+    dropping the note 3/3b length guards or turning note 5/6's "parsed but
+    wrong" into success each left the rest of this file green. Against an
+    engine that stored nothing, the only acceptable outcomes are STILL
+    REPRODUCES, UNSOUND, or the harness refusing the fixture.
+    """
+    number, _title, fn = probe
+    try:
+        ok, detail = fn(engine(), 10)       # 10 is note 1's MIN_SCALE
+    except (harness.FixtureNotBuilt, harness.ResetFailed):
+        return
+    assert ok is not True, f"note {number} reported FIXED on an empty engine: {detail}"
+
+
+def test_note_6_with_inserts_that_never_landed_cannot_tell():
+    """Two accepted inserts and no rows is not "the constraint enforces nothing"."""
+    ok, detail = cases.note_6(_IgnoresCreate(), 0)
+    assert ok is None, detail
+
+
+class _DistinctIgnored:
+    """A build where DISTINCT de-duplicates nothing useful: two rows, one value."""
+
+    def query(self, statement, graph):
+        if "count(n.id)" in statement:
+            return types.SimpleNamespace(records=[[5]])
+        if "DISTINCT" in statement:
+            return types.SimpleNamespace(records=[["A"], ["A"]])
+        return types.SimpleNamespace(records=[])
+
+
+def test_note_2_reads_the_values_not_the_row_count():
+    """`[["A"], ["A"]]` is two rows and still the wrong answer."""
+    ok, detail = cases.note_2(_DistinctIgnored(), 0)
     assert ok is False, detail

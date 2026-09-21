@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A knowledge graph of edge-AI deployment — boards, SoCs, accelerators, runtimes,
 ONNX operators, kernels, quantized model variants and biosignal pipelines — built
-on the **Samyama Graph** engine (OSS v1.7.0). The repo holds the loader, the
-synthetic generator and the query catalog; the engine itself lives in
-`samyama-ai/samyama-graph`.
+on the **Samyama Graph** engine (server 1.7.0; embedded `samyama>=1.7.1`). The
+repo holds the loader, the synthetic generator and the query catalog; the
+engine itself lives in `samyama-ai/samyama-graph`.
 
 The hero question it exists to answer: *which operators in this model have no
 kernel on this accelerator, and therefore silently fall back to the CPU?*
@@ -149,10 +149,10 @@ read as disagreements between the embedded build and the HTTP server -- a
 second `WITH` introducing a new alias failing embedded (note 10), and
 `sum(CASE ...)` returning a different type on each build and silently dropping
 a `WHERE` on it (note 11). They are neither. They are one pip install against
-another: `pyproject.toml` asked for `samyama>=0.6.0`, pip resolved 0.6.1, and
-the notes were measured against a 1.7.0 server.
+another: `pyproject.toml` then asked for `samyama>=0.6.0` (the old floor), pip
+resolved 0.6.1, and the notes were measured against a 1.7.0 server.
 
-This file now floors the engine at `samyama>=1.7.1`, on which neither
+`pyproject.toml` now floors the engine at `samyama>=1.7.1`, on which neither
 reproduces embedded -- the same caveat as above: nothing here re-probed the
 server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 `run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.
