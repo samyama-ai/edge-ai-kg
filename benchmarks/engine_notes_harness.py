@@ -32,22 +32,19 @@ def reset(client):
     Raising only when `DETACH DELETE` *errors* was not enough: a delete that
     succeeds and leaves rows behind is the failure mode that matters here,
     because every probe opens with this call and would then measure a graph
-    holding the previous probe's fixture. `note_8` detects its own case --
-    `p1` surviving is reported UNSOUND rather than as note 8 -- but the other
-    ten had nothing, and an inherited node shows up as a wrong row count, which
+    holding the previous probe's fixture. Note 8 in particular relies on
+    this: a `p1` surviving its delete would otherwise read as note 8. An inherited node shows up as a wrong row count, which
     is exactly what these probes read as a verdict.
     """
     try:
         client.query("MATCH (n) DETACH DELETE n", GRAPH)
-        records = client.query("MATCH (n) RETURN count(n)", GRAPH).records
+        # The ids themselves, not `count(n)`. A bare-node aggregate is the
+        # shape engine note 9 says does not aggregate, and `count(n.id)` would
+        # miss a node with no `id` -- so no aggregate at all: every surviving
+        # node is one row, whatever properties it has.
+        left = len(client.query("MATCH (n) RETURN id(n)", GRAPH).records)
     except Exception as exc:
         raise ResetFailed(f"reset failed; later verdicts are unsound: {exc}") from exc
-    # `records[0][0]` was inside the `try`. An engine returning no rows for an
-    # aggregate over an empty graph -- which is the *successful* case here --
-    # would raise IndexError, get caught, and be re-raised as a failed reset,
-    # marking every probe below UNSOUND for having worked. Read outside, with
-    # "no rows" meaning zero.
-    left = records[0][0] if records else 0
     if left:
         raise ResetFailed(
             f"reset ran without error and left {left:,} nodes; later verdicts "
@@ -94,8 +91,11 @@ def built(client, label: str, expected: int):
             f"empty graph rather than the behaviour.")
 
 
-def does_not_parse(client, cypher: str):
-    """Whether the engine refuses `cypher`, distinguishing refusal from breakage.
+def parses(client, cypher: str):
+    """Whether the engine accepts `cypher`: `True`, `False`, or `None` for "cannot tell".
+
+    Named for what `True` means. It was `does_not_parse` and returned `True`
+    when the statement *did* parse, so every call site read backwards.
 
     Notes 5 and 6 are "this statement does not parse", so the probe reads a
     raised exception as the note reproducing. Any exception would do that --

@@ -66,7 +66,7 @@ def test_a_fixture_that_landed_is_accepted():
 
 
 def test_an_engine_answering_nothing_is_unsound_not_a_reproduction():
-    """`does_not_parse` distinguishes "refuses this" from "answers nothing".
+    """`parses` distinguishes "refuses this" from "answers nothing".
 
     Notes 5 and 6 read a raised exception as the note reproducing. A dropped
     connection would otherwise print STILL REPRODUCES for a run that measured
@@ -76,7 +76,7 @@ def test_an_engine_answering_nothing_is_unsound_not_a_reproduction():
         def query(self, statement, graph):
             raise RuntimeError("connection refused")
 
-    assert harness.does_not_parse(Dead(), "MATCH (n) RETURN n")[0] is None
+    assert harness.parses(Dead(), "MATCH (n) RETURN n")[0] is None
 
     class RefusesOnlyThis:
         def query(self, statement, graph):
@@ -84,15 +84,15 @@ def test_an_engine_answering_nothing_is_unsound_not_a_reproduction():
                 return types.SimpleNamespace(records=[[1]])
             raise RuntimeError("Query error: unsupported syntax")
 
-    assert harness.does_not_parse(RefusesOnlyThis(), "BAD CYPHER")[0] is False
+    assert harness.parses(RefusesOnlyThis(), "BAD CYPHER")[0] is False
 
 
 def test_a_reset_that_leaves_rows_is_unsound():
     """`DETACH DELETE` succeeding and leaving rows is the case that matters."""
     class NeverEmpties:
         def query(self, statement, graph):
-            if "count(" in statement:
-                return types.SimpleNamespace(records=[[7]])
+            if "RETURN id(n)" in statement:
+                return types.SimpleNamespace(records=[[i] for i in range(7)])
             return types.SimpleNamespace(records=[])
 
     with pytest.raises(harness.ResetFailed, match="left 7 nodes"):
@@ -127,7 +127,7 @@ class _MinEngine:
             return types.SimpleNamespace(records=[[value]])
         if "count(n.id)" in statement:
             return types.SimpleNamespace(records=[[2]])
-        return types.SimpleNamespace(records=[[0]] if "count(" in statement else [])
+        return types.SimpleNamespace(records=[])
 
 
 def test_note_4_reads_only_the_int_sentinel_for_its_verdict():
@@ -145,3 +145,35 @@ def test_note_4_survives_a_non_numeric_minimum():
     """A None from `min()` is a verdict, not a TypeError landing in ERROR."""
     assert cases.note_4(_MinEngine(None, 6.9), 0)[0] is False
     assert cases.note_4(_MinEngine(6.9, None), 0)[0] is None
+
+
+def test_note_1_refuses_a_scale_that_cannot_tell():
+    """At 0 an empty graph satisfies `len(got) == n`; at 1 the product is the answer."""
+    for scale in (0, 1):
+        assert cases.note_1(object(), scale)[0] is None
+
+
+class _NullMatchingEngine:
+    """A build where note 8b reproduces: `<>` matches a node with no `kind`."""
+
+    def query(self, statement, graph):
+        if 'q.id = "null" RETURN q.kind' in statement:
+            return types.SimpleNamespace(records=[[None]])
+        if "<>" in statement:
+            restricted = 'q.id = "has"' in statement
+            hits = [["has"]] if restricted else [["has"], ["null"]]
+            if '"NPU"' in statement:
+                hits = [] if restricted else [["null"]]
+            return types.SimpleNamespace(records=hits)
+        return types.SimpleNamespace(records=[])
+
+
+def test_note_8b_reports_a_reproduction_as_one_not_as_unsound():
+    """The control must not be contaminated by the bug the probe measures.
+
+    Over the whole label, `kind <> "GPU"` matches `null` on exactly the build
+    where 8b reproduces, and the control used to read that as "`<>` is broken"
+    and return UNSOUND -- so the probe could never say STILL REPRODUCES.
+    """
+    ok, detail = cases.note_8b(_NullMatchingEngine(), 0)
+    assert ok is False, detail

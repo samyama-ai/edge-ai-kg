@@ -95,7 +95,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # The engine-notes probe, three modules: `engine_notes_probe.py` (the CLI),
 # `engine_notes_harness.py` and `engine_notes_cases.py`. BLE001 in six places
 # across them: the reset (re-raised as `ResetFailed`, never swallowed); the two
-# catches in `does_not_parse` that separate "refuses this statement" from "not
+# catches in `parses` that separate "refuses this statement" from "not
 # answering at all"; note 6's attempted `DROP CONSTRAINT`; the version label,
 # read in a `try` so a renamed field cannot stop the run; and the per-probe
 # guard in `main` that turns an unexpected failure into one ERROR verdict

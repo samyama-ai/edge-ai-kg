@@ -14,7 +14,7 @@ from __future__ import annotations
 from benchmarks.engine_notes_harness import (
     GRAPH,
     built,
-    does_not_parse,
+    parses,
     reset,
     rows,
 )
@@ -24,8 +24,13 @@ def note_1(client, scale: int):
     """A trailing bound variable in a second MATCH is not joined -> cartesian product."""
     from etl.helpers import create_edges, create_nodes
 
-    reset(client)
     n = scale
+    if n < 2:
+        # At 0 there is nothing to join and `len(got) == n` holds for an empty
+        # graph; at 1 the cartesian product *is* the right answer. The CLI
+        # refuses these, but the function should not rely on its caller.
+        return None, f"--scale {n} cannot tell a cartesian product from a join"
+    reset(client)
     create_nodes(client, GRAPH, "RBd", [{"id": "B1"}])
     create_nodes(client, GRAPH, "RMd", [{"id": f"M{i}"} for i in range(n)])
     create_nodes(client, GRAPH, "RVr",
@@ -39,6 +44,7 @@ def note_1(client, scale: int):
                       ("RDp", f"d{i}{p}", "R_OF", "RVr", f"M{i}{p}", None),
                       ("RVr", f"M{i}{p}", "R_VO", "RMd", f"M{i}", None)]
     create_edges(client, GRAPH, edges)
+    built(client, "RDp", 2 * n)
     got = rows(client, (
         'MATCH (b:RBd)<-[:R_ON]-(d1:RDp)-[:R_OF]->(v1:RVr)-[:R_VO]->(m:RMd) '
         'WHERE v1.p="fp32" '
@@ -155,10 +161,10 @@ def note_5(client, scale):
     reset(client)
     rows(client, 'CREATE (:N5 {id:"n1"})')
     built(client, "N5", 1)
-    parses, detail = does_not_parse(
+    accepted, detail = parses(
         client, 'MATCH (n:N5) WHERE NOT (n)-[:R]->() RETURN n.id')
-    if parses is not True:
-        return parses, detail
+    if accepted is not True:
+        return accepted, detail
     # Parsing is not the claim. This note is why the catalog writes every
     # anti-join as `OPTIONAL MATCH ... count() = 0`, and someone reading FIXED
     # will drop that workaround -- so the negated pattern has to return the
@@ -189,7 +195,7 @@ def note_6(client, scale):
     the reason per-probe labels are not decoration.
     """
     reset(client)
-    parsed, detail = does_not_parse(
+    parsed, detail = parses(
         client, 'CREATE CONSTRAINT FOR (n:N6) REQUIRE n.id IS UNIQUE')
     if parsed is True:
         # Parsing is not the claim: the note exists because `id` uniqueness is
@@ -198,8 +204,8 @@ def note_6(client, scale):
         # has to *reject a duplicate*. An engine that accepts the statement and
         # enforces nothing is the worst outcome here and the one this catches.
         rows(client, 'CREATE (:N6 {id:"dup"})')
-        enforced, why = does_not_parse(client, 'CREATE (:N6 {id:"dup"})')
-        if enforced is True:
+        inserted, why = parses(client, 'CREATE (:N6 {id:"dup"})')
+        if inserted is True:
             held = rows(client, 'MATCH (n:N6) RETURN count(n.id)')
             return False, (f"the constraint was accepted and enforces nothing: "
                            f"a duplicate `id` inserted, {held[0][0] if held else 0} "
@@ -260,8 +266,11 @@ def note_8b(client, scale):
     # below is satisfied by an engine that returns nothing for every
     # comparison, and the note would read FIXED on a build where `<>` is
     # broken outright.
-    control = {r[0] for r in
-               rows(client, 'MATCH (q:Q) WHERE q.kind <> "GPU" RETURN q.id')}
+    # Restricted to `has`: over the whole label, a build where note 8b
+    # reproduces would match `null` too, and the control would call a working
+    # `<>` broken -- reporting UNSOUND for exactly the case it should report.
+    control = {r[0] for r in rows(
+        client, 'MATCH (q:Q) WHERE q.id = "has" AND q.kind <> "GPU" RETURN q.id')}
     if control != {"has"}:
         return None, (f"`kind <> \"GPU\"` matched {sorted(control)}, want "
                       f"['has'] -- `<>` is not working at all here, so the "

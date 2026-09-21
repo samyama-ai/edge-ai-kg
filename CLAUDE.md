@@ -151,6 +151,9 @@ reproduces. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
+`docs/engine-notes.md` still describes them in the unresolved present tense
+until #94, the docs half of this change, rewrites its preamble; where the two
+disagree, this file and the probe are current.
 
 `tests/test_engine_version.py` keeps the floor honest -- it asserts the
 declared dependency, the running engine, **and** re-runs note 11's own

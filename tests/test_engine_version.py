@@ -114,12 +114,14 @@ def _parse(version: str) -> Version:
 @pytest.fixture(scope="module")
 def engine():
     """Skips in *setup* so `--no-skips` can see a missing engine."""
+    # Only a missing package skips. An engine that imports and then fails to
+    # start is broken, not absent, and should error rather than skip -- this
+    # module exists to fail loudly on a bad engine.
     try:
         from samyama import SamyamaClient
-
-        client = SamyamaClient.embedded()
-    except Exception as exc:  # pragma: no cover
-        pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+    except ImportError as exc:  # pragma: no cover
+        pytest.skip(f"samyama is not installed: {exc}")
+    client = SamyamaClient.embedded()
     # Every other embedded module resets first; this one must too, and must also
     # clean up. Without a reset it is not idempotent -- a second run in one
     # process sees eight :VGrp nodes -- the fixture creates four -- and `hits`
@@ -265,7 +267,10 @@ def _floor_of(spec: str) -> str | None:
 def _name_of(spec: str) -> str:
     """`samyama[cli]>=1.7.1 ; ...` -> `samyama`. Extras are not part of the name."""
     body = spec.split(";", 1)[0].strip()
-    return re.split(r"[\[<>=!~ ]", body, maxsplit=1)[0].strip().lower()
+    # `(` too: `samyama(>=1.7.1)` is legal PEP 508 with no space, and without
+    # it the name came back as `samyama(`, so the lookup reported samyama as
+    # not declared at all.
+    return re.split(r"[\[(<>=!~ ]", body, maxsplit=1)[0].strip().lower()
 
 
 def test_requirement_parsing_survives_the_shapes_a_pyproject_may_use():
@@ -292,6 +297,7 @@ def test_requirement_parsing_survives_the_shapes_a_pyproject_may_use():
                  # Legal PEP 508, and the floor read as `"1.7.1)"` until the
                  # closing paren joined the excluded characters.
                  "samyama (>=1.7.1)",
+                 "samyama(>=1.7.1)",
                  "samyama (>=1.7.1) ; python_version>='3.10'"):
         assert _name_of(spec) == "samyama", spec
         floor = _floor_of(spec)
