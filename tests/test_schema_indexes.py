@@ -92,7 +92,10 @@ CYPHER_SOURCES = (
     # Scanned regardless: the guard's contract is "every file with Cypher is
     # read", and exempting one because it *looks* irrelevant is how the
     # `demo/demo.py` gap happened.
-    "benchmarks/engine_notes_probe.py",
+    # Three files since the split: the probe CLI holds no Cypher of its own,
+    # and the harness only resets and counts.
+    "benchmarks/engine_notes_cases.py",
+    "benchmarks/engine_notes_harness.py",
     # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint
     # lookups that filter on `id`, which every label already indexes.
     "benchmarks/neo4j_client.py",
