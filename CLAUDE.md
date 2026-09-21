@@ -137,6 +137,13 @@ rather than erroring**. The loader and every catalog query work around them, so
 these are not trivia — breaking one of these rules produces confident,
 plausible, wrong output.
 
+`python -m benchmarks.engine_notes_probe --scale 300` re-runs notes 1-6, 8 and
+9 against the installed engine, and on **embedded** 1.7.1 none of them
+reproduces. That does not retire a rule: the notes were measured on the 1.7.0
+**HTTP server**, a different binary that has not been re-probed, and note 7
+(no tenant boundary on that server) has no probe at all. The rules below stay
+binding until the server is measured too.
+
 **Notes 10 and 11 are resolved, and were never what they said they were.** They
 read as disagreements between the embedded build and the HTTP server -- a
 second `WITH` introducing a new alias failing embedded (note 10), and
@@ -146,14 +153,14 @@ another: `pyproject.toml` asked for `samyama>=0.6.0`, pip resolved 0.6.1, and
 the notes were measured against a 1.7.0 server.
 
 This file now floors the engine at `samyama>=1.7.1`, on which neither
-reproduces. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
+reproduces embedded -- the same caveat as above: nothing here re-probed the
+server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 `run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.
 The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
-`docs/engine-notes.md` still describes them in the unresolved present tense
-until #94, the docs half of this change, rewrites its preamble; where the two
-disagree, this file and the probe are current.
+`docs/engine-notes.md` carries a banner saying the same; rewriting the notes
+themselves is #94.
 
 `tests/test_engine_version.py` keeps the floor honest -- it asserts the
 declared dependency, the running engine, **and** re-runs note 11's own

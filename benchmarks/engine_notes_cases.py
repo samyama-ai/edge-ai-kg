@@ -1,4 +1,10 @@
-"""One minimal reproduction per engine note, as written in `docs/engine-notes.md`.
+"""One minimal reproduction per probeable engine note in `docs/engine-notes.md`.
+
+Notes 1-6, 8 and 9, plus 3b, 4b and 8b. Not every note: note 7 is a property
+of the HTTP server (see the comment above `PROBES`), and notes 10 and 11 are
+resolved and guarded elsewhere -- `tests/test_engine_version.py` re-runs note
+11's reproduction on every test run, and note 10 is the second-`WITH` shape
+`EA01`/`EA02` exercise in `tests/test_correctness.py`.
 
 Each probe returns `(ok, detail)`: `True` when the running engine gives the
 right answer (FIXED), `False` when it still shows the note's behaviour, `None`
@@ -99,10 +105,10 @@ def note_3b(client, scale):
     # would notice. Six makes it 1 in 720, and the insertion order below is
     # deliberately the reverse of the sorted one.
     for i, (a, b) in enumerate([(1, 6), (1, 5), (1, 4), (1, 3), (1, 2), (1, 1)]):
-        rows(client, f'CREATE (:S {{id:"s{i}", a:{a}, b:{b}}})')
-    built(client, "S", 6)
+        rows(client, f'CREATE (:S3b {{id:"s{i}", a:{a}, b:{b}}})')
+    built(client, "S3b", 6)
     got = [r[0] for r in rows(
-        client, 'MATCH (s:S) WITH s.a AS a, s.b AS b ORDER BY a ASC, b ASC RETURN b')]
+        client, 'MATCH (s:S3b) WITH s.a AS a, s.b AS b ORDER BY a ASC, b ASC RETURN b')]
     if len(got) != 6:
         return None, f"expected 6 rows back, got {len(got)}: {got}"
     return got == sorted(got), f"second key gave {got}, sorted would be {sorted(got)}"
@@ -187,10 +193,13 @@ def note_6(client, scale):
     `SHOW CONSTRAINTS` lists it. There is then no way to remove it: neither
     `DROP CONSTRAINT FOR (n:N6) REQUIRE ...` nor the older
     `DROP CONSTRAINT ON (n:N6) ASSERT ...` parses. `reset` is `DETACH DELETE`,
-    which removes nodes and not schema, so the constraint outlives this probe.
+    which removes nodes and not schema, so the constraint outlives this probe
+    -- but not the run: each `SamyamaClient.embedded()` is its own in-memory
+    graph, and a constraint created on one is absent from the next (checked on
+    1.7.1: `SHOW CONSTRAINTS` on a fresh client returns `[]`).
 
-    That is contained rather than unsound, and only because `:N6` belongs to
-    this probe alone: nothing below touches that label, so a uniqueness
+    Within the run it is contained rather than unsound, because `:N6` belongs
+    to this probe alone: nothing below touches that label, so a uniqueness
     constraint on it cannot change another verdict. The drop is still
     attempted, and its failure is reported in the detail line rather than
     swallowed -- "created and cannot be removed" is worth knowing, and it is
@@ -205,7 +214,13 @@ def note_6(client, scale):
         # reading FIXED will stop maintaining the invariant. So the constraint
         # has to *reject a duplicate*. An engine that accepts the statement and
         # enforces nothing is the worst outcome here and the one this catches.
-        rows(client, 'CREATE (:N6 {id:"dup"})')
+        # The first insert is fixture, not measurement: if even it is refused,
+        # the constraint is not the thing being tested, so say so rather than
+        # letting the raise land in ERROR.
+        first, why_first = parses(client, 'CREATE (:N6 {id:"dup"})')
+        if first is not True:
+            return None, (f"the constraint was created, but a first `:N6` insert "
+                          f"with no duplicate was refused too ({why_first[:60]})")
         inserted, why = parses(client, 'CREATE (:N6 {id:"dup"})')
         if inserted is True:
             held = rows(client, 'MATCH (n:N6) RETURN count(n.id)')
@@ -225,18 +240,19 @@ def note_6(client, scale):
 def note_8(client, scale):
     """Deleted property columns resurrect onto new nodes.
 
-    `:P` is this probe's own label, and every probe owns its labels -- which is
+    `:P8` is this probe's own label, and every probe owns its labels -- which is
     what keeps a resurrected column from leaking into the next verdict. Note 8
     is a *column* behaviour, so `reset` counting nodes cannot detect it; the
-    isolation is the guard. Each label is named for its probe (`:B2`, `:D3`,
-    `:V4`, `:N4b`, `:N5`, `:N6`, `:A9`) -- notes 2-4 used to build real schema
-    labels (`:Board`, `:Deployment`) and 4b and 5 shared `:N`.
+    isolation is the guard. Each label ends in its probe's number (`:B2`,
+    `:D3`, `:S3b`, `:V4`, `:N4b`, `:N5`, `:N6`, `:P8`, `:Q8b`, `:A9`/`:O9`;
+    note 1's are `R`-prefixed) -- notes 2-4 used to build real schema labels
+    (`:Board`, `:Deployment`) and 4b and 5 shared `:N`.
     """
     reset(client)
-    rows(client, 'CREATE (:P {id:"p1", doomed:"ghost"})')
+    rows(client, 'CREATE (:P8 {id:"p1", doomed:"ghost"})')
     reset(client)                      # DETACH DELETE, which note 8 says is not a reset
-    rows(client, 'CREATE (:P {id:"p2"})')
-    got = rows(client, 'MATCH (p:P) RETURN p.id, p.doomed')
+    rows(client, 'CREATE (:P8 {id:"p2"})')
+    got = rows(client, 'MATCH (p:P8) RETURN p.id, p.doomed')
     # Every row, not `got[0]`. `p1` cannot be among them: `reset` above
     # verifies the graph is empty and raises `ResetFailed` otherwise, which
     # `tests/test_engine_notes_probe.py` pins -- so a surviving `p1` (a delete
@@ -253,14 +269,14 @@ def note_8b(client, scale):
     have counted a node the query meant to exclude.
     """
     reset(client)
-    rows(client, 'CREATE (:Q {id:"has", kind:"NPU"})')
-    rows(client, 'CREATE (:Q {id:"null"})')           # no `kind` at all
+    rows(client, 'CREATE (:Q8b {id:"has", kind:"NPU"})')
+    rows(client, 'CREATE (:Q8b {id:"null"})')           # no `kind` at all
     # Note 8 first. If a property column survived an earlier probe's delete
     # (that is note 8), `null` may come back carrying a `kind` it was never
     # given -- and then `kind <> "NPU"` matching it is note 8 showing through,
     # not note 8b. Different findings; reporting one as the other is the false
     # positive this probe is most exposed to, because 8 runs immediately above.
-    planted = rows(client, 'MATCH (q:Q) WHERE q.id = "null" RETURN q.kind')
+    planted = rows(client, 'MATCH (q:Q8b) WHERE q.id = "null" RETURN q.kind')
     if planted and planted[0][0] is not None:
         return None, (f"`null` was created without `kind` and came back with "
                       f"{planted[0][0]!r} -- that is note 8 resurrecting a "
@@ -273,13 +289,13 @@ def note_8b(client, scale):
     # reproduces would match `null` too, and the control would call a working
     # `<>` broken -- reporting UNSOUND for exactly the case it should report.
     control = {r[0] for r in rows(
-        client, 'MATCH (q:Q) WHERE q.id = "has" AND q.kind <> "GPU" RETURN q.id')}
+        client, 'MATCH (q:Q8b) WHERE q.id = "has" AND q.kind <> "GPU" RETURN q.id')}
     if control != {"has"}:
         return None, (f"`kind <> \"GPU\"` matched {sorted(control)}, want "
                       f"['has'] -- `<>` is not working at all here, so the "
                       f"null case below would say nothing about note 8b")
-    got = {r[0] for r in rows(client, 'MATCH (q:Q) WHERE q.kind <> "NPU" RETURN q.id')}
-    return got == set(), (f"`kind <> \"GPU\"` matched ['has'] as it should; "
+    got = {r[0] for r in rows(client, 'MATCH (q:Q8b) WHERE q.kind <> "NPU" RETURN q.id')}
+    return got == set(), (f"`kind <> \"GPU\"` matched {sorted(control)} as it should; "
                           f"`kind <> \"NPU\"` matched {sorted(got)}, want none")
 
 
@@ -310,6 +326,10 @@ def note_9(client, scale):
 # property of the OSS *server's* HTTP path, and this probe runs embedded, where
 # there is no tenant boundary to ignore in the first place. Reporting it either
 # way from here would be a measurement of nothing.
+#
+# Notes 10 and 11 are absent for a different reason: they are resolved (0.6.1
+# against a 1.7.0 server, not a behaviour of either), and each already has a
+# guard that runs on every `pytest` -- see the module docstring.
 PROBES = [
     (1, "trailing bound variable in a 2nd MATCH is not joined", note_1),
     (2, "RETURN DISTINCT is a no-op", note_2),
