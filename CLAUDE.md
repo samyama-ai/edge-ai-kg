@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A knowledge graph of edge-AI deployment — boards, SoCs, accelerators, runtimes,
 ONNX operators, kernels, quantized model variants and biosignal pipelines — built
-on the **Samyama Graph** engine (OSS v1.7.0). The repo holds the loader, the
-synthetic generator and the query catalog; the engine itself lives in
-`samyama-ai/samyama-graph`.
+on the **Samyama Graph** engine (server 1.7.0; embedded `samyama>=1.7.1`). The
+repo holds the loader, the synthetic generator and the query catalog; the
+engine itself lives in `samyama-ai/samyama-graph`.
 
 The hero question it exists to answer: *which operators in this model have no
 kernel on this accelerator, and therefore silently fall back to the CPU?*
@@ -137,16 +137,35 @@ rather than erroring**. The loader and every catalog query work around them, so
 these are not trivia — breaking one of these rules produces confident,
 plausible, wrong output.
 
-**Notes 10 and 11 are not these.** They are disagreements between the embedded
-build and the HTTP server rather than behaviours of either, and **neither is
-worked around in the catalog**: a second `WITH` introducing a new alias fails
-embedded (note 10), and `sum(CASE ...)` returns a different type on each build,
-which silently drops a `WHERE` on it (note 11). For note 11 a workaround is
-known -- `toFloat()` on the aggregate is correct on both -- and deliberately
-deferred to #56; for note 10 none has been established. Cypher that obeys every rule below still answers
-differently on the two builds, which is why `EA01`, `EA02` and `EA04` are right
-under `run_benchmark` and wrong under `pytest`. Three tests are marked `xfail` -- five parameters in the run output.
-See #56 — which build is authoritative is undecided.
+`python -m benchmarks.engine_notes_probe --scale 300` re-runs notes 1-6, 8 and
+9 against the installed engine, and on **embedded** 1.7.1 none of them
+reproduces. That does not retire a rule: the notes were measured on the 1.7.0
+**HTTP server**, a different binary that has not been re-probed, and note 7
+(no tenant boundary on that server) has no probe at all. The rules below stay
+binding until the server is measured too.
+
+**Notes 10 and 11 are resolved, and were never what they said they were.** They
+read as disagreements between the embedded build and the HTTP server -- a
+second `WITH` introducing a new alias failing embedded (note 10), and
+`sum(CASE ...)` returning a different type on each build and silently dropping
+a `WHERE` on it (note 11). They are neither. They are one pip install against
+another: `pyproject.toml` then asked for `samyama>=0.6.0` (the old floor), pip
+resolved 0.6.1, and the notes were measured against a 1.7.0 server.
+
+`pyproject.toml` now floors the engine at `samyama>=1.7.1`, on which neither
+reproduces embedded -- the same caveat as above: nothing here re-probed the
+server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
+`run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.
+The two notes stay in `docs/engine-notes.md` as history, because the wrong
+conclusion is the useful part: two builds were assumed to differ for three
+weeks when the difference was a version.
+`docs/engine-notes.md` carries a banner saying the same; rewriting the notes
+themselves is #94.
+
+`tests/test_engine_version.py` keeps the floor honest -- it asserts the
+declared dependency, the running engine, **and** re-runs note 11's own
+reproduction, because note 11 does not raise. On a downgraded build it makes
+`EA04` return confident extra rows rather than fail.
 
 The rules that follow from notes 1-9:
 

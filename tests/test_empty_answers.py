@@ -39,14 +39,26 @@ asks: 60 of 60 models are CPU-only somewhere, and `EA11`'s top ten counts
 ## Why not EA01
 
 The issue asks for the fallback audit itself, and that is the right instinct --
-`EA01` *is* the hero question. It cannot be run here: on the embedded engine it
-raises `Query error: Variable not found: operator` before returning anything,
-which is engine note 10 / #56, not a property of any fixture.
+`EA01` *is* the hero question. It could not be run here at first: on the
+embedded engine it raised `Query error: Variable not found: operator` before
+returning anything, which was engine note 10 / #56, not a property of any
+fixture.
 
-`EA11` is the closest available stand-in -- the same anti-join, asked
+`EA11` was added as the closest available stand-in -- the same anti-join, asked
 fleet-wide instead of against one accelerator -- and `test_ea01_zero_row_case`
-below is marked `xfail(strict=True)` so that the day #56 is resolved, the suite
-fails and says this coverage can now be added.
+below was marked `xfail(strict=True)` so that the day #56 resolved, the suite
+would fail and say this coverage could now be added. #56 resolved by pinning the
+embedded engine to `samyama>=1.7.1`, the mark fired exactly that way, and
+`EA01` is asserted directly now. `EA11` stays: it covers the fleet-wide shape,
+which is a different question, not a substitute for this one.
+
+**`EA01` is paired like everything else here, and was not at first.** While the
+mark was on, the zero-row test used ids `EA01` does not filter on -- the query
+filters `m.id = "model:00000"` and `a.id = "accel:00001"` -- so its opening
+`MATCH` bound nothing and `[]` came back regardless of the graph. An xfailed
+test hides that; an unmarked one does not, but only if something can tell empty
+from vacuous. That something is the control, and `EA01` was the one query in
+this module without one (Tarun's review on #94).
 """
 import pytest
 
@@ -184,34 +196,69 @@ def test_ea13_finds_the_operator_when_cuda_does_not(engine):
     )
 
 
-@pytest.mark.xfail(
-    reason="#56 / engine note 10: EA01 projects through a second WITH, which the "
-           "embedded build does not register, so it raises `Variable not found: "
-           "operator` before any fixture matters. Strict: when #56 is resolved "
-           "this passes, the suite fails, and the fallback audit's zero-row case "
-           "-- the one the issue actually asks for -- can be asserted here.",
-    strict=True,
-)
+def ea01_fixture(client, *, covered_by_the_audited_accelerator: bool):
+    """The audited model and accelerator, with one operator either covered or not.
+
+    **The ids must be `model:00000` and `accel:00001`.** `EA01` hardcodes them
+    (`benchmarks/queries.py:28,30`) because the hero question is asked about one
+    named model on one named board. A fixture using any other id leaves the
+    opening `MATCH` binding nothing, and the query returns `[]` for every graph
+    -- which is what an earlier version of this test did, passing vacuously.
+
+    The `engine` fixture resets the graph first, so there is no generated
+    fleet to collide with; reusing the generator's id shape is safe and is the
+    only way the query sees the fixture at all.
+
+    Takes the client rather than making one: the skip for a missing engine has
+    to happen in setup, which is what `--no-skips` converts (#106).
+    """
+    create_nodes(client, GRAPH, "Model",
+                 [{"id": "model:00000", "name": "audited-model", "family": "cnn"}])
+    # Note 8: a key omitted here can report a *previous* load's value rather
+    # than null, so every property EA01 projects is set explicitly.
+    create_nodes(client, GRAPH, "Operator",
+                 [{"id": "op1", "name": "Conv", "category": "convolution",
+                   "since_version": 11}])
+    create_nodes(client, GRAPH, "Accelerator",
+                 [{"id": "accel:00001", "kind": "NPU-Lite", "is_cpu_fallback": 0},
+                  {"id": "accel:00002", "kind": "NPU-Pro", "is_cpu_fallback": 0}])
+    create_nodes(client, GRAPH, "Kernel",
+                 [{"id": "k1", "execution_provider": "CPUExecutionProvider"}])
+    runs_on = "accel:00001" if covered_by_the_audited_accelerator else "accel:00002"
+    create_edges(client, GRAPH, [
+        ("Model", "model:00000", "USES_OPERATOR", "Operator", "op1", None),
+        ("Kernel", "k1", "IMPLEMENTS", "Operator", "op1", None),
+        ("Kernel", "k1", "RUNS_ON", "Accelerator", runs_on, None),
+    ])
+    return client
+
+
 def test_ea01_zero_row_case(engine):
     """An accelerator implementing everything must produce an empty audit.
 
-    Ids are deliberately un-generator-shaped. `etl/generate.py:182` mints
-    `f"{prefix}:{n:05d}"`, so `model:00000` and `accel:00001` are exactly its
-    first model and second accelerator -- and had this fixture ever shared a
-    graph with a generated fleet, `EA01` would stop raising once #56 lands, match
-    the *generated* model's operator surface, return a non-empty audit and fail
-    the assertion. That is XFAIL, not XPASS, so `strict=True` would never fire
-    and the mark would become permanent instead of retiring itself.
+    This is the hero question's own zero-row case, which #27 asks for and which
+    could not be asserted while engine note 10 made `EA01` raise on the embedded
+    build. #56 pinned the engine to `samyama>=1.7.1` and the query runs.
     """
-    create_nodes(engine, GRAPH, "Model", [{"id": "ea01-model", "name": "m"}])
-    create_nodes(engine, GRAPH, "Operator",
-                 [{"id": "op1", "name": "Conv", "category": "convolution",
-                   "since_version": 1}])
-    create_nodes(engine, GRAPH, "Accelerator", [{"id": "ea01-accel", "kind": "NPU-Lite"}])
-    create_nodes(engine, GRAPH, "Kernel", [{"id": "k1"}])
-    create_edges(engine, GRAPH, [
-        ("Model", "ea01-model", "USES_OPERATOR", "Operator", "op1", None),
-        ("Kernel", "k1", "IMPLEMENTS", "Operator", "op1", None),
-        ("Kernel", "k1", "RUNS_ON", "Accelerator", "ea01-accel", None),
-    ])
-    assert run(engine, "EA01") == []
+    rows = run(ea01_fixture(engine, covered_by_the_audited_accelerator=True), "EA01")
+    assert rows == [], (
+        f"the audited accelerator has a kernel for the model's only operator, "
+        f"so the fallback audit must be empty; EA01 returned {rows}"
+    )
+
+
+def test_ea01_finds_the_operator_when_the_audited_accelerator_lacks_a_kernel(engine):
+    """The control. Without it the assertion above proves nothing.
+
+    An earlier version of the zero-row test used ids the query does not filter
+    on, so its `MATCH` bound nothing and `[]` came back whatever the graph held
+    -- it would have passed with the `RUNS_ON` edge deleted. Every empty-answer
+    assertion in this module is paired for exactly that reason; `EA01` was the
+    one that had no pair, which is how the vacuity survived review.
+    """
+    rows = run(ea01_fixture(engine, covered_by_the_audited_accelerator=False), "EA01")
+    assert len(rows) == 1, (
+        f"the only kernel runs on accel:00002, not the audited accel:00001, so "
+        f"Conv must be reported as falling back; EA01 returned {rows}"
+    )
+    assert tuple(rows[0]) == ("Conv", "convolution", 11), rows[0]

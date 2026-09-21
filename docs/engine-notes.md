@@ -1,5 +1,13 @@
 # Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-11)
 
+> **Partly superseded, 2026-09-21.** Notes 10 and 11 are **resolved**: they
+> were `samyama` 0.6.1 against a 1.7.0 server, not two builds disagreeing, and
+> `pyproject.toml` now floors the engine at 1.7.1 (#56). Notes 1-6, 8 and 9 do
+> not reproduce on *embedded* 1.7.1 either -- `python -m
+> benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
+> 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
+> Note 7 has no probe. The text below is the original record; #94 rewrites it.
+
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
 [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).

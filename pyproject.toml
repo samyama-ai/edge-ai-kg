@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Edge AI deployment knowledge graph (boards, accelerators, ONNX kernels, quantized models) built on Samyama"
 requires-python = ">=3.10"
 dependencies = [
-    "samyama>=0.6.0",
+    # >=1.7.1 is a floor, not a preference: 0.6.x fails engine notes 10 and 11
+    # (a second WITH's alias, and sum(CASE) typing) and panics the HNSW index on
+    # near-duplicate vectors. 1.7.1 matches the 1.7.0 server the notes were
+    # measured against. See #56.
+    "samyama>=1.7.1",
     "requests>=2.31",
     "rich>=13.0",
     "click>=8.0",
@@ -13,7 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.16,<0.17"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.16,<0.17",
+    # `tomllib` is 3.11+, and this project supports 3.10.
+    # `tests/test_engine_version.py` reads this file to check the samyama
+    # floor; without a reader it had to skip, and a `skipif` is a setup-phase
+    # skip that `--no-skips` turns into a failure -- so a developer on 3.10
+    # reproducing a CI failure got a hard error about `etl.download_data`
+    # instead of the thing they were chasing.
+    "tomli; python_version < '3.11'",
+]
 
 [tool.setuptools.packages.find]
 include = ["etl*", "mcp_server*", "benchmarks*", "demo*"]
@@ -77,6 +91,24 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # everywhere else here; there is no untrusted input to sanitise. All HTTP in
 # this comparison goes through this module.
 "benchmarks/neo4j_client.py" = ["S310"]
+
+# The engine-notes probe, three modules: `engine_notes_probe.py` (the CLI),
+# `engine_notes_harness.py` and `engine_notes_cases.py`. BLE001 in six places
+# across them: the reset (re-raised as `ResetFailed`, never swallowed); the two
+# catches in `parses` that separate "refuses this statement" from "not
+# answering at all"; note 6's attempted `DROP CONSTRAINT`; the version label,
+# read in a `try` so a renamed field cannot stop the run; and the per-probe
+# guard in `main` that turns an unexpected failure into one ERROR verdict
+# instead of ending the sweep. All six sit on a call into the engine, which
+# raises untyped errors (`RuntimeError("Query error: ...")`) for anything from
+# unsupported Cypher to an unreachable server. There is no narrower class.
+#
+# No S110 here. An earlier version of this comment claimed one for "a reset
+# that fails must not mask the note", but nothing in these files swallows an
+# exception with `pass`: a failed reset raises `ResetFailed`, which `main`
+# turns into an UNSOUND verdict. The ignore was unused and its stated reason
+# described a mechanism the files do not use.
+"benchmarks/engine_notes_*.py" = ["BLE001"]
 
 # S101: asserts are what a test is. S110: cleanup between fixtures is
 # best-effort by design -- failing to delete leftover nodes must not mask the

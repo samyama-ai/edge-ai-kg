@@ -240,19 +240,6 @@ RETURN op.name AS operator
     assert {r[0] for r in recs} == expected
 
 
-@pytest.mark.xfail(
-    reason="engine note 11 / #56: EA04 has a single WITH, so note 10 is NOT its "
-           "cause. sum(CASE ... THEN 1 ELSE 0 END) returns float on the embedded "
-           "build and int on the server, so EA04's `WHERE int8_hits > 0` filters on "
-           "the server and is silently dropped embedded. The groups that leak "
-           "through are fp32-only, so int8_kb is correctly the ELSE sentinel and "
-           "this assertion fails. Strict: the failure is a filter not running, so a "
-           "non-strict mark could outlive the fix and leave EA04's answer on the "
-           "generated graph unchecked. test_ea04_shape_is_not_a_cartesian_product "
-           "covers note 1 on its fixture and is unaffected -- every group there "
-           "satisfies the WHERE, so dropping it changes nothing.",
-    strict=True,
-)
 def test_ea04_quantization_unlock_is_not_a_cartesian_product(loaded):
     """int8 size must be exactly a quarter of fp32 size for the SAME model.
 
@@ -344,35 +331,20 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
 
 # EA01 and EA02 each introduce a new alias in a second WITH -- EA01 from a
 # property expression (`op.name AS operator`), EA02 from an aggregate
-# (`count(k) AS kernel_count`) -- which the embedded build does not register.
-# Both are correct against the HTTP server. See engine note 10 and #56.
-NOTE_10_QUERIES = {"EA01", "EA02"}
-NOTE_10_REASON = ("engine note 10 / #56: the embedded build does not register an "
-                  "alias introduced by a second WITH. Correct against the HTTP "
-                  "server. Remove this mark when #56 is resolved.")
-
-
-def excused_by_note_10():
-    """A marker, not `pytest.xfail()`.
-
-    The imperative call raises at once, so the query never runs and the
-    parameter can only ever report XFAIL. Applying a marker lets the body run,
-    so if a future `samyama` release fixes note 10 the run says XPASS and the
-    mark can come off -- which is the signal the engine notes promise. With
-    `pytest.xfail()` that promise could never be kept.
-    """
-    return pytest.mark.xfail(reason=NOTE_10_REASON, strict=False)
+# (`count(k) AS kernel_count`). Both were excused here as `xfail` until #56:
+# the 0.6.x embedded build did not register such an alias and raised
+# `Variable not found`, while the 1.7.0 server answered correctly. Pinning the
+# embedded build to `samyama>=1.7.1` removed the divergence, both parameters
+# XPASSed, and the marks came off. Engine note 10 keeps the history.
 
 
 @pytest.mark.parametrize("qid", list(BY_ID))
-def test_every_catalog_query_runs_and_returns_rows(loaded, qid, request):
-    """Parametrised so the two note-10 queries can be excused individually.
+def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
+    """Parametrised rather than one sweep, so a single query can be excused.
 
-    Marking the whole sweep `xfail` would excuse the other fourteen too: EA07
-    could stop returning rows and the run would still be green.
+    Marking the whole sweep would excuse the other fifteen too: EA07 could stop
+    returning rows and the run would still be green.
     """
-    if qid in NOTE_10_QUERIES:
-        request.applymarker(excused_by_note_10())
     client, _ = loaded
     _, recs = rows(client, BY_ID[qid]["cypher"])
     # EA04 needs a model that misses at fp32 but fits at int8 on the same board;
@@ -453,13 +425,15 @@ ORDER BY model
 
 
 @pytest.mark.parametrize("qid", list(BY_ID))
-def test_order_by_is_actually_applied(loaded, qid, request):
+def test_order_by_is_actually_applied(loaded, qid):
     """ORDER BY on a RETURN-introduced alias is silently ignored on v1.7.0, and
     only the first sort key is honoured. Every catalog query must therefore
     project through WITH and sort on a single key -- assert it really sorts.
 
     Parametrised for the same reason as the sweep above: excusing the whole test
-    for note 10 would excuse the other fourteen queries' sort order too.
+    for a single query would excuse the other fifteen queries' sort order too.
+    That is what kept EA01 and EA02's note-10 marks from hiding anything, and it
+    is why the parametrisation stays now that the marks are gone.
     """
     import re
 
@@ -470,8 +444,6 @@ def test_order_by_is_actually_applied(loaded, qid, request):
     keys = [k.strip() for k in match.group(1).split(",")]
     assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
 
-    if qid in NOTE_10_QUERIES:
-        request.applymarker(excused_by_note_10())
     client, _ = loaded
     cols, recs = rows(client, cypher)
     key = keys[0].split()[0]
