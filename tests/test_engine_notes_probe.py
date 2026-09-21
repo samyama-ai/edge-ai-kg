@@ -52,7 +52,7 @@ def test_a_fixture_that_did_not_land_is_unsound_not_fixed():
         def query(self, statement, graph):
             return types.SimpleNamespace(records=[[0]])
 
-    with pytest.raises(harness.ResetFailed, match="built 6 :Deployment rows"):
+    with pytest.raises(harness.FixtureNotBuilt, match="built 6 :Deployment rows"):
         harness.built(StoresNothing(), "Deployment", 6)
 
 

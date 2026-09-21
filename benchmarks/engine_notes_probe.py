@@ -1,6 +1,8 @@
 """Re-run the probeable engine notes against whatever engine is installed.
 
-Notes 1-6, 8 and 9. **Note 7 has no probe**: "the `--graph` argument is
+Eleven probes: notes 1-6, 8 and 9, plus 3b, 4b and 8b -- behaviours the notes
+file lists under 3, 4 and 8 that carry CLAUDE.md rules of their own. **Note 7
+has no probe**: "the `--graph` argument is
 ignored" is a property of the OSS HTTP path, and there is no tenant boundary to
 ignore on an embedded build, so there is nothing here to measure. It stands
 un-re-measured, and the output says so.
@@ -37,7 +39,7 @@ from __future__ import annotations
 import click
 
 from benchmarks.engine_notes_cases import PROBES
-from benchmarks.engine_notes_harness import ResetFailed, verdict_for
+from benchmarks.engine_notes_harness import FixtureNotBuilt, ResetFailed, verdict_for
 
 # Below this, note 1's cartesian product is not distinguishable from its
 # correct answer: at n models the wrong answer is n*n rows and the right one
@@ -76,7 +78,7 @@ def main(scale):
     except Exception as exc:
         version = f"unknown ({type(exc).__name__} reading client.status())"
     click.echo(f"embedded engine: {version}\n")
-    fixed, reproduces, inconclusive, unsound = [], [], [], []
+    fixed, reproduces, inconclusive, unsound, errored = [], [], [], [], []
     for number, title, probe in PROBES:
         if number == 1 and not scale:
             # Skipped, not run and discarded. Building the fixture only to throw
@@ -90,13 +92,14 @@ def main(scale):
                 # fallback could never be reached -- and had it been, it would
                 # have run note 1 at a size its own text calls proof of nothing.
                 ok, detail = probe(client, scale)
-            except ResetFailed as exc:
+            except (ResetFailed, FixtureNotBuilt) as exc:
                 verdict, bucket, detail = "UNSOUND", unsound, str(exc)
             except Exception as exc:
                 # Per-probe, so one unexpected failure does not abort the run
-                # and hide the ten after it. A probe that cannot run is a
-                # result too -- it is just not a result about the engine note.
-                verdict, bucket = "ERROR", unsound
+                # and hide the rest. A probe that cannot run is a result too
+                # -- it is just not a result about the engine note, and it
+                # gets its own bucket rather than borrowing UNSOUND's.
+                verdict, bucket = "ERROR", errored
                 detail = f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0]}"
             else:
                 verdict = verdict_for(ok)
@@ -115,8 +118,11 @@ def main(scale):
     if reproduces:
         click.echo(f"still reproducing: {reproduces}")
     if unsound:
-        click.echo(f"UNSOUND / ERROR, measuring nothing: {unsound} -- these are not "
-                   "evidence\neither way, and are excluded from the count above.")
+        click.echo(f"UNSOUND, the run could not tell: {unsound} -- not evidence "
+                   "either way,\nand excluded from the count above.")
+    if errored:
+        click.echo(f"ERROR, the probe itself failed: {errored} -- excluded from the "
+                   "count above;\nthe detail line under each says what raised.")
     if inconclusive:
         click.echo(f"NOT MEASURED: {inconclusive} -- note 1 needs --scale, because its "
                    "own\ntext says a small reproduction proves nothing. Re-run with "

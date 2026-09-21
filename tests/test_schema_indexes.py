@@ -77,23 +77,15 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
-    # Listed because it holds Cypher, and the entry is inert -- but not for
-    # the reason an earlier version of this comment gave. It said the probe
-    # uses only throwaway labels, naming `:VGrp`, which appears nowhere in that
-    # file; and notes 2 and 3 build real `:Board` and `:Deployment` rows and
-    # read `form_factor` and `latency_ms` off them.
-    #
-    # What makes the entry inert is that none of those real-label queries
-    # carries a `WHERE`. This file counts a property as *used* only when
-    # something filters on it, so the probe justifies no index -- while its
-    # throwaway labels, which do carry `WHERE` clauses, name nothing the schema
-    # indexes.
+    # The engine-notes probe. Listed because it holds Cypher, and inert: every
+    # probe builds its own throwaway labels (`:B2`, `:D3`, `:V4`, ...), which
+    # name nothing the schema indexes. Notes 2 and 3 used to build real
+    # `:Board` and `:Deployment` rows; they no longer do.
     #
     # Scanned regardless: the guard's contract is "every file with Cypher is
     # read", and exempting one because it *looks* irrelevant is how the
-    # `demo/demo.py` gap happened.
-    # Three files since the split: the probe CLI holds no Cypher of its own,
-    # and the harness only resets and counts.
+    # `demo/demo.py` gap happened. The CLI module holds no Cypher of its own;
+    # the harness only resets and counts.
     "benchmarks/engine_notes_cases.py",
     "benchmarks/engine_notes_harness.py",
     # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint

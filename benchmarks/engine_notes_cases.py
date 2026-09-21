@@ -63,8 +63,9 @@ def note_2(client, scale):
     """`RETURN DISTINCT` is a no-op."""
     reset(client)
     for i, f in enumerate(["A", "A", "B", "B", "B"]):
-        rows(client, f'CREATE (:Board {{id:"b{i}", form_factor:"{f}"}})')
-    got = rows(client, 'MATCH (b:Board) RETURN DISTINCT b.form_factor')
+        rows(client, f'CREATE (:B2 {{id:"b{i}", form_factor:"{f}"}})')
+    built(client, "B2", 5)
+    got = rows(client, 'MATCH (b:B2) RETURN DISTINCT b.form_factor')
     return len(got) == 2, f"{len(got)} rows over 5 boards with 2 distinct values"
 
 
@@ -72,10 +73,10 @@ def note_3(client, scale):
     """`ORDER BY` on a RETURN-introduced alias is silently ignored."""
     reset(client)
     for i, v in enumerate([10.9, 12.7, 7.5, 9.0, 3.2, 20.1]):
-        rows(client, f'CREATE (:Deployment {{id:"d{i}", latency_ms:{v}}})')
-    built(client, "Deployment", 6)
+        rows(client, f'CREATE (:D3 {{id:"d{i}", latency_ms:{v}}})')
+    built(client, "D3", 6)
     got = [r[0] for r in
-           rows(client, 'MATCH (d:Deployment) RETURN d.latency_ms AS a ORDER BY a ASC')]
+           rows(client, 'MATCH (d:D3) RETURN d.latency_ms AS a ORDER BY a ASC')]
     # Both halves. `[] == sorted([])` is true, so "is it sorted" alone reports
     # FIXED for an engine that returned nothing at all.
     if len(got) != 6:
@@ -118,11 +119,11 @@ def note_4(client, scale):
     """
     reset(client)
     for i, (p, kb) in enumerate([("int8", 6.9), ("fp32", 27.6)]):
-        rows(client, f'CREATE (:V {{id:"v{i}", precision:"{p}", size_kb:{kb}}})')
-    built(client, "V", 2)
+        rows(client, f'CREATE (:V4 {{id:"v{i}", precision:"{p}", size_kb:{kb}}})')
+    built(client, "V4", 2)
 
     def smallest(sentinel):
-        got = rows(client, 'MATCH (v:V) RETURN min(CASE WHEN v.precision = '
+        got = rows(client, 'MATCH (v:V4) RETURN min(CASE WHEN v.precision = '
                            f'"int8" THEN v.size_kb ELSE {sentinel} END)')
         return got[0][0] if got else None
 
@@ -151,8 +152,9 @@ def note_4b(client, scale):
     behaviours, and one pass/fail over both cannot say which of them moved.
     """
     reset(client)
-    rows(client, 'CREATE (:N {id:"n1", x:3})')
-    got = rows(client, 'MATCH (n:N) WHERE n.x > 0.5 RETURN n.id')
+    rows(client, 'CREATE (:N4b {id:"n1", x:3})')
+    built(client, "N4b", 1)
+    got = rows(client, 'MATCH (n:N4b) WHERE n.x > 0.5 RETURN n.id')
     return len(got) == 1, f"`WHERE n.x > 0.5` against int x=3 -> {len(got)} rows (want 1)"
 
 
@@ -226,8 +228,9 @@ def note_8(client, scale):
     `:P` is this probe's own label, and every probe owns its labels -- which is
     what keeps a resurrected column from leaking into the next verdict. Note 8
     is a *column* behaviour, so `reset` counting nodes cannot detect it; the
-    isolation is the guard. `:N` was shared by notes 4b and 5 until this was
-    written down, so notes 5 and 6 now use `:N5` and `:N6`.
+    isolation is the guard. Each label is named for its probe (`:B2`, `:D3`,
+    `:V4`, `:N4b`, `:N5`, `:N6`, `:A9`) -- notes 2-4 used to build real schema
+    labels (`:Board`, `:Deployment`) and 4b and 5 shared `:N`.
     """
     reset(client)
     rows(client, 'CREATE (:P {id:"p1", doomed:"ghost"})')
@@ -283,13 +286,21 @@ def note_8b(client, scale):
 def note_9(client, scale):
     """Aggregating a bare node variable over a multi-variable MATCH does not aggregate."""
     reset(client)
-    rows(client, 'CREATE (:A {id:"a1"}), (:A {id:"a2"}), (:O {id:"o1"}), (:O {id:"o2"})')
+    rows(client, 'CREATE (:A9 {id:"a1"}), (:A9 {id:"a2"}), (:O9 {id:"o1"}), (:O9 {id:"o2"})')
+    built(client, "A9", 2)
+    built(client, "O9", 2)
     for a in ("a1", "a2"):
         for o in ("o1", "o2"):
-            rows(client, f'MATCH (x:A),(y:O) WHERE x.id="{a}" AND y.id="{o}" '
+            rows(client, f'MATCH (x:A9),(y:O9) WHERE x.id="{a}" AND y.id="{o}" '
                           f'CREATE (x)-[:U]->(y)')
-    bare = rows(client, 'MATCH (a:A)-[:U]->(o:O) RETURN count(DISTINCT o)')
-    prop = rows(client, 'MATCH (a:A)-[:U]->(o:O) RETURN count(DISTINCT o.id)')
+    bare = rows(client, 'MATCH (a:A9)-[:U]->(o:O9) RETURN count(DISTINCT o)')
+    prop = rows(client, 'MATCH (a:A9)-[:U]->(o:O9) RETURN count(DISTINCT o.id)')
+    # The property form is the note's workaround and the control. If it is
+    # not 2 either, the edges did not land as built, and the bare form being
+    # wrong says nothing about note 9.
+    if [list(r) for r in prop] != [[2]]:
+        return None, (f"control count(DISTINCT o.id) -> {[list(r) for r in prop]}, "
+                      f"want [[2]] -- the fixture is not what this probe built")
     ok = len(bare) == 1 and bare[0][0] == 2
     return ok, (f"count(DISTINCT o) -> {[list(r) for r in bare]}, "
                 f"count(DISTINCT o.id) -> {[list(r) for r in prop]}")
