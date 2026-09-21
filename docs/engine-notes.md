@@ -490,7 +490,7 @@ rather than a sentence here. On this box (RTX 4050 laptop), embedded build,
 
 | | rate | batch |
 |---|---:|---|
-| nodes | **~52K/s** | 250 per `CREATE` |
+| nodes | **~48K/s** on 1.7.1 (52-53K on 0.6.1) | 250 per `CREATE` |
 | edges | **~3.1K/s** | 50 per statement |
 
 **The per-item gap is ~17-21x, not the 11x this file used to imply.** The old
@@ -519,8 +519,10 @@ statement**:
 
 4.5x the patterns costs 9.7x the time, roughly `O(p^1.5)` steepening toward
 `O(p^2)`. Node batching is **flat** by contrast -- 52-53K/s at every size from
-100 to 2000 -- which is the control that isolates the cause to the lookup rather
-than to writing.
+100 to 2000 on `samyama` 0.6.1, ~48K/s across the same range on 1.7.1 -- which
+is the control that isolates the cause to the lookup rather than to writing.
+Flat is the finding; the absolute figure moved with the engine, as every other
+number on this page did.
 
 `create_edges` batches 50 for this reason; it was 100, which costs 21% of edge
 throughput. Reproduce with `python -m benchmarks.ingest --sweep-edge-batch`.
@@ -535,6 +537,8 @@ batches: total patterns actually *fall* as batches grow (51,112 at 250 vs 56,823
 at 50) while time doubles, which is what rules out pattern count as the driver.
 
 **The `id` indexes dominate everything above.** Without them the same edge load
-takes 234s instead of 22s, a 10.6x penalty, because each endpoint lookup becomes
+takes 234s instead of 22s, a 10.6x penalty on `samyama` 0.6.1 -- re-measured at
+**6.4x** on 1.7.1 (161s against 25s), reproducible with
+`python -m benchmarks.ingest --no-indexes` -- because each endpoint lookup becomes
 a label scan (#18). The numbers here all assume `schema/edge_ai_kg.cypher` has
 been applied.

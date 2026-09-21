@@ -2,6 +2,10 @@
 
 Closes #41, under the alerting tracking issue #33.
 
+**See also [`alerting-scope.md`](alerting-scope.md)**, which takes this page's
+conclusion as settled and decides which of the remaining questions in #33 this
+repo builds — and records the declines for #34, #38 and #39.
+
 The failure this page exists to prevent is a reader concluding the graph is an
 alerting product. It is not, and saying so plainly is what makes the second half
 credible.
