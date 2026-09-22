@@ -10,12 +10,19 @@
 > $ python -m benchmarks.vector_probe --repro
 > index accepted: True
 > same normalised vector added twice -> ok:
-> that is the 0.6.1 panic gone -- it raised PanicException (assertion failed: c.dist_to_ref <= 0.) until 1.7.1; see #56
+> no panic on this build. docs/vector-search.md records 0.6.1 raising PanicException (assertion failed: c.dist_to_ref <= 0.) here; see #56.
 >
 > $ python -m benchmarks.vector_probe --holdout
 > held out 40; 336 remain -> 307 distinct embeddings
 > add_vector: 307 accepted, none failed
 > vector_search: 40 of 40 unseen operators queried, none failed
+>
+> Every unseen operator searched without panicking. docs/vector-search.md records
+> 0.6.1 panicking on the 9th of 40 here, so on this build that reproduction does
+> not reproduce -- which is a statement about the build you just ran, not about
+> any version number. Note what it does not show: the engine *accepts* the workload,
+> and nothing here says whether the nearest neighbour returned is the useful one.
+> Judging the answers is #48.
 > ```
 >
 > Against 0.6.1 that same run panicked on the 9th of 40. **So the blocker is

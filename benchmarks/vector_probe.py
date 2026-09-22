@@ -286,7 +286,7 @@ def main(repro, metrics, collisions, holdout, seed, scale):
 
 
 def holdout_tail(add_failed: str | None, search_failed: str | None,
-                 added: int = 1, searched: int = 1) -> str:
+                 added: int, searched: int) -> str:
     """The conclusion, read off the run rather than written into the module.
 
     This tail used to be a constant ending "and the search still panics". On
@@ -303,18 +303,13 @@ def holdout_tail(add_failed: str | None, search_failed: str | None,
     HNSW index: calling any other exception by its name would be the same
     mislabelling in the other direction.
 
-    `added` and `searched` are read before any of that, because "nothing
-    failed" is vacuously true of a run that did nothing: a fleet with no
-    operators, or a hold-out that selected none, would otherwise print the
-    clean tail -- the strongest sentence on the page -- over an experiment
-    that never ran.
+    `added` and `searched` are read *after* the failure branches, not before.
+    A panic on the very first add leaves `added == 0`, and a vacuous-run guard
+    placed first would answer "nothing to conclude, check the fleet was
+    generated" -- burying the exact reproduction this command exists to
+    produce. They are required arguments rather than defaulted, so a caller
+    cannot skip the check by omission.
     """
-    if not added or not searched:
-        return (
-            f"\nNothing to conclude: {added} vectors were added and {searched} "
-            f"hold-out searches ran.\nThe experiment needs both to be non-zero "
-            f"before its result means anything -- check the\nfleet was "
-            f"generated and that `data/` holds operators.\n")
     if add_failed:
         return (
             f"\n`add_vector` failed ({add_failed}), so the index is incomplete "
@@ -335,12 +330,22 @@ def holdout_tail(add_failed: str | None, search_failed: str | None,
             "`PanicException` from the HNSW\nindex. Anything else is a different "
             "fault. Read the exception before concluding\nthe blocker is "
             "present.\n")
+    if not added or not searched:
+        # After the failure branches: nothing failed *and* nothing ran, which
+        # is a fleet or hold-out problem rather than a result about the engine.
+        return (
+            f"\nNothing to conclude: {added} vectors were added and {searched} "
+            f"hold-out searches ran,\nand neither raised. The experiment needs "
+            f"both to be non-zero before its result\nmeans anything -- check "
+            f"the fleet was generated and that `data/` holds operators.\n")
     return (
-        "\nEvery unseen operator searched without panicking, which is the 0.6.1 "
-        "blocker\ngone (#56 raised the floor to 1.7.1). Note what this does and "
-        "does not show: it\nshows the engine *accepts* the workload -- it says "
-        "nothing about whether the\nnearest neighbour returned is the useful "
-        "one. Judging the answers is #48.\n")
+        "\nEvery unseen operator searched without panicking. "
+        "docs/vector-search.md records\n0.6.1 panicking on the 9th of 40 here, "
+        "so on this build that reproduction does\nnot reproduce -- which is a "
+        "statement about the build you just ran, not about\nany version "
+        "number. Note what it does not show: the engine *accepts* the "
+        "workload,\nand nothing here says whether the nearest neighbour "
+        "returned is the useful one.\nJudging the answers is #48.\n")
 
 
 if __name__ == "__main__":

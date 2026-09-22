@@ -144,7 +144,8 @@ none erroring. The table above is the server's answer, which is the one a
 `--url` user sees.
 
 So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
-remains open behind them. It needs its own investigation: unlike notes 10 and 11
+divergence remains open behind them — tracked in **#56's own thread**, which
+is where the row-count gap was measured, rather than as an engine note. It needs its own investigation: unlike notes 10 and 11
 it has **no minimal reproduction yet** — only the whole real layer and a
 different row count — so it is not written up as an engine note, which would
 imply a shape someone could avoid.
@@ -356,13 +357,15 @@ the type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
 
 **Both are resolved (#56).** There was nothing to file: the cause was version
 skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
-unpinned and resolved **0.6.1** — an engine two minor versions behind the 1.7.0
-server everything else was measured against. The floor is now `samyama>=1.7.1`,
+unpinned and resolved **0.6.1**, while everything else was measured against the
+1.7.0 server — a different release line, not a patch apart. The floor is now `samyama>=1.7.1`,
 neither note reproduces, and the four test functions they excused — six xfail
 reports, since two were parametrised sweeps — pass unmarked. Notes 10
 and 11 are kept in the notes file as history.
 
-Each is documented with a minimal reproduction and the workaround used in
+**Notes 10 and 11 have no workaround, and need none** — they are resolved, and
+the floor is what resolved them. Each of notes 1-9 is documented with a minimal
+reproduction *and* the workaround the catalog uses, in
 [`docs/engine-notes.md`](docs/engine-notes.md) — and those reproductions are
 runnable, not prose: `python -m benchmarks.engine_notes_probe --scale 300`
 re-runs them against whatever engine is installed. On embedded `samyama` 1.7.1

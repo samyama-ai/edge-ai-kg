@@ -53,9 +53,11 @@ and the 1.7.1 upgrade did not touch it. See the README.
 
 It is worth being clear about what that does *not* buy either. Notes 1-9 are the
 cost this section is about, and the rules built on them all still stand. That is
-now a narrower statement than it reads: re-probed on 2026-09-08, **none of
-notes 1-6, 8 and 9 reproduces on embedded 1.7.1** either
-(`python -m benchmarks.engine_notes_probe --scale 300`). Note 7 is not among
+now a narrower statement than it reads: re-probed on 2026-09-21 by the probe
+#104 landed, **none of notes 1-6, 8 and 9 reproduces on embedded 1.7.1**
+either (`python -m benchmarks.engine_notes_probe --scale 300`). 2026-09-08 is
+a different event -- #56's pip upgrade, which resolved notes 10 and 11. Note 7
+is not among
 them and has no probe -- "the `--graph` argument is ignored" is a property of
 the OSS HTTP path, and embedded has no tenant boundary to ignore, so it stands
 un-re-measured.
@@ -68,8 +70,9 @@ re-measure against the server, not a reason to quote it as a live cost.
 
 Neo4j has none of these. An engineer who knows Cypher can write Cypher against
 Neo4j; against this engine they must read an eleven-note file first — nine
-binding rules, plus notes 10 and 11 kept as resolved history. That cost was real and was paid on day one. Whether
-it is still being paid depends on the server re-measurement above.
+binding rules, plus notes 10 and 11 kept as resolved history. That cost was
+real and was paid on day one. Whether it is still being paid depends on the
+server re-measurement above.
 
 ### Operations and maturity — they win
 
