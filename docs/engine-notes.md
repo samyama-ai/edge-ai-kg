@@ -439,14 +439,14 @@ aliases, and runs embedded without raising.** That is this note's shape, and on
 `samyama` 1.7.1 it does not raise: `tests/test_latency_budget.py` passes
 embedded, returning rows on a fixture and zero on the fleet.
 
-That is a statement about `EA18` on 1.7.1, not a verdict on the note. Whether
-the note is obsolete is #94's question -- it was written against 0.6.1, and #94
-argues the whole embedded-versus-server split was a version skew -- and until
-that lands, `tests/test_empty_answers.py::test_ea01_zero_row_case` is still
-`xfail(strict=True)` naming this note and `EA01`'s second `WITH`. Declaring the
-note false here while a strict test asserts it holds would put the two in
-conflict with nothing resolving it. Recorded so the next reader does not
-conclude `EA18` is untested against the note.
+That is a statement about `EA18` on 1.7.1, not a verdict on the note itself.
+The note was written against 0.6.1, and #56 settled the wider question: the
+embedded-versus-server split was version skew, the floor is now
+`samyama>=1.7.1`, and `tests/test_empty_answers.py::test_ea01_zero_row_case`
+is live and passing rather than `xfail(strict=True)`. What is still unmeasured
+is the **1.7.0 server**, which nothing here re-probed -- so this note stays
+binding for the server path. Recorded so the next reader does not conclude
+`EA18` is untested against the note.
 
 ---
 

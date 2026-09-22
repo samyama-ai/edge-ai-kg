@@ -488,11 +488,25 @@ RETURN kind, affected, only_via_me, nearest
         # an ORDER BY on nothing.
         #
         # A deployment whose model solves several breached tasks does not get
-        # an inflated `fallback_ops`: the first `WITH` groups by the deployment
-        # and operator *properties* -- never the bare nodes, per note 9 -- so
-        # the duplicate task paths collapse before anything is counted. The
-        # generator emits one `SOLVES` per model today, so it cannot arise --
-        # which is exactly why it is written down.
+        # an inflated `fallback_ops`, but not because the duplicate task paths
+        # collapse -- they do not. The first `WITH` groups by the deployment
+        # and operator *properties* (never the bare nodes, per note 9) while
+        # `t` is still bound, so `count(k.id)` is multiplied by the number of
+        # breached tasks: one operator with one kernel and two breached tasks
+        # gives `kernels_here = 2`. What saves the count is that the second
+        # `WITH` only asks whether it is **zero**, and a multiple of zero is
+        # zero -- so the operator is either covered or it is not, whatever the
+        # multiplier. `operators` is a `collect` over the same grouping, so it
+        # is not duplicated either. The generator emits one `SOLVES` per model
+        # today, so none of this can arise yet, which is why it is written down
+        # rather than tested.
+        #
+        # `min(budget_ms)` across several breached tasks takes the **tightest**
+        # budget, which maximises `over_by_ms`. That is the intended reading --
+        # the deployment has to satisfy every task it serves, so the strictest
+        # one is the binding constraint -- and it is stated here because the
+        # alternative (the budget of the worst-served task) is just as
+        # plausible to a reader and would give a different number.
         #
         # Ordered by `over_by_ms`, not by `fallback_ops`. Sorting on the
         # fallback count puts the zero-fallback rows last, so on a fleet with
