@@ -19,7 +19,12 @@
 > ```
 >
 > Against 0.6.1 that same run panicked on the 9th of 40. **So the blocker is
-> gone and #48's nearest-unknown-operator query is buildable.** What this page
+> gone on the embedded build**, which is what every measurement on this page
+> was taken on; the 1.7.0 server was not probed for it, and this repo does not
+> assume the two agree (see #56 for what that cost last time). On embedded
+> 1.7.1, #48's nearest-unknown-operator query is no longer blocked by the
+> panic -- whether it returns *useful* neighbours is #48's own question and is
+> untested. What this page
 > says about *the engine* is now history; what it says about the **embedding**
 > is not — the 26 collision groups are a property of a name catalogue, not of
 > any engine version, and still shape whatever gets built.
@@ -107,9 +112,12 @@ the collisions are a property of the embedding, not of the engine.
 The 0.6.1 column is the original measurement. The 1.7.1 column was
 re-measured on 2026-09-21: each row in a fresh process, every vector added
 *and* searched (`k=3`) under `metric="cosine"`, three random seeds per row. No
-row raised on any seed. The script was a throwaway rather than a
-`vector_probe` flag -- the two rows that matter most, a random vector added
-twice and the hold-out, are `--repro` and `--holdout`, which anyone can re-run.
+row raised on any seed. **That column is not currently reproducible**: the
+script was a throwaway rather than a `vector_probe` flag, so re-running the
+whole table means writing it again. The two rows that matter most -- a random
+vector added twice, and the hold-out -- are `--repro` and `--holdout`, which
+anyone can re-run, and `--metrics` covers the metric table. Folding the rest
+into the probe is the honest fix and is not done.
 
 | input | 0.6.1 | 1.7.1 |
 |---|---|---|
@@ -236,8 +244,9 @@ is what an embedding is for.
 The panic was in a third-party crate (`hnsw_rs 0.2.1`) rather than in Samyama's
 own code, so the likely fixes were upstream or a version bump. **It was the
 version bump**: #56 raised the floor to 1.7.1 and the reproduction stops
-reproducing, so nothing was ever filed against
-`samyama-ai/samyama-graph`.
+reproducing. No issue was filed against `samyama-ai/samyama-graph` from this
+repo -- whether anyone else filed one upstream is not something this page can
+say.
 
 **Not investigated:** whether the panic leaves the index corrupt or is
 recoverable within the same process. Cheap follow-up for whoever picks this up.

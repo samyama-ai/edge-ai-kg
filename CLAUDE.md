@@ -35,7 +35,10 @@ a macOS wheel plus an sdist.
 
 The from-source path below still applies if pip resolves the sdist — a
 non-x86_64 host, or glibc older than 2.38. Check which you got with
-`pip show -f samyama | head -2` before assuming you need any of it. maturin
+`python -c "import importlib.metadata as m; print(m.distribution('samyama').read_text('WHEEL'))"`
+before assuming you need any of it: `Tag: ...manylinux...` is the published
+wheel, while a locally built one says `linux_x86_64`. (`pip show` reports the
+version, not how it was installed.) maturin
 auto-downloads a Rust toolchain, but the host must supply a C compiler and
 clang's builtin headers; on a bare Ubuntu box the build fails twice, first on a
 missing linker, then on `zstd-sys` bindgen not finding `stddef.h`:
@@ -169,8 +172,10 @@ server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
-`docs/engine-notes.md`'s notes 10 and 11 are rewritten to say this rather than
-carrying a banner that contradicts them. **Write Cypher to notes 1-9.**
+`docs/engine-notes.md`'s notes 10 and 11 say this in their own text now,
+instead of being contradicted by a banner forwarding to a PR. The page keeps
+its banner at the top, which records the 1.7.1 re-measurement and its two
+dates. **Write Cypher to notes 1-9.**
 
 If you are ever on an older engine, note 11 is the dangerous one: it does not
 raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.

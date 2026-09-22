@@ -196,7 +196,7 @@ shipped only a macOS wheel and an sdist.
 2.38 — the from-source path is below. Check which you got first:
 
 ```bash
-pip show -f samyama | head -2
+python -c "import importlib.metadata as m; print(m.distribution('samyama').read_text('WHEEL'))"
 ```
 
 maturin fetches its own Rust toolchain, but the system still has to supply

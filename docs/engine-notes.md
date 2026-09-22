@@ -1,12 +1,23 @@
 # Engine notes -- Samyama Graph, measured on v1.7.0
 
-> **Ten of the eleven notes were re-measured on `samyama` 1.7.1 (embedded) on
-> 2026-09-08, and none of those ten reproduces.** Notes 10 and 11 were resolved
-> by #56; notes 1-6, 8 and 9 were re-probed while checking that claim and are
-> gone too, note 1 included at cardinality 300, where a cartesian product would
-> return 90,000 rows instead of 300. The sub-behaviours the rules below depend
-> on -- 3b (only the first `ORDER BY` key) and 8b (`<>` matching nulls) -- were
-> probed separately and are also gone.
+> **Ten of the eleven notes do not reproduce on `samyama` 1.7.1 (embedded).**
+> That is two events, and collapsing them into one date would misdate the
+> evidence:
+>
+> - **2026-09-08, #56:** notes 10 and 11 were resolved. The embedded build went
+>   from 0.6.1 to 1.7.1 and both stopped reproducing -- version skew, not a
+>   difference between the builds.
+> - **2026-09-21, #104:** notes 1-6, 8 and 9 were re-probed by
+>   `benchmarks/engine_notes_probe`, which landed with that PR, and none of
+>   them reproduces either. Note 1 was run at cardinality 300, where a
+>   cartesian product would return 90,000 rows instead of 300. The
+>   sub-behaviours the rules below depend on -- 3b (only the first `ORDER BY`
+>   key), 4b (an int property against a float literal) and 8b (`<>` matching
+>   nulls) -- are separate probes and are gone too.
+>
+> The probe is the authority here rather than this paragraph, and it has been
+> wrong before: two of its own review rounds fixed verdicts that read FIXED
+> when the fixture had not been built. Re-run it rather than quoting this.
 >
 > **Note 7 is the exception, and is not measured either way.** It is a property
 > of the OSS *server's* HTTP path, and the probe runs embedded, where there is
