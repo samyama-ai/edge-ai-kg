@@ -186,9 +186,9 @@ the same vector added twice no longer panics —
 `python -m benchmarks.vector_probe --repro` reports which way that went on the
 installed build. On 0.6.1 it did panic: [`vector-search.md`](vector-search.md) records the
 HNSW index panicking on identical or near-identical vectors, and this repo's
-floor (`samyama>=0.6.0`) still admits that build until #105 raises it. So
-convergence is **available on 1.7.1**, not hypothetical — and not yet
-guaranteed by anything this repo pins.
+floor was `samyama>=0.6.0`, which admitted that build; **#104 raised it to
+`>=1.7.1`**, so convergence is **available**, not hypothetical, on every build
+this repo now allows.
 
 **But this repo does not use it.** The catalog is 17 Cypher queries and not one
 of them is a vector search. The only vector code here is

@@ -6,10 +6,10 @@ satisfies it cannot tell "the answer is none" from "the query is broken" (#27).
 
 That claim is checked rather than assumed --
 `tests/test_correctness.py::test_every_catalog_query_runs_and_returns_rows`
-sweeps the catalog -- though it is checked for 14 of the 17. Three ids are
-excused there: `EA04`, whose combination may legitimately not occur at the
-fixture's scale, and `EA01` and `EA02`, which carry a non-strict `xfail` for
-engine note 10.
+sweeps the catalog -- though `EA04` is excused there, because its combination
+may legitimately not occur at the fixture's scale. `EA01` and `EA02` used to be
+excused too, under a non-strict `xfail` for engine note 10; #104 raised the
+engine floor to 1.7.1, the note stopped reproducing, and those marks are gone.
 
 It matters here more than most repos, because the catalog's central question is
 a **negative** -- operators with *no* kernel -- so an empty result is the

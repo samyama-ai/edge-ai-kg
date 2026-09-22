@@ -22,11 +22,10 @@ The catalog entry points here for these, because each is a paragraph:
    (`test_ea17_matches_ground_truth_at_full_scale`, `--full-scale`). Do not edit
    those patterns without re-running it: a small graph cannot settle it, and the
    failure is silent in the direction that looks like the finding.
-2. **It needs the 1.7.1 floor #105 pins** (landing with #104). Each leg's
-   second `WITH` introduces all-new aliases -- note 10's shape, which 0.6.x
-   rejects. Until #104 merges,
-   `pyproject.toml` declares `samyama>=0.6.0`, so the declared floor admits a
-   build where `EA17` does not run at all.
+2. **It needs the `samyama>=1.7.1` floor #104 landed.** Each leg's second
+   `WITH` introduces all-new aliases -- note 10's shape, which 0.6.x rejects,
+   so on a build below the floor `EA17` does not run at all.
+   `tests/test_engine_version.py` is what fails if the floor is lowered.
 3. **`+1/+2/+4/+5` are single schema-fixed hops**, not an assumed chain length:
    `FEEDS`, then `PRECEDES`, then `VARIANT_OF`+`OF_VARIANT`, then `ON_BOARD`.
    The variable part is `size(r)` over `NEXT_STAGE`. A schema change that
@@ -76,7 +75,7 @@ import re
 
 import pytest
 
-from benchmarks.queries import BY_ID
+from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl.helpers import create_edges, create_nodes
 
 GRAPH = "default"
@@ -126,6 +125,15 @@ def build_and_load(engine_factory, ops, seed: int, scale: float):
     client = engine_factory()
     fleet = gen.generate(seed=seed, scale=scale, operators=ops)
     real_layer.build_real(fleet, ops)
+    # Loudly, rather than by omission. Iterating `NODE_LABELS` silently drops
+    # any label the generator grew since, and the ground truth below is
+    # computed from `fleet` -- so the comparison would quietly stop covering
+    # the new label instead of failing.
+    unknown = sorted(set(fleet.nodes) - set(NODE_LABELS))
+    assert not unknown, (
+        f"the fleet holds {unknown}, which `etl.loader.NODE_LABELS` does not "
+        f"list, so those nodes would never be loaded while the ground truth "
+        f"below still counts them. Add them to NODE_LABELS.")
     for label in NODE_LABELS:
         if fleet.nodes.get(label):
             create_nodes(client, GRAPH, label, fleet.nodes[label])
@@ -169,6 +177,19 @@ class Truth:
         for _sl, src, rel, _tl, tgt, _p in fleet.edges:
             if rel == "REQUIRES_SENSOR":
                 self.requires[src].add(tgt)
+        # The one-hop invariant `by_kind` reads below, checked where the data
+        # is rather than assumed where it is used: every `REQUIRES_SENSOR`
+        # endpoint is a `Sensor`, so a task that requires this sensor is
+        # adjacent to it and its blast-radius depth is 1. A schema change that
+        # routed this through a stage would make that depth wrong -- and wrong
+        # in the same direction as the query, which is the pair of errors that
+        # cancel and leave a green test.
+        off_sensor = {tgt for sensors in self.requires.values() for tgt in sensors
+                      if self.labels.get(tgt) != "Sensor"}
+        assert not off_sensor, (
+            f"REQUIRES_SENSOR points at {sorted(off_sensor)[:3]}, which is not "
+            f"a Sensor, so ClinicalTask is no longer one hop from the sensor "
+            f"and `by_kind`'s depth of 1 is wrong. Derive it instead.")
         self.modality = {row["id"]: row.get("modality")
                          for row in fleet.nodes.get("Sensor", ())}
         self.reachable = {row["id"]: self._reachable_from(row["id"])
@@ -262,6 +283,8 @@ class Truth:
         tasks = {task for task, sensors in self.requires.items()
                  if sensor_id in sensors}
         if tasks:
+            # Depth 1 is the schema's one hop, and the invariant that makes
+            # it one is asserted in `__init__` rather than assumed here.
             per_kind["ClinicalTask"] = [1] * len(tasks)
             only["ClinicalTask"] = len(tasks & exclusive)
 
@@ -269,10 +292,17 @@ class Truth:
                 for kind, depths in per_kind.items()}
 
 
+# Ten: five legs, each naming the subject twice (`s.id =` and `o.id <>`).
+# Exact rather than a floor, so adding or removing a leg has to be an edit here
+# too -- a retarget that silently covered four legs of five is the failure this
+# number exists to catch.
+EA17_SUBJECT_OCCURRENCES = 10
+
+
 def retargeted_ea17(sensor_id: str) -> str:
     """`EA17` asking about `sensor_id` instead of the hardcoded subject.
 
-    The quoted literal, not the bare id. `replace("sensor:00000", ...)` is a
+    The quoted literal, not the bare id. `replace(EA17_SUBJECT, ...)` is a
     substring match: it would also rewrite a longer id that merely starts with
     it, and would rewrite the string wherever else it appeared. Ten
     occurrences, all of them quoted, so anchoring on the quotes is exact.
@@ -287,11 +317,12 @@ def retargeted_ea17(sensor_id: str) -> str:
     # when `sensor_id` *is* `sensor:00000` -- which is the first sensor in the
     # fleet and the one most callers pass -- so the "catalog subject moved"
     # check never fired for the commonest case.
-    occurrences = original.count('"sensor:00000"')
-    assert occurrences >= 5, (
-        f"`EA17` names `sensor:00000` {occurrences} times; expected at least "
-        f"one per leg. The catalog's hardcoded subject has moved, and this "
-        f"retarget no longer does anything.")
+    occurrences = original.count(f'"{EA17_SUBJECT}"')
+    assert occurrences == EA17_SUBJECT_OCCURRENCES, (
+        f"`EA17` names `{EA17_SUBJECT}` {occurrences} times, not "
+        f"{EA17_SUBJECT_OCCURRENCES}. Either a leg was added or removed -- in "
+        f"which case update EA17_SUBJECT_OCCURRENCES here -- or the catalog's "
+        f"subject moved and this retarget no longer rewrites every leg.")
     cypher = original.replace('"sensor:00000"', f'"{sensor_id}"')
     assert cypher.count(f'"{sensor_id}"') == occurrences, (
         f"retargeting to {sensor_id} rewrote "
@@ -453,3 +484,45 @@ def test_ea17_never_compares_an_id_with_a_bare_inequality():
         "no `<>` in EA17 at all -- this test would pass vacuously, so it "
         "checks the comparison it guards is still there"
     )
+
+
+def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
+    """`EA17` walks `NEXT_STAGE*0..` with no depth cap. The fleet has cycles.
+
+    Both halves of that are measured, because the pair is what matters.
+
+    **The fleet really is cyclic.** `etl/generate.py` gives each sensor a
+    random *sample* of a shared stage pool and chains it, so two sensors'
+    chains cross in opposite orders. At the fixture's scale the generated graph
+    contains `stage:00012 -> stage:00009 -> stage:00010 -> stage:00012`. Any
+    reasoning that starts "the stage graph is a DAG" is therefore wrong, and a
+    depth cap on `EA17` cannot be justified that way either.
+
+    **It terminates anyway**, because Cypher's variable-length matching does
+    not traverse the same relationship twice within one path, so the walk is
+    bounded by the number of `NEXT_STAGE` edges rather than by the graph being
+    acyclic. That is a property of the engine, not of the data, which is
+    exactly the kind of thing this repo does not take on trust: this builds the
+    smallest cyclic chain -- two stages pointing at each other -- and runs the
+    real catalog query against it.
+
+    A hang here is a hang in `run_benchmark`, so if this ever stops returning,
+    that is the finding.
+    """
+    client = engine_factory()
+    create_nodes(client, GRAPH, "Sensor",
+                 [{"id": "sensor:cycle", "modality": "ecg"}])
+    create_nodes(client, GRAPH, "SignalStage",
+                 [{"id": "stage:a", "kind": "filter"},
+                  {"id": "stage:b", "kind": "filter"}])
+    create_edges(client, GRAPH, [
+        ("Sensor", "sensor:cycle", "FEEDS", "SignalStage", "stage:a", None),
+        ("SignalStage", "stage:a", "NEXT_STAGE", "SignalStage", "stage:b", None),
+        ("SignalStage", "stage:b", "NEXT_STAGE", "SignalStage", "stage:a", None),
+    ])
+
+    rows = client.query(retargeted_ea17("sensor:cycle"), GRAPH).records
+    by_kind = {row[0]: row[1] for row in rows}
+    assert by_kind.get("SignalStage") == 2, (
+        f"the two stages of a cyclic chain should both be in the blast "
+        f"radius, exactly once each; got {by_kind}")

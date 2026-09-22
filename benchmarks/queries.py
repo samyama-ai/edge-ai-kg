@@ -13,6 +13,12 @@ Engine notes:
 """
 from __future__ import annotations
 
+# `EA17`'s subject, in one place. The query names it ten times -- twice in each
+# of five legs -- and a retarget that rewrote only some of them would leave one
+# leg answering about a different sensor than the rest, which reads as a real
+# finding rather than an editing mistake.
+EA17_SUBJECT = "sensor:00000"
+
 QUERIES: list[dict] = [
     {
         "id": "EA01",
@@ -342,7 +348,7 @@ ORDER BY kernels DESC
     {
         "id": "EA17",
         "title": "BLAST RADIUS: this sensor stops -- what stops with it?",
-        "question": ("Sensor `sensor:00000` fails. What depends on it, and how "
+        "question": (f"Sensor `{EA17_SUBJECT}` fails. What depends on it, and how "
                      "much of that stops *only* because of it?"),
         "why_graph": (
             "Two numbers, because reachable is not the same as stopped. "
@@ -365,68 +371,72 @@ ORDER BY kernels DESC
         #   1. The `OPTIONAL MATCH` legs use note 1's trailing-rebind shape.
         #      Validated at `--scale 1.0`, 0 disagreements. Do not edit those
         #      patterns without re-running `pytest --full-scale`.
-        #   2. Needs 1.7.1 (note 10's shape, per-leg second `WITH`); #105.
+        #   2. Needs the `samyama>=1.7.1` floor #104 landed (note 10's shape,
+        #      a per-leg second `WITH`, which 0.6.x rejects).
         #   3. `+1/+2/+4/+5` are schema-fixed hops, not a depth bound. The
         #      variable part is `size(r)`, which is what `*0..` is for.
-        #   4. The sensor id appears ten times; retarget with
-        #      `retargeted_ea17`, never by hand. An unknown id gives an empty
-        #      blast radius rather than an error, as `EA01` and `EA06` do.
+        #   4. The sensor id is `EA17_SUBJECT`, written once above and
+        #      interpolated into all ten places the query names it -- five
+        #      legs, each naming it twice. Retarget with `retargeted_ea17`,
+        #      never by hand. An unknown id gives an empty blast radius rather
+        #      than an error, as `EA01` and `EA06` do.
         #   5. No `ORDER BY` (note 3c) and no `WHERE` on `only_via_me`
         #      (note 11); `o.id IS NOT NULL` guards note 8b -- `<>` against a
         #      null property matches.
         #
         # **Embedded only.** The 1.7.0 server does not traverse the
         # variable-length walk and rejects `size(r)` on it (note 12), so
-        # `run_benchmark` over HTTP records a per-query failure. Constraint 2
-        # means embedded 0.6.1 rejects it too: the floor that excludes 0.6.1 is
-        # #105, and until it lands pip resolving 1.7.1 is what keeps the
-        # catalog sweep green.
+        # `run_benchmark` over HTTP records a per-query failure -- a standing
+        # one, not a regression, and `docs/engine-notes.md` note 12 is what a
+        # reader of that output is sent to. Constraint 2 means embedded 0.6.1
+        # rejects it too, and `pyproject.toml`'s `samyama>=1.7.1` floor (#104)
+        # is what excludes that build.
         "cypher": """
 MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(x:SignalStage)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x)
-WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH x.id AS thing, min(size(r)) + 1 AS depth, count(DISTINCT o.id) AS others
 WITH "SignalStage" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
 MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m:Model)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m)
-WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH m.id AS thing, min(size(r)) + 2 AS depth, count(DISTINCT o.id) AS others
 WITH "Model" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
 MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
-WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH d.id AS thing, min(size(r)) + 4 AS depth, count(DISTINCT o.id) AS others
 WITH "Deployment" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
 MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
-WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH b.id AS thing, min(size(r)) + 5 AS depth, count(DISTINCT o.id) AS others
 WITH "Board" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
 MATCH (t:ClinicalTask)-[:REQUIRES_SENSOR]->(s:Sensor)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 OPTIONAL MATCH (t)-[:REQUIRES_SENSOR]->(o:Sensor)
-WHERE o.id IS NOT NULL AND o.id <> "sensor:00000" AND o.modality = s.modality
+WHERE o.id IS NOT NULL AND o.id <> {subject} AND o.modality = s.modality
 WITH t.id AS thing, 1 AS depth, count(DISTINCT o.id) AS others
 WITH "ClinicalTask" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
-""",
+""".replace("{subject}", f'"{EA17_SUBJECT}"'),
     },
 ]
 
