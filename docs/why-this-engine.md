@@ -23,9 +23,11 @@ Every claim here is one of three kinds, and each is labelled:
 
 ### Cypher completeness — they win, and it is not close
 
-`docs/engine-notes.md` documents **eleven** behaviours of this engine that
-Neo4j does not have. Nine are v1.7.0 semantics; two are disagreements between
-the embedded and HTTP builds of the same version.
+`docs/engine-notes.md` documents **eleven** behaviours of this engine that Neo4j
+does not have. Nine are v1.7.0 semantics. The other two were disagreements
+between the embedded and HTTP builds and are **resolved** — they turned out to
+be an outdated pip engine rather than a design difference (#56) — and are kept
+there as history.
 
 Several **return wrong rows rather than erroring**, which is the worst failure
 mode a database can have:
@@ -40,12 +42,34 @@ mode a database can have:
 | A trailing bound variable in a second `MATCH` | not joined — a cartesian product (note 1) |
 
 **Measured.** The hero query is written *around* note 1, which is why `EA04`
-uses conditional aggregation instead of the natural self-join. Three tests are
-marked `xfail` because the two builds disagree (#56).
+uses conditional aggregation instead of the natural self-join. Four test
+functions were marked `xfail` because the two builds disagreed; that turned out
+to be an outdated pip engine rather than a real divergence, and pinning
+`samyama>=1.7.1` removed those marks and *that* disagreement (#56).
+
+**Not every disagreement, though.** One survives on the real layer — the
+embedded build answers `EA08`, `EA10` and `EA12` differently from the server —
+and the 1.7.1 upgrade did not touch it. See the README.
+
+It is worth being clear about what that does *not* buy either. Notes 1-9 are the
+cost this section is about, and the rules built on them all still stand. That is
+now a narrower statement than it reads: re-probed on 2026-09-08, **none of
+notes 1-6, 8 and 9 reproduces on embedded 1.7.1** either
+(`python -m benchmarks.engine_notes_probe --scale 300`). Note 7 is not among
+them and has no probe -- "the `--graph` argument is ignored" is a property of
+the OSS HTTP path, and embedded has no tenant boundary to ignore, so it stands
+un-re-measured.
+
+All of them, note 7 included, were originally measured against the 1.7.0
+*server*, which has not been re-probed. The workarounds in the loader and the
+catalog stay until it is. So the honest position is that this
+cost was real and is now unverified rather than confirmed — which is a reason to
+re-measure against the server, not a reason to quote it as a live cost.
 
 Neo4j has none of these. An engineer who knows Cypher can write Cypher against
-Neo4j; against this engine they must read an eleven-item notes file first. That
-is a real cost and it is paid on day one.
+Neo4j; against this engine they must read a nine-item notes file first (plus two
+kept as resolved history). That cost was real and was paid on day one. Whether
+it is still being paid depends on the server re-measurement above.
 
 ### Operations and maturity — they win
 
@@ -184,8 +208,11 @@ search and an MCP surface in one embedded binary.
 returns ranked `(node_id, distance)` pairs. So convergence is **available**, not
 hypothetical.
 
-**But this repo does not use it.** `grep` for vector/embedding/hnsw across the
-source returns nothing; the catalog is 16 Cypher queries. So the claim today is
+**But this repo does not use it.** No catalog query is a vector search; the
+only vector code here is `benchmarks/vector_probe.py`, which exists to probe
+the feature for this page. An earlier version of this sentence said a `grep`
+for vector/embedding/hnsw returned nothing, which stopped being true the day
+that probe was written; the catalog is 16 Cypher queries. So the claim today is
 "the engine can, this KG does not" — #48 is the issue that closes that gap, and
 until it lands the convergence differentiator is real in the engine and
 undemonstrated here. #49 asks the same of the MCP surface.

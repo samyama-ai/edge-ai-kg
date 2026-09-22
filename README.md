@@ -134,16 +134,25 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA11` |
 
-**The embedded build answers three of them differently** on the same data —
-`EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports 6 and
-10. That is a divergence beyond [engine notes 10 and 11](docs/engine-notes.md)
-and is recorded on #56; the table above is the server's answer, which is the one
-a `--url` user sees.
+**The embedded build still answers three of them differently** on the same data
+— `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports 6 and
+10. That is a divergence beyond [engine notes 10 and 11](docs/engine-notes.md),
+and **it is the one thing the 1.7.1 upgrade did not fix**: re-measured on
+2026-09-08 against `samyama` 1.7.1, the embedded split is unchanged at
+`EA05, EA08, EA13, EA14, EA15, EA16` returning rows and the other ten empty,
+none erroring. The table above is the server's answer, which is the one a
+`--url` user sees.
 
-`EA01` and `EA02` are empty rather than erroring here, on both builds. Note 10
-makes them raise on the embedded build, but only once their opening `MATCH`
-yields rows — with no `USES_OPERATOR` edges it yields nothing, so the failing
-clause is never reached.
+So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
+remains open behind them. It needs its own investigation: unlike notes 10 and 11
+it has **no minimal reproduction yet** — only the whole real layer and a
+different row count — so it is not written up as an engine note, which would
+imply a shape someone could avoid.
+
+`EA01` and `EA02` are empty rather than erroring here, on both builds — and were
+before the upgrade too. Note 10 made them raise on the old embedded build, but
+only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
+yields nothing, so the failing clause was never reached.
 
 **The hero question is one of the empty ones.** It walks
 `Model -[:USES_OPERATOR]-> Operator`, and the real layer has no `USES_OPERATOR`
@@ -327,20 +336,31 @@ two that **silently return wrong rows** rather than erroring:
 
 All nine are filed upstream — tracking issue [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-Two more are recorded but **not** filed, because they are not behaviours of the
-server: the embedded build and the HTTP server disagree about a second `WITH`
-that introduces a new alias ([note 10](docs/engine-notes.md)), and about the
-type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
-([note 11](docs/engine-notes.md)). Neither is worked around in the catalog --
-note 11 has a known workaround deferred to #56, note 10 has none established. So
-`EA01`, `EA02` and `EA04` are correct against the server and wrong against the
-engine `pytest` uses; three tests in
-`tests/test_correctness.py` are marked `xfail` for them, five parameters in the
-run output. See #56 — which engine
-the suite should treat as authoritative is an open decision.
+Two more were recorded but **not** filed, because they were not behaviours of
+the server: the embedded build and the HTTP server disagreed about a second
+`WITH` that introduces a new alias ([note 10](docs/engine-notes.md)), and about
+the type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
+([note 11](docs/engine-notes.md)).
+
+**Both are resolved (#56).** There was nothing to file: the cause was version
+skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
+unpinned and resolved **0.6.1** — an engine two minor versions behind the 1.7.0
+server everything else was measured against. The floor is now `samyama>=1.7.1`,
+neither note reproduces, and the four tests they excused pass unmarked. Notes 10
+and 11 are kept in the notes file as history.
 
 Each is documented with a minimal reproduction and the workaround used in
-[`docs/engine-notes.md`](docs/engine-notes.md). Because of these,
+[`docs/engine-notes.md`](docs/engine-notes.md) — and those reproductions are
+runnable, not prose: `python -m benchmarks.engine_notes_probe --scale 300`
+re-runs them against whatever engine is installed. On embedded `samyama` 1.7.1
+**none of notes 1-6, 8 and 9 reproduces**. **Note 7 is not among them** — the
+probe has none, because "the `--graph` argument is ignored" is a property of
+the OSS HTTP path and there is no tenant boundary to ignore on an embedded
+build. It stands un-re-measured, which matters: a reader taking "none of them"
+at face value could conclude the tenant argument is honoured now. It is not.
+The workarounds stay regardless, because the
+notes were measured against the 1.7.0 *server* and the probe runs embedded;
+#56 is the standing lesson about assuming two builds agree. Because of these,
 [`tests/test_correctness.py`](tests/test_correctness.py) validates query
 **results** against ground truth computed in Python — a query that runs and
 returns plausible rows is not evidence that it is right.

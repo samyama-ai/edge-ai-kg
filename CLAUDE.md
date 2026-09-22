@@ -26,13 +26,19 @@ python -m etl.download_data      # REQUIRED first — builds ./data (gitignored)
 `tests/test_correctness.py` call `load_cached()` and skip or fail without it.
 Add `--force` to re-fetch upstreams, `--seed` / `--scale` to change the fleet.
 
-### Installing `samyama` on Linux
+### Installing `samyama` on Linux — no longer a special case
 
-`samyama` publishes only a **macOS x86_64 wheel** plus an sdist, so Linux builds
-the Rust extension from source. maturin auto-downloads a Rust toolchain, but the
-host must supply a C compiler and clang's builtin headers. On a bare Ubuntu box
-the build fails twice — first on a missing linker, then on `zstd-sys` bindgen not
-finding `stddef.h`. Fix:
+**1.7.1 publishes `samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl`**, so a
+plain `pip install -e ".[dev]"` takes the wheel: no Rust toolchain, no compiler,
+no sudo. That is new — the floor moved from 0.6.x in #56, and 0.6.1 shipped only
+a macOS wheel plus an sdist.
+
+The from-source path below still applies if pip resolves the sdist — a
+non-x86_64 host, or glibc older than 2.38. Check which you got with
+`pip show -f samyama | head -2` before assuming you need any of it. maturin
+auto-downloads a Rust toolchain, but the host must supply a C compiler and
+clang's builtin headers; on a bare Ubuntu box the build fails twice, first on a
+missing linker, then on `zstd-sys` bindgen not finding `stddef.h`:
 
 ```bash
 sudo apt install -y build-essential python3-dev
@@ -43,6 +49,10 @@ pip install -e ".[dev]"                        # ~3 min of cargo build
 
 (Installing `clang`/`libclang-common-*-dev` is the cleaner fix if you have sudo;
 `BINDGEN_EXTRA_CLANG_ARGS` is the workaround when you only have gcc.)
+
+**An editable install does not rebuild when the floor moves.** If
+`tests/test_engine_version.py` fails saying the engine is older than 1.7.1, the
+metadata is right and the installed extension is stale — re-run the install.
 
 ## Commands
 
@@ -159,13 +169,29 @@ server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
-`docs/engine-notes.md` carries a banner saying the same; rewriting the notes
-themselves is #94.
+`docs/engine-notes.md`'s notes 10 and 11 are rewritten to say this rather than
+carrying a banner that contradicts them. **Write Cypher to notes 1-9.**
 
-`tests/test_engine_version.py` keeps the floor honest -- it asserts the
-declared dependency, the running engine, **and** re-runs note 11's own
-reproduction, because note 11 does not raise. On a downgraded build it makes
-`EA04` return confident extra rows rather than fail.
+If you are ever on an older engine, note 11 is the dangerous one: it does not
+raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
+`tests/test_engine_version.py` checks the floor and re-runs that reproduction,
+so a downgrade fails loudly.
+
+**One embedded/server divergence does survive**, and it is not notes 10 and 11:
+on the real layer the embedded build answers `EA08`, `EA10` and `EA12`
+differently from the server (README, "What the real layer alone can answer").
+Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
+why it is not an engine note — nothing here tells you a shape to avoid.
+
+**Notes 1-6, 8 and 9 also stop reproducing on embedded 1.7.1** —
+`python -m benchmarks.engine_notes_probe --scale 300` re-runs those. **Note 7
+is not among them**: the probe has none, because "the `--graph` argument is
+ignored" is a property of the OSS HTTP path rather than a Cypher shape, and
+this probe runs embedded where there is nothing to isolate. Note 7 stands
+un-re-measured, which is why the sentence above still says it applies. The
+rules below still stand, because those notes were measured against the 1.7.0
+*server* and the probe runs embedded; assuming two builds agree is exactly what
+#56 cost. Do not drop a workaround without re-measuring against the server.
 
 The rules that follow from notes 1-9:
 
