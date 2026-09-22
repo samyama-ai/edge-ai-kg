@@ -1,4 +1,4 @@
-# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-12)
+# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-13b)
 
 > **Partly superseded, 2026-09-21.** Notes 10 and 11 are **resolved**: they
 > were `samyama` 0.6.1 against a 1.7.0 server, not two builds disagreeing, and
@@ -16,11 +16,13 @@ Notes 1-9 were observed on the OSS engine at v1.7.0
 (`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
 
-**Versions these describe.** The server is
-`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0; the embedded build is
-`samyama` 0.6.1 from pip. `pyproject.toml` asks for `samyama>=0.6.0` unpinned,
-so a fresh install can resolve a different embedded build than notes 10 and 11
-were measured against. Whether to pin it belongs with #56, which has not yet
+**Versions these describe.** Notes 1-9 are the **server** at 1.7.0
+(`ghcr.io/samyama-ai/samyama-graph:1`), as the paragraph above says. Where an
+embedded build is involved -- notes 10 and 11, which compare the two -- it was
+`samyama` 0.6.1 from pip. **Notes 12, 13 and 13b were measured on embedded
+1.7.1.** `pyproject.toml` asks for `samyama>=0.6.0` unpinned, so which embedded
+build a fresh install gets is not decided here; run `pip show samyama` rather
+than trusting a sentence on this page. Whether to pin it belongs with #56, which has not yet
 decided which build the suite treats as authoritative -- pinning now would be
 choosing that by the back door.
 
@@ -432,6 +434,20 @@ build starts agreeing the run says so and the marks come off.
 The third failing test, `test_ea04_quantization_unlock_is_not_a_cartesian_product`,
 is **not** this note — EA04 has a single `WITH`. See note 11.
 
+**`EA18` (#37) chains three `WITH`s, the second and third introducing all-new
+aliases, and runs embedded without raising.** That is this note's shape, and on
+`samyama` 1.7.1 it does not raise: `tests/test_latency_budget.py` passes
+embedded, returning rows on a fixture and zero on the fleet.
+
+That is a statement about `EA18` on 1.7.1, not a verdict on the note. Whether
+the note is obsolete is #94's question -- it was written against 0.6.1, and #94
+argues the whole embedded-versus-server split was a version skew -- and until
+that lands, `tests/test_empty_answers.py::test_ea01_zero_row_case` is still
+`xfail(strict=True)` naming this note and `EA01`'s second `WITH`. Declaring the
+note false here while a strict test asserts it holds would put the two in
+conflict with nothing resolving it. Recorded so the next reader does not
+conclude `EA18` is untested against the note.
+
 ---
 
 ## 11. The two builds disagree on the type of `sum(CASE ... THEN <int> ... END)`, so a `WHERE` on it is dropped
@@ -585,6 +601,117 @@ stops being true. Nothing in the suite reads the floor, so nothing will say so
 -- re-read this note when #104 lands. (Naming a test here that pinned it would
 be the better fix; there isn't one, and claiming otherwise is how a page starts
 asserting enforcement it does not have.)
+
+---
+
+## 13. A `WITH` alias in an `OPTIONAL MATCH`'s `WHERE` turns it into an inner join
+
+Measured 2026-09-15 while writing `EA18` (#37). **Silently returns wrong rows.**
+
+An `OPTIONAL MATCH` whose `WHERE` compares against a **literal** behaves
+correctly: rows with no match survive with `NULL`, and `count()` over them is 0.
+An `OPTIONAL MATCH` whose `WHERE` mentions an alias introduced by an earlier
+`WITH` drops the unmatched rows instead. The `OPTIONAL` is gone. No error.
+
+```cypher
+// two operators; only `op:c` has a kernel
+MATCH (op:Operator)
+OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op)
+WHERE k.name = "Relu-npu"                 // literal
+WITH op.id AS o, count(k) AS n RETURN o, n
+// -> [("op:a", 0), ("op:c", 1)]          correct
+
+// one Kernel in this fixture, so `want` is a single row
+MATCH (x:Kernel) WITH x.name AS want
+MATCH (op:Operator)
+OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op)
+WHERE k.name = want                       // the only change
+WITH op.id AS o, count(k) AS n RETURN o, n
+// -> [("op:c", 1)]                       `op:a` is gone
+```
+
+The single `Kernel` is deliberate: with more, that first `MATCH` yields one row
+per kernel and the result multiplies, which obscures the drop rather than
+changing it. The constant-alias form below shows the same thing with nothing to
+multiply.
+
+The trigger is an alias introduced by a **`WITH`**, and not what it holds:
+carrying a plain constant through one (`WITH op, "accel:npu" AS accel_id`) and
+comparing against that reproduces it exactly. The pattern shape does not matter
+-- single-pattern and comma-separated `OPTIONAL MATCH` both do it.
+
+**A `MATCH`-bound alias is safe**, which is a narrower rule than "anything that
+is not a literal" and had to be measured rather than assumed:
+
+```cypher
+MATCH (t:T)-[:R]->(s:S) WHERE s.id = "s:1"
+OPTIONAL MATCH (t)-[:R]->(o:O)
+WHERE o.modality = s.modality        // `s` comes from the MATCH
+WITH t.id AS task, count(o) AS alts RETURN task, alts
+// -> [("t:1", 0), ("t:2", 1)]        correct
+
+MATCH (t:T)-[:R]->(s:S) WHERE s.id = "s:1"
+WITH t, s.modality AS mine           // the same value, through a WITH
+OPTIONAL MATCH (t)-[:R]->(o:O)
+WHERE o.modality = mine
+WITH t.id AS task, count(o) AS alts RETURN task, alts
+// -> [("t:2", 1)]                    `t:1` is gone
+```
+
+That matters for the catalog: `EA17`'s `ClinicalTask` leg filters
+`o.modality = s.modality` inside an `OPTIONAL MATCH`, with `s` bound by the
+opening `MATCH`. It is the first form, so it is correct -- and it is the reason
+the rule has to be stated as "a `WITH` alias" rather than "a non-literal".
+
+**Why this is the dangerous kind.** The whole point of the shape is the
+anti-join: `OPTIONAL MATCH ... WITH count(k) AS n ... WHERE n = 0`, which note 5
+forces on us because negated patterns do not parse. The rows this drops are
+exactly the rows with no match -- the answer. A "what is missing" query comes
+back saying nothing is missing, which is a plausible, reassuring, wrong answer.
+
+**Workaround used here:** none is needed in the catalog. Its anti-joins compare
+against a literal or against a `MATCH`-bound alias, and neither triggers this.
+Where a `WITH` alias is genuinely required, collect and filter after the
+aggregation, which is correct on this build:
+
+```cypher
+WITH op.id AS o, want, collect(k.name) AS names
+WITH o, [n IN names WHERE n = want] AS hit
+RETURN o, size(hit)
+// -> [("op:a", 0), ("op:c", 1)]          correct
+```
+
+**This is why `EA18` re-binds `a` in trailing position** rather than carrying
+`a.id` through a `WITH` and filtering on it. The second spelling is the one note
+1 would prefer, and it is unavailable: it silently drops every deployment whose
+operators are uncovered, which is the entire answer. Measured both ways on the
+same fixture -- the trailing re-bind returns the two uncovered operators, the
+`WITH`-alias form returns the deployment as though nothing were uncovered.
+
+---
+
+### 13b. A grouping key mixed with an aggregate in one projection is NULL
+
+Same session, same query. Also silent.
+
+```cypher
+MATCH (n:N) WITH n.v AS v, min(n.v) AS lo, n.v - min(n.v) AS diff RETURN v, lo, diff
+// -> [[250.0, 250.0, NULL], [90.0, 90.0, NULL]]      the arithmetic is gone
+
+MATCH (n:N) WITH n.v AS v, min(n.v) AS lo WITH v, lo, v - lo AS diff RETURN v, lo, diff
+// -> [[250.0, 250.0, 0.0], [90.0, 90.0, 0.0]]        correct
+```
+
+Aggregate-minus-aggregate in one projection is fine
+(`max(n.v) - min(n.v)` returns 160.0). It is specifically a **grouping key**
+referenced in the same projection as an aggregate over the group.
+
+**Severity is lower than 13's** -- a NULL column is visible, where a dropped row
+is not. But `ORDER BY` on that column then sorts on nothing, and with `LIMIT`
+that is note 3's failure again: an arbitrary N dressed as a top-N.
+
+**Workaround used here:** compute it one `WITH` later, which is what `EA18`
+does for `over_by_ms`.
 
 ---
 

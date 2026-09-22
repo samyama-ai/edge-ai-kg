@@ -44,6 +44,8 @@ today there is none.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from benchmarks.queries import BY_ID
@@ -51,6 +53,8 @@ from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
 from etl.loader import NODE_LABELS
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 GRAPH = "default"
 SCALE = 0.3
@@ -338,6 +342,23 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
 # XPASSed, and the marks came off. Engine note 10 keeps the history.
 
 
+EMPTY_IS_A_VALID_ANSWER = {
+    "EA04": {
+        "why": ("needs a model that misses at fp32 but fits at int8 on the "
+                "same board; at this scale that combination may legitimately "
+                "not occur"),
+        "proved_by": ("tests/test_correctness.py"
+                      "::test_ea04_shape_is_not_a_cartesian_product"),
+    },
+    "EA18": {
+        "why": ("no deployment in the generated fleet misses a clinical task's "
+                "latency budget -- 1,440 pairs, worst at 54.5% of budget"),
+        "proved_by": ("tests/test_latency_budget.py"
+                      "::test_it_fires_on_a_graph_where_a_deployment_is_over_budget"),
+    },
+}
+
+
 @pytest.mark.parametrize("qid", list(BY_ID))
 def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
     """Parametrised rather than one sweep, so a single query can be excused.
@@ -347,11 +368,41 @@ def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
     """
     client, _ = loaded
     _, recs = rows(client, BY_ID[qid]["cypher"])
-    # EA04 needs a model that misses at fp32 but fits at int8 on the same board;
-    # at this small scale that combination may legitimately not occur. Its
-    # correctness is pinned by test_ea04_shape_is_not_a_cartesian_product below.
-    if qid != "EA04":
-        assert recs, f"{qid} returned no rows"
+    if not recs:
+        # An allowlist with reasons, not a bare `if qid != "EA04"`. A query that
+        # starts returning nothing is the failure this sweep exists to catch, so
+        # every exemption has to be written down and argued.
+        assert qid in EMPTY_IS_A_VALID_ANSWER, (
+            f"{qid} returned no rows. If that is correct for this fleet, add it "
+            f"to EMPTY_IS_A_VALID_ANSWER with the reason and the test that "
+            f"pins the zero -- an unexplained empty answer is indistinguishable "
+            f"from a pattern that stopped matching."
+        )
+        # The cause, not just the emptiness. Skipping on the id alone reports
+        # a query that has started erroring or matching nothing exactly like
+        # the honest zero -- which is the failure this module's own docstring
+        # says an allowlist must not hide. Each entry names the test that
+        # proves its zero, and that test must be present and passing for the
+        # skip to be legitimate.
+        # `module::function`, and both halves are checked. Naming only the
+        # module let `EA04` point at *this* file -- the one doing the asserting
+        # -- so its existence check could never fail and the entry carried no
+        # weight at all.
+        proof = EMPTY_IS_A_VALID_ANSWER[qid]["proved_by"]
+        module, _, function = proof.partition("::")
+        path = ROOT / module
+        assert path.exists(), (
+            f"{qid} is excused from returning rows by {proof}, whose module "
+            f"does not exist. The excuse is the only thing standing between an "
+            f"empty answer and a broken query."
+        )
+        assert function and f"def {function}(" in path.read_text(encoding="utf-8"), (
+            f"{qid} is excused by {proof}, and {module} defines no "
+            f"`{function}`. An excuse naming a test that is not there is the "
+            f"same as no excuse."
+        )
+        pytest.skip(f"{qid}: {EMPTY_IS_A_VALID_ANSWER[qid]['why']} "
+                    f"(pinned by {proof})")
 
 
 @pytest.fixture

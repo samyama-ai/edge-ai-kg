@@ -174,7 +174,7 @@ def _report(label: str, times: list[float]) -> None:
               help="Shell command that restarts the server, run between repeats "
                    "(e.g. 'docker restart samyama'). The only reset that works.")
 @click.option("--verify-queries", is_flag=True,
-              help="Run all 16 catalog queries against the imported graph.")
+              help="Run every catalog query against the imported graph.")
 def main(url, path, export_to, repeats, verify_queries, restart_cmd):
     if not path and not export_to:
         raise SystemExit("give --file to time an import, or --export to time an export")
