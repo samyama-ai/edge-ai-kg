@@ -364,7 +364,7 @@ ORDER BY kernels DESC
         # reason -- a task's other sensors replace this one only if they supply
         # the same modality.
         #
-        # Five constraints, each written up where it can be checked rather than
+        # Six constraints, each written up where it can be checked rather than
         # repeated here. `tests/test_blast_radius.py`'s module docstring is the
         # long form:
         #
@@ -375,12 +375,19 @@ ORDER BY kernels DESC
         #      a per-leg second `WITH`, which 0.6.x rejects).
         #   3. `+1/+2/+4/+5` are schema-fixed hops, not a depth bound. The
         #      variable part is `size(r)`, which is what `*0..` is for.
-        #   4. The sensor id is `EA17_SUBJECT`, written once above and
+        #   4. The ClinicalTask leg's `depth` is 1 by construction, not a
+        #      measured hop count like the other legs': a task points *at* the
+        #      sensor, so it is adjacent. `nearest` is therefore comparable
+        #      within a kind and not across them.
+        #   5. The sensor id is `EA17_SUBJECT`, written once above and
         #      interpolated into all ten places the query names it -- five
         #      legs, each naming it twice. Retarget with `retargeted_ea17`,
         #      never by hand. An unknown id gives an empty blast radius rather
-        #      than an error, as `EA01` and `EA06` do.
-        #   5. No `ORDER BY` (note 3c) and no `WHERE` on `only_via_me`
+        #      than an error, as `EA01` and `EA06` do -- measured by
+        #      `test_an_unknown_sensor_gives_an_empty_blast_radius`, because
+        #      aggregate-only legs could as easily have returned a row of
+        #      zeros.
+        #   6. No `ORDER BY` (note 3c) and no `WHERE` on `only_via_me`
         #      (note 11); `o.id IS NOT NULL` guards note 8b -- `<>` against a
         #      null property matches.
         #

@@ -6,7 +6,8 @@
 > not reproduce on *embedded* 1.7.1 either -- `python -m
 > benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
 > 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
-> Note 7 has no probe. The text below is the original record; #94 rewrites it.
+> Note 7 has no probe. The text below is the original record; #109 rewrites it
+> (it replaces #94, which was closed unmerged).
 
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue

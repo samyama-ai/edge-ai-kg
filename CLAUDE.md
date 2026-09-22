@@ -160,7 +160,7 @@ The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
 `docs/engine-notes.md` carries a banner saying the same; rewriting the notes
-themselves is #94.
+themselves is #109 (which replaces #94, closed unmerged).
 
 `tests/test_engine_version.py` keeps the floor honest -- it asserts the
 declared dependency, the running engine, **and** re-runs note 11's own

@@ -31,7 +31,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
-| #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #103) |
+| #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #110) |
 | #36 | root cause versus symptom | no | **take** |
 | #37 | silent degradation against a latency budget | no | **take** |
 | #40 | which certifications a failure implicates | no | **take** |
@@ -60,13 +60,16 @@ already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
 `#35` is delivered by #96, whose work reaches `main` with **#110** — in the
-same merge as this paragraph, so the two arrive together. Wherever this page is read, `EA17` is in the catalog beside
-it, and the catalog is `EA01`-`EA17`. It is the one catalog query the **1.7.0 server** cannot run: that build does
-not traverse variable-length relationships and rejects `size(r)` on one (engine
-note 12). Note 12 is careful about what that does and does not show — 1.7.0
-*embedded* was never measured, so this may be a fix that landed between 1.7.0
-and 1.7.1 rather than anything HTTP-specific. What is measured is that it runs
-on embedded 1.7.1 and fails on the 1.7.0 server.
+same merge as this paragraph, so the two arrive together. Wherever this page
+is read, `EA17` is in the catalog beside it, and the catalog is
+`EA01`-`EA17`.
+
+It is the one catalog query the **1.7.0 server** cannot run: that build does
+not traverse variable-length relationships and rejects `size(r)` on one
+(engine note 12). Note 12 is careful about what that does and does not show —
+1.7.0 *embedded* was never measured, so this may be a fix that landed between
+1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
+it runs on embedded 1.7.1 and fails on the 1.7.0 server.
 `tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
 keeps this paragraph honest in both directions: it fails if the page claims
 `#35` is pending while `EA17` is in the catalog, and if `EA17` is reverted while

@@ -65,7 +65,8 @@ filters `m.id = "model:00000"` and `a.id = "accel:00001"` -- so its opening
 `MATCH` bound nothing and `[]` came back regardless of the graph. An xfailed
 test hides that; an unmarked one does not, but only if something can tell empty
 from vacuous. That something is the control, and `EA01` was the one query in
-this module without one (Tarun's review on #94).
+this module without one (Tarun's review, made on #94 before that PR was
+closed and rebuilt as #109).
 """
 import pytest
 

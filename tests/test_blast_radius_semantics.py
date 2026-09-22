@@ -374,3 +374,35 @@ def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
     assert by_kind.get("SignalStage") == 2, (
         f"the two stages of a cyclic chain should both be in the blast "
         f"radius, exactly once each; got {by_kind}")
+
+
+def test_an_unknown_sensor_gives_an_empty_blast_radius(engine_factory):
+    """`EA17` on an id that is not in the graph: no rows, not an error.
+
+    The catalog comment claims this, and a claim about five aggregate-only
+    legs is not obvious: `count()` over zero input rows returns a row holding
+    0 in some engines, which would make an unknown sensor look like a real
+    sensor with an empty blast radius. Measured here instead: each leg's
+    grouping `WITH` carries `x.id`/`m.id`/... so a leg that matched nothing
+    has no group to aggregate over, and the query returns nothing at all.
+
+    It matters because `retargeted_ea17` is how every other test in these two
+    modules asks about a sensor. A typo'd id returning `[["SignalStage", 0, 0,
+    0]]` would read as a measured zero rather than as a query that matched
+    nothing.
+    """
+    client = engine_factory()
+    create_nodes(client, GRAPH, "Sensor",
+                 [{"id": EA17_SUBJECT, "modality": "ecg"}])
+    create_nodes(client, GRAPH, "SignalStage", [{"id": "stage:only", "kind": "filter"}])
+    create_edges(client, GRAPH, [
+        ("Sensor", EA17_SUBJECT, "FEEDS", "SignalStage", "stage:only", None)])
+
+    present = client.query(retargeted_ea17(EA17_SUBJECT), GRAPH).records
+    assert present, "the fixture's own sensor should have a blast radius"
+
+    absent = client.query(retargeted_ea17("sensor:not-in-this-graph"), GRAPH).records
+    assert [list(row) for row in absent] == [], (
+        f"an unknown sensor id returned {[list(r) for r in absent]}; the "
+        f"catalog comment promises an empty blast radius rather than rows of "
+        f"zeros, and a row of zeros would read as a measured answer")
