@@ -95,9 +95,8 @@ run here. Note 12's title names 1.7.0 for that reason, and this paragraph
 should not be read as covering a build nobody has tested.
 
 **Different engine build from the rest of this page.** Everything above was
-measured on `samyama` **0.6.1**; this table on **1.7.1**, which is what pip
-resolves today rather than what `pyproject.toml` requires — the declared floor
-is still `>=0.6.0` until #105 raises it (landing with #104).
+measured on `samyama` **0.6.1**, the build in use when that table was taken;
+this one on **1.7.1**, which `pyproject.toml` has floored since #104.
 Growth columns are comparable, absolute milliseconds across the two tables are
 not — and the shared queries show it: `EA11` reads 33 ms here against 118 ms
 above, `EA08` 48 ms against 118 ms. Read each table's growth column, not across

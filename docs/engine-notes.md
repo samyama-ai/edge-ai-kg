@@ -19,12 +19,12 @@ the loader or the query catalog works around it. Verified 2026-08-14.
 **Versions these describe.** Notes 1-9 are the **server** at 1.7.0
 (`ghcr.io/samyama-ai/samyama-graph:1`), as the paragraph above says. Where an
 embedded build is involved -- notes 10 and 11, which compare the two -- it was
-`samyama` 0.6.1 from pip. **Notes 12, 13 and 13b were measured on embedded
-1.7.1.** `pyproject.toml` asks for `samyama>=0.6.0` unpinned, so which embedded
-build a fresh install gets is not decided here; run `pip show samyama` rather
-than trusting a sentence on this page. Whether to pin it belongs with #56, which has not yet
-decided which build the suite treats as authoritative -- pinning now would be
-choosing that by the back door.
+`samyama` 0.6.1 from pip, which is what `pyproject.toml` resolved when they
+were written. **Notes 12, 13 and 13b were measured on embedded 1.7.1.** Since
+#104 the floor is `samyama>=1.7.1`, so a fresh install no longer resolves the
+0.6.1 build notes 10 and 11 describe -- which is why those two are marked
+resolved, and why the rest of this page is pending a re-measurement against the
+server rather than a live record of it.
 
 **Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
 server: both are disagreements between the server and the in-process embedded
@@ -543,9 +543,9 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 >
 > **Version labels, because this file carries two vintages.** The rest of this
 > page describes `samyama` **0.6.1** embedded against the **1.7.0** server,
-> which is what `pyproject.toml`'s `samyama>=0.6.0` resolved when notes 1-11
-> were written. This note was measured against **1.7.1** embedded, the floor
-> #105 pins (landing with #104). So the comparison below is 1.7.0 server against 1.7.1 embedded, and
+> which is what `pyproject.toml` resolved when notes 1-11 were written. This
+> note was measured against **1.7.1** embedded, the floor #104 landed. So the
+> comparison below is 1.7.0 server against 1.7.1 embedded, and
 > the conclusion "the server is the one that is wrong" is really "the server at
 > 1.7.0 does not do what the embedded build at 1.7.1 does". Whether 1.7.0
 > *embedded* traverses has not been measured; there is no reason to think the
@@ -589,18 +589,14 @@ robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
 that the 1.7.0 server executes. The options are an engine that does it
 (embedded 1.7.1 does), or not asking the question over HTTP.
 
-**`EA17` therefore depends on #105**, the floor raise that lands with #104. It needs an engine at 1.7.1, both for this
+**`EA17` therefore needs the 1.7.1 floor**, which #104 landed. It needs an engine at 1.7.1, both for this
 and because its per-leg second `WITH` introduces new aliases -- note 10's shape,
-which 0.6.1 rejects. The floor in `pyproject.toml` is what decides this, and it
-is `samyama>=0.6.0` until #104 merges -- so today it admits a build on which
-`EA17` fails outright. In practice pip resolves 1.7.1 (published 2026-08-27),
-which is why the suite is green.
+which 0.6.1 rejects. `pyproject.toml` declares `samyama>=1.7.1` since #104, so
+the floor no longer admits a build on which `EA17` fails outright.
 
-When #104 merges, that floor becomes `>=1.7.1` and this paragraph's "today"
-stops being true. Nothing in the suite reads the floor, so nothing will say so
--- re-read this note when #104 lands. (Naming a test here that pinned it would
-be the better fix; there isn't one, and claiming otherwise is how a page starts
-asserting enforcement it does not have.)
+`tests/test_engine_version.py` reads that floor and re-runs note 11's
+reproduction, so a downgrade fails loudly rather than silently changing what
+`EA17` returns.
 
 ---
 

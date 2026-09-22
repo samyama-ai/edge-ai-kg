@@ -170,12 +170,8 @@ significant digit of a float. Those are not different answers, but they are not
 the "embedded versus server" disagreement was a version skew (0.6.1 against a
 1.7.0 server) rather than a difference between the two builds.
 
-Which of the two you get is not determined by this repo: `pyproject.toml`
-declares `samyama>=0.6.0`, so the floor admits both, and pip resolving 1.7.1
-today is a fact about the index rather than a guarantee here. #105 raises the
-floor and removes those `xfail`s (it lands with #104; #94 rewrites the notes).
-Until then, check with `pip show samyama` and read whichever half of this page
-matches.
+`pyproject.toml` declares `samyama>=1.7.1` since #104, so the build these
+pages describe is the build you get.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.
@@ -436,8 +432,8 @@ note 12.
 - the 1.7.0 **server** does not traverse a variable-length relationship,
   bounded or not — it returns only the zero-length match, and rejects `size(r)`
   on one — where the embedded 1.7.1 build walks it
-  ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only and
-  depends on the 1.7.1 floor (#105, landing with #104).
+  ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only, and
+  why it needs the `samyama>=1.7.1` floor #104 landed.
 
 Notes 10 and 11 are not worked around in the catalog — note 11 has a known
 workaround deferred to #56, note 10 has none established. Note 12 has no
@@ -445,17 +441,11 @@ workaround either, and one is not possible: there is no way to write "walk a
 chain of unknown length" that the 1.7.0 server executes, so `EA17` is
 embedded-only rather than reshaped.
 
-`EA01`, `EA02` and `EA04` carry `xfail` marks in `tests/test_correctness.py`
-for notes 10 and 11 — three test functions, five reported outcomes: `EA04`'s
-own test, plus `EA01` and `EA02` in each of two parametrised sweeps. Those marks were written against `samyama` 0.6.1; at 1.7.1
-they XPASS. **#105 raises the floor and removes them (it lands with #104), and
-#94 rewrites the notes.**
-
-Until that lands, `CLAUDE.md` still says those queries are "wrong under
-`pytest`" and that the two builds disagree. It is describing 0.6.1 and this
-paragraph is describing 1.7.1 — the two read as a contradiction because the
-repo is mid-change, not because either is wrong about its own build. Run
-`pip show samyama` if you need to know which applies to you.
+`EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
+four test functions, six reported outcomes, since two of them are parametrised
+sweeps. Those marks were written against `samyama` 0.6.1. **#104 raised the
+floor to 1.7.1 and removed them**, and the three queries now pass unmarked
+under `pytest` and under `run_benchmark`. #109 rewrites the notes themselves.
 
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,

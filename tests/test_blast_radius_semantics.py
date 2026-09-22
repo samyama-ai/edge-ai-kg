@@ -20,9 +20,13 @@ these fixtures exist and why the ground-truth sweep alone is not enough.
 """
 from __future__ import annotations
 
-from benchmarks.queries import BY_ID
+from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl.helpers import create_edges, create_nodes
-from tests.test_blast_radius import retargeted_ea17, run_ea17
+from tests.test_blast_radius import (
+    EA17_SUBJECT_OCCURRENCES,
+    retargeted_ea17,
+    run_ea17,
+)
 
 GRAPH = "default"
 
@@ -37,8 +41,8 @@ def test_retargeting_replaces_every_occurrence_of_the_sensor_id():
     replaceable and that no occurrence survives.
     """
     cypher = BY_ID["EA17"]["cypher"]
-    occurrences = cypher.count("sensor:00000")
-    assert occurrences >= 5, (
+    occurrences = cypher.count(EA17_SUBJECT)
+    assert occurrences == EA17_SUBJECT_OCCURRENCES, (
         f"expected the subject id once per leg at least, found {occurrences}. "
         f"If the query stopped hardcoding it, this test and the retargeting in "
         f"`run_ea17` both need rewriting."

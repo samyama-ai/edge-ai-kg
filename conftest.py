@@ -135,7 +135,16 @@ def reset_embedded(client):
     # could hand back a non-empty client while this docstring promises an empty
     # one -- the same failure the copy-with-no-fallback had, arriving by the
     # other route.
-    records = client.query("MATCH (n) RETURN count(n.id)", GRAPH).records
+    # `count(n)`, not `count(n.id)`. CLAUDE.md's "aggregate a property, never a
+    # bare node variable" is about `count(DISTINCT x)` over a multi-variable
+    # MATCH (engine note 9); this is a single-variable `MATCH (n)`, where
+    # `count(n)` measures correctly and still returns `[[0]]` on an empty
+    # graph. The distinction matters: measured on 1.7.1, a graph holding
+    # `{id:"a"}` and `{name:"noid"}` gives `count(n.id)` -> 1 and
+    # `count(n)` -> 2, so the id form is blind to exactly the leftover a
+    # fixture is least likely to have set -- and this check exists to catch
+    # leftovers.
+    records = client.query("MATCH (n) RETURN count(n)", GRAPH).records
     held = records[0][0] if records else 0
     if held:
         raise ResetIncomplete(
@@ -161,6 +170,10 @@ def conftest_internals():
 @pytest.fixture(scope="session")
 def reset_embedded_graph():
     """`reset_embedded`, reached through the fixture system rather than imported.
+
+    **Embedded clients only.** It wipes `GRAPH`, and `--graph` is ignored on
+    the OSS HTTP path (engine note 7), so handing this a server client would
+    empty whatever that server holds in `default`. Nothing does today.
 
     A test wanting to empty a client's graph would otherwise write
     `from conftest import reset_embedded` -- the exact import this file exists
@@ -190,7 +203,11 @@ def probe_engine(make):
     except ResetIncomplete:
         raise
     except Exception as exc:  # noqa: BLE001 -- untyped engine errors mean skip
-        pytest.skip(f"embedded Samyama engine unavailable: {exc}")
+        # Named widely on purpose: `reset_embedded` imports `etl.loader`
+        # lazily, so a broken loader import arrives here too and "engine
+        # unavailable" alone would send the next reader to the wrong place.
+        pytest.skip(f"embedded Samyama engine or its loader unavailable: "
+                    f"{type(exc).__name__}: {exc}")
 
 
 @pytest.fixture(scope="session")
