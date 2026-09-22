@@ -26,6 +26,14 @@ GRAPH_CONSTANT_FILES = [
     "demo/questions.py",
     "tests/test_correctness.py",
     "tests/test_edge_verification.py",
+    # The shared fixture and its own tests. This list already pins two test
+    # modules, so a third and the root conftest belong in it: a `GRAPH` that
+    # disagreed here would send every fixture-built graph to a different
+    # tenant name than the CLIs use, and `--graph` being ignored on OSS
+    # (engine note 7) is exactly what made the last such disagreement
+    # invisible.
+    "conftest.py",
+    "tests/test_embedded_engine_fixture.py",
 ]
 
 
