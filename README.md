@@ -184,12 +184,24 @@ python -m etl.download_data     # fetch 3 public sources + generate the fleet
 python -m demo.demo             # narrated walkthrough, in-process, no server
 ```
 
-### On Linux, install these first
+### On Linux, usually nothing extra
 
-`samyama` publishes a macOS wheel and an sdist, so on Linux `pip` builds the
-Rust extension from source. maturin fetches its own Rust toolchain, but the
-system still has to supply venv support, a C compiler and clang's builtin
-headers — a stock Ubuntu 24.04 image has none of the three:
+Since the floor moved to `samyama>=1.7.1` (#56), a plain
+`pip install -e ".[dev]"` takes
+`samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl`: no Rust toolchain, no
+compiler, no sudo. On 0.6.x it did build from source, because that release
+shipped only a macOS wheel and an sdist.
+
+**If pip resolves the sdist anyway** — a non-x86_64 host, or glibc older than
+2.38 — the from-source path is below. Check which you got first:
+
+```bash
+pip show -f samyama | head -2
+```
+
+maturin fetches its own Rust toolchain, but the system still has to supply
+venv support, a C compiler and clang's builtin headers, and a stock Ubuntu
+24.04 image has none of the three:
 
 ```bash
 sudo apt install -y python3-venv build-essential python3-dev
@@ -346,7 +358,8 @@ the type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
 skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
 unpinned and resolved **0.6.1** — an engine two minor versions behind the 1.7.0
 server everything else was measured against. The floor is now `samyama>=1.7.1`,
-neither note reproduces, and the four tests they excused pass unmarked. Notes 10
+neither note reproduces, and the four test functions they excused — six xfail
+reports, since two were parametrised sweeps — pass unmarked. Notes 10
 and 11 are kept in the notes file as history.
 
 Each is documented with a minimal reproduction and the workaround used in

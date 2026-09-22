@@ -33,14 +33,6 @@
 > from the probe, not from this prose -- asserting "notes 1-9 are unaffected"
 > without running anything is the mistake that produced this banner.
 
-> **Partly superseded, 2026-09-21.** Notes 10 and 11 are **resolved**: they
-> were `samyama` 0.6.1 against a 1.7.0 server, not two builds disagreeing, and
-> `pyproject.toml` now floors the engine at 1.7.1 (#56). Notes 1-6, 8 and 9 do
-> not reproduce on *embedded* 1.7.1 either -- `python -m
-> benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
-> 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
-> Note 7 has no probe. The text below is the original record; #94 rewrites it.
-
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
 [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
@@ -377,7 +369,7 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ## 10. `samyama` 0.6.1 did not register an alias introduced by a second `WITH`
 
-> **RESOLVED by #56 — fixed in `samyama` 1.7.1, which this repo now requires.**
+> **RESOLVED by #56 — version skew, not a build difference. 1.7.1 is the floor.**
 > Not filed upstream; there was nothing to file. This was an old embedded engine
 > against a newer server, not a defect in either. Kept because it explains why
 > `EA01` and `EA02` carried `xfail` marks, and because the *shape* below is worth
@@ -469,7 +461,7 @@ was **not** this note — EA04 has a single `WITH`. See note 11.
 
 ## 11. `samyama` 0.6.1 typed `sum(CASE ... THEN <int> ... END)` as float, so a `WHERE` on it was dropped
 
-> **RESOLVED by #56 — fixed in `samyama` 1.7.1, which this repo now requires.**
+> **RESOLVED by #56 — version skew, not a build difference. 1.7.1 is the floor.**
 > Same cause as note 10: version skew, not a design difference. Verified
 > 2026-08-31; re-verified resolved 2026-09-08.
 >

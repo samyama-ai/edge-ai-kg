@@ -132,7 +132,7 @@ duplicates" passes and "40 + 4" does not.
 
 Volume alone is fine. 336 distinct vectors index and search without complaint.
 
-## The metric argument is not validated (measured on 0.6.1)
+## The metric argument is not validated (measured on 0.6.1, re-run on 1.7.1)
 
 This is a separate finding from the panic, and useful on its own.
 
@@ -142,9 +142,9 @@ after a panic is uninvestigated, so sharing one would make rows 2-6
 order-dependent -- and `index accepted` is recorded separately from the panic,
 so "accepted without complaint" is a measurement rather than an inference:
 
-`python -m benchmarks.vector_probe --metrics` produces both columns. The
-0.6.1 column is the original run; the 1.7.1 column is the run of 2026-09-21,
-whose output was:
+`python -m benchmarks.vector_probe --metrics` prints one column, for whichever
+engine is installed. The table below sets the original 0.6.1 run beside the
+1.7.1 re-run of 2026-09-21, whose output was:
 
 ```
 metric            index accepted  add + search

@@ -316,22 +316,5 @@ def holdout_tail(add_failed: str | None, search_failed: str | None) -> str:
         "nothing about whether the\nnearest neighbour returned is the useful "
         "one. Judging the answers is #48.\n")
 
-HOLDOUT_TAIL_SEARCH_FAILED = """
-`vector_search` failed, but not with a panic -- {what}.
-
-The 0.6.1 blocker this experiment is about is a `PanicException` from the HNSW
-index. Anything else is a different fault, and calling it the same one is the
-mislabelling the add-phase tail above already guards against. Read the
-exception before concluding the blocker is present.
-"""
-
-HOLDOUT_TAIL_CLEAN = """
-Every unseen operator searched without panicking, which is the 0.6.1 blocker
-gone (#56 raised the floor to 1.7.1). Note what this does and does not show: it
-shows the engine *accepts* the workload -- it says nothing about whether the
-nearest neighbour returned is the useful one. Judging the answers is #48.
-"""
-
-
 if __name__ == "__main__":
     main()

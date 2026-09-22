@@ -67,8 +67,8 @@ cost was real and is now unverified rather than confirmed — which is a reason 
 re-measure against the server, not a reason to quote it as a live cost.
 
 Neo4j has none of these. An engineer who knows Cypher can write Cypher against
-Neo4j; against this engine they must read a nine-item notes file first (plus two
-kept as resolved history). That cost was real and was paid on day one. Whether
+Neo4j; against this engine they must read an eleven-note file first — nine
+binding rules, plus notes 10 and 11 kept as resolved history. That cost was real and was paid on day one. Whether
 it is still being paid depends on the server re-measurement above.
 
 ### Operations and maturity — they win
