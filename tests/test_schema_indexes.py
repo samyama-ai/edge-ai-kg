@@ -256,12 +256,23 @@ def test_every_file_holding_cypher_is_scanned():
     `m.family` would have had `Model(family)` reported as an orphan and deleted.
 
     `tests/` is excluded deliberately. Tests are not what an index is there to
-    serve, and letting one justify an index would make the check circular.
+    serve, and letting one justify an index would make the check circular. The
+    root `conftest.py` is excluded for the same reason -- it is test
+    infrastructure that happens not to live under `tests/`, and its only Cypher
+    is `MATCH (n) RETURN count(n.id)`, checking that a fixture's graph really
+    was emptied. The delete itself is `etl.loader.reset_graph`, which is scanned.
+
+    That exclusion is an exact match on the root file, not a pattern. A
+    `demo/conftest.py` would still be scanned, and deliberately so: a conftest
+    beside production code is as likely to be fixture plumbing as it is to be
+    something that justifies an index, and this check should ask rather than
+    assume. There is only the one today.
     """
     holding = set()
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
-        if rel.startswith((".venv/", "tests/")) or "egg-info" in rel:
+        if (rel.startswith((".venv/", "tests/")) or rel == "conftest.py"
+                or "egg-info" in rel):
             continue
         if re.search(r"\bMATCH\s*\(", path.read_text(encoding="utf-8")):
             holding.add(rel)

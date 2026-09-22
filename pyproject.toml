@@ -77,6 +77,13 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # a process the previous panic has not touched).
 "benchmarks/vector_probe.py" = ["S311", "S324", "S603"]
 
+# S603: the fixture module runs `sys.executable -m pytest` over a copy of the
+# root `conftest.py` in a tmp directory, to check *where* the engine skip
+# happens -- the argument list is literal and the directory is pytest's own
+# `tmp_path`. Running it is the only way to pin that property; importing the
+# fixture cannot see the difference.
+"tests/test_embedded_engine_fixture.py" = ["S603"]
+
 # BLE001/PERF203: the catalog sweep catches per-query so it reports every
 # failure rather than stopping at the first -- the same reason
 # `benchmarks/run_benchmark.py` is exempt, and the engine raises untyped errors
