@@ -1,4 +1,4 @@
-"""The target graph is one setting spread across seven files.
+"""The target graph is one setting spread across nine files.
 
 Issue #5: the loader defaulted to `default` and the benchmark runner to
 `edge_ai`. Nothing caught it because the engine ignores the graph argument on

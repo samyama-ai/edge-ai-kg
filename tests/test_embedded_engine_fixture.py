@@ -17,11 +17,16 @@ failures under `--no-skips`, so a CI job with no engine fails loudly instead of
 reporting green over a suite that never ran. A helper called from inside a test
 body would skip in the body and slip past that.
 """
+import os
+import pathlib
 import types
 
 import pytest
 
 GRAPH = "default"
+
+
+ROOT_CONFTEST = pathlib.Path(__file__).resolve().parent.parent / "conftest.py"
 
 
 def held_nodes(client) -> int:
@@ -34,10 +39,13 @@ def held_nodes(client) -> int:
     failure messages below would print, which is the opposite of what they are
     written for.
 
-    `count(n.id)` rather than `count(n)`: CLAUDE.md's rule is to aggregate a
-    property, and matching `etl/loader.py` costs nothing here.
+    `count(n)`, not `count(n.id)`: the id form counts only nodes that have an
+    `id`, and a leftover without one is exactly what these assertions are
+    looking for. CLAUDE.md's rule against aggregating a bare node variable is
+    about `count(DISTINCT x)` over a multi-variable MATCH (engine note 9), not
+    about this.
     """
-    records = client.query("MATCH (n) RETURN count(n.id)", GRAPH).records
+    records = client.query("MATCH (n) RETURN count(n)", GRAPH).records
     return records[0][0] if records else 0
 
 
@@ -150,8 +158,21 @@ def test_the_probe_skips_a_missing_engine_and_re_raises_a_broken_reset(
     def broken_reset():
         raise internals.ResetIncomplete("reset left 5 nodes in `default`")
 
-    with pytest.raises(internals.ResetIncomplete, match="reset left 5 nodes"):
+    # Not `pytest.raises`: it does not catch `Skipped`, which is a
+    # `BaseException`, so a `probe_engine` that had lost its `raise` would let
+    # the skip propagate and this test would be *reported as skipped* -- and
+    # `--no-skips` converts setup-phase skips, not call-phase ones. The guard
+    # against a dirty shared graph would then be green and silent, which is
+    # the failure this whole module exists to prevent.
+    try:
         internals.probe_engine(broken_reset)
+    except internals.ResetIncomplete as exc:
+        assert "reset left 5 nodes" in str(exc)
+    except BaseException as exc:                    # including Skipped
+        pytest.fail(f"probe_engine turned a broken reset into {exc!r}, so a "
+                    f"suite sharing one dirty graph would report green")
+    else:
+        pytest.fail("probe_engine returned on a broken reset")
 
 
 def test_a_reset_that_leaves_rows_raises(conftest_internals):
@@ -173,3 +194,51 @@ def test_a_reset_that_leaves_rows_raises(conftest_internals):
         "it is an Exception subclass, which is exactly why `probe_engine` has "
         "to name it rather than relying on `except Exception` missing it"
     )
+
+
+def _run_isolated(tmp_path, *args):
+    """Run pytest over a copy of the real `conftest.py`, with no engine installed.
+
+    A subprocess and a copy, rather than `pytester`: the property under test is
+    *where* the skip happens, and that is decided by this repo's own
+    `conftest.py` -- so the file itself is copied in rather than a stub of it
+    being written. `samyama.py` on the path raises on import, which is the
+    condition a machine without the extension is in.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    shutil.copy(ROOT_CONFTEST, tmp_path / "conftest.py")
+    (tmp_path / "samyama.py").write_text(
+        "raise ImportError('no extension here')\n", encoding="utf-8")
+    (tmp_path / "test_needs_the_engine.py").write_text(
+        "def test_wants_a_client(engine_factory):\n"
+        "    assert engine_factory() is not None\n", encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *args],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)})
+
+
+def test_the_engine_skip_happens_in_setup_so_no_skips_converts_it(tmp_path):
+    """The headline property of this fixture, pinned by running it.
+
+    `--no-skips` converts a *setup-phase* skip into an error. Move the skip
+    into the returned `make` -- so it fires at call time instead -- and the run
+    goes green with a skip line, under `--no-skips`, with nothing to notice.
+    Nothing else in this file catches that, because the difference is invisible
+    to any test that imports the fixture rather than running it.
+    """
+    plain = _run_isolated(tmp_path, ".")
+    assert plain.returncode == 0, (
+        f"without --no-skips a missing engine should skip, not fail:\n"
+        f"{plain.stdout[-800:]}")
+    assert "1 skipped" in plain.stdout, plain.stdout[-800:]
+
+    strict = _run_isolated(tmp_path, ".", "--no-skips")
+    assert strict.returncode != 0, (
+        "--no-skips did not fail a run whose engine fixture skipped. The skip "
+        "is firing at call time rather than in setup, which is the one thing "
+        "this fixture is shaped around:\n" + strict.stdout[-800:])
+    assert "error" in strict.stdout.lower(), strict.stdout[-800:]
