@@ -108,9 +108,10 @@ def test_reset_empties_a_reused_client(engine_factory, reset_embedded_graph):
 def test_full_scale_is_registered(request):
     """That the option exists, which is what can actually be asserted here.
 
-    Named for what it checks. The slow tests call
-    `request.config.getoption("--full-scale")` and skip on it; if the option
-    were never registered that call raises `ValueError` inside each of them,
+    Named for what it checks. No test reads the option yet -- it is plumbing
+    landing ahead of the scale-sensitive tests in #96 and #100, which will call
+    `request.config.getoption("--full-scale")` and skip on it. If the option
+    were not registered, that call raises `ValueError` inside each of them,
     turning an opt-out into a crash. `getoption` not raising is the check.
 
     Whether the *default* is off cannot be read from a run that may have been
