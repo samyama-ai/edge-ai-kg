@@ -78,7 +78,7 @@ class Neo4j:
             raise Neo4jLoadError(
                 f"cannot reach Neo4j at {self.url}: {exc.reason}\n"
                 f"  start one with: docker run -d -p 7474:7474 "
-                f"-e NEO4J_AUTH=neo4j/benchmarkpw neo4j:5-community") from exc
+                f"-e NEO4J_AUTH=neo4j/$NEO4J_PASSWORD neo4j:5-community") from exc
         if body["errors"]:
             error = body["errors"][0]
             raise RuntimeError(f"{error['code']}: {error['message'].splitlines()[0]}")

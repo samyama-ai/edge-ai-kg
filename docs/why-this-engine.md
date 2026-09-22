@@ -47,6 +47,36 @@ Neo4j has none of these. An engineer who knows Cypher can write Cypher against
 Neo4j; against this engine they must read an eleven-item notes file first. That
 is a real cost and it is paid on day one.
 
+### The hero query — they win, measured (#47)
+
+**Neo4j answers `EA01` more than four times as fast as we do** — 8.1 and 7.7 ms
+across two runs against our 34.8 and 35.8 ms (4.3-4.7x). Identical Cypher, the
+same 22 indexes on both engines, a catalog-wide warm-up, median of 15, two runs
+published. It also takes `EA15` (1.6-1.8x).
+
+Overall: **Samyama 8, Neo4j 2, unresolved 1, no verdict 5.** Full results,
+losses first, in [`neo4j-comparison.md`](neo4j-comparison.md), which this
+section is copied from — if the two disagree, that page is right.
+
+- **Six of our eight wins are queries we answer in under three
+  milliseconds**, against a Neo4j floor of about 8 ms that barely moves. On
+  cheap queries this measures in-process against over-the-wire. Above ~20 ms of
+  real work it splits evenly: `EA05` and `EA16` to us, `EA01` and `EA15` to
+  Neo4j. `EA04` is unresolved — a win in one run, parity in the other.
+- **Five queries get no verdict.** `EA02`, `EA08` and `EA11` answer differently
+  between repeats of the *same* engine (ties under `ORDER BY ... LIMIT`), and
+  `EA07` and `EA09` return different rows on each. An earlier version of that
+  page, and of this section, counted `EA02` and `EA11` as Neo4j wins; they are
+  not.
+- **The catalog's workarounds do not handicap Neo4j.** `EA01` with
+  `NOT EXISTS { }`, as a Neo4j author would write it, is *slower* there than our
+  shape in both runs.
+
+Read that page's *How this page was wrong twice* section before quoting any of
+it — two headlines published and withdrawn from three defects, then a fourth
+correction when repeats of one engine were first compared with each other. Each
+changed the headline. Two runs are reported because one was never enough.
+
 ### Operations and maturity — they win
 
 Backup, replication, failover, monitoring, rolling upgrade, and twenty years of
@@ -193,7 +223,11 @@ undemonstrated here. #49 asks the same of the MCP surface.
 ### Memgraph — closest on the performance axis, unavailable on licence
 
 In-memory, C++, Bolt and Cypher, positions explicitly on speed, and is the one
-most likely to beat this engine on a head-to-head benchmark (#47, not yet run).
+most likely to beat this engine on a head-to-head benchmark. Still unmeasured
+— #47 ran Neo4j, not Memgraph. Neo4j, which this page called the *less* likely
+winner, takes two of the sixteen including the hero query
+([`neo4j-comparison.md`](neo4j-comparison.md)), so the guess that Memgraph would
+be the closer contest is untested and looks optimistic.
 
 But per its own BSL, it cannot be embedded in a shipped product. So it is the
 strongest technical competitor and simultaneously not a competitor for the
@@ -289,7 +323,7 @@ existed, and the contract test was written to permit exactly that phrasing.
 | 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
 | Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
-| Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |
+| Faster than Neo4j on the hero query | **Measured — no. Neo4j is 4.3-4.7x faster on `EA01`** | `python -m benchmarks.compare_neo4j --repeats 15 --natural`; needs a Neo4j and `NEO4J_PASSWORD`. Results in [`neo4j-comparison.md`](neo4j-comparison.md), #47 |
 | Graph + vector in one binary | **Measured** — available, unused in this repo | `python -m benchmarks.vector_probe --holdout` (#48) |
 | | | `--repro` is the *defect* reproduction, not the capability: it was cited here to show vector search works, which is the opposite of what its name and output say. On 1.7.1 neither panics any more, and both commands now report which way the run went instead of asserting the 0.6.1 outcome. |
 | PageRank / WCC / SCC / triangle count | **Quoted** — available, unused by the catalog | [`client-api.md`](client-api.md); no command in this repo |
