@@ -151,10 +151,11 @@ comes back, except `EA10`, which differs in the sixteenth significant digit of a
 float. Those are not different answers, but they are not "no disagreements"
 either, and comparing lengths would have hidden all seven.
 
-**This does not contradict the engine-notes section below**, which says `EA01`,
-`EA02` and `EA04` are *wrong* against the engine `pytest` uses and carry
-`xfail`s. That text describes `samyama` 0.6.1. The comparison above was run at
-1.7.1, where notes 10 and 11 do not reproduce — which is #94's finding, that
+**This does not contradict the engine-notes section below.** That section
+describes `samyama` 0.6.1, where `EA01`, `EA02` and `EA04` were wrong against
+the engine `pytest` used and carried `xfail`s. The comparison above was run at
+1.7.1, where notes 10 and 11 do not reproduce and those marks are gone (#104) —
+which is #56's finding, that
 the "embedded versus server" disagreement was a version skew (0.6.1 against a
 1.7.0 server) rather than a difference between the two builds.
 
