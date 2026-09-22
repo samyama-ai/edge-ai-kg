@@ -342,7 +342,7 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
 def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
     """Parametrised rather than one sweep, so a single query can be excused.
 
-    Marking the whole sweep would excuse the other fifteen too: EA07 could stop
+    Marking the whole sweep would excuse the other sixteen too: EA07 could stop
     returning rows and the run would still be green.
     """
     client, _ = loaded
@@ -424,6 +424,20 @@ ORDER BY model
     )
 
 
+# Catalog queries that deliberately carry no `ORDER BY`, and why. Everything
+# else must sort: engine note 3 makes an ignored sort look like a top-N, so the
+# sweep below asserts the order really is applied. Listing them by name rather
+# than skipping silently means a query that *loses* its sort is caught instead
+# of quietly leaving the sweep -- which is how a catalog-wide convention stops
+# being one.
+NO_ORDER_BY = {
+    "EA06": "a single aggregate row -- there is nothing to order",
+    "EA17": "five legs joined by UNION ALL, and ORDER BY is silently dropped after "
+            "UNION ALL on this engine (note 3c); the five rows are keyed by "
+            "`kind`, so an order would carry nothing",
+}
+
+
 @pytest.mark.parametrize("qid", list(BY_ID))
 def test_order_by_is_actually_applied(loaded, qid):
     """ORDER BY on a RETURN-introduced alias is silently ignored on v1.7.0, and
@@ -431,7 +445,7 @@ def test_order_by_is_actually_applied(loaded, qid):
     project through WITH and sort on a single key -- assert it really sorts.
 
     Parametrised for the same reason as the sweep above: excusing the whole test
-    for a single query would excuse the other fifteen queries' sort order too.
+    for a single query would excuse the other sixteen queries' sort order too.
     That is what kept EA01 and EA02's note-10 marks from hiding anything, and it
     is why the parametrisation stays now that the marks are gone.
     """
@@ -440,7 +454,11 @@ def test_order_by_is_actually_applied(loaded, qid):
     cypher = BY_ID[qid]["cypher"].strip()
     match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.DOTALL)
     if not match:
-        pytest.skip(f"{qid} has no ORDER BY")
+        assert qid in NO_ORDER_BY, (
+            f"{qid} has no ORDER BY and is not listed as deliberately unsorted. "
+            f"Either restore the sort or add it to NO_ORDER_BY with the reason."
+        )
+        pytest.skip(f"{qid} is deliberately unsorted: {NO_ORDER_BY[qid]}")
     keys = [k.strip() for k in match.group(1).split(",")]
     assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
 

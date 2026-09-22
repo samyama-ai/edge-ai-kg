@@ -1,4 +1,4 @@
-# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-11)
+# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-12)
 
 > **Partly superseded, 2026-09-21.** Notes 10 and 11 are **resolved**: they
 > were `samyama` 0.6.1 against a 1.7.0 server, not two builds disagreeing, and
@@ -109,6 +109,22 @@ is *detectable*: `tests/test_correctness.py` asserts that ratio, and
 `test_ea04_shape_is_not_a_cartesian_product` pins the behaviour on a
 purpose-built 4-deployment fixture.
 
+**One query re-binds in trailing position deliberately, and is measured.**
+`EA17` (#35) is five `OPTIONAL MATCH` legs that each re-bind a variable the
+opening `MATCH` already bound. That is this shape, and there is no other way to
+express "reachable from some *other* sensor" -- it is note 5's anti-join, which
+needs the re-bind. So it is not taken on trust:
+`test_ea17_matches_ground_truth_at_full_scale` compares every sensor, both
+counts and the depth, against a Python breadth-first search at `--scale 1.0`,
+where this note's failure appears if it appears. 0 disagreements.
+
+**That test is opt-in.** It is gated on `--full-scale`, so a default `pytest`
+run does not execute it -- loading a scale-1.0 fleet takes minutes. A green
+default run is therefore *not* evidence about this note; `pytest --full-scale`
+is. Re-run it after any edit to `EA17`'s patterns, because a small graph cannot
+settle this and the failure is silent in the direction that looks like the
+finding.
+
 ---
 
 ## 2. `RETURN DISTINCT` is a no-op
@@ -173,6 +189,25 @@ pass establishes the alias.
 unsorted within each group. Multi-key sorts are therefore avoided entirely;
 `tests/test_correctness.py::test_order_by_is_actually_applied` asserts every
 catalog query uses a single sort key *and* that the result really is sorted.
+
+### 3c. `ORDER BY` after `UNION ALL` is dropped
+
+Measured 2026-09-09 while writing `EA17` (#35), which is five legs joined by `UNION ALL`.
+Appending `ORDER BY affected DESC` to the whole statement returned the rows in
+leg order -- `16, 60, 1440, 120, 4` -- unchanged and unsorted. No error.
+
+Same family as note 3 and the same severity: with `LIMIT` it would be an
+arbitrary N dressed as a top-N. `test_order_by_is_actually_applied` cannot
+assert this note -- `EA17` deliberately carries no `ORDER BY`, so there is no
+sort to check applied. It no longer *skips* silently, though: an unsorted query
+must name itself in that test's `NO_ORDER_BY` with its reason, so `EA17` is
+covered by an explicit allowlist rather than by escaping the filter. Adding a
+query with no `ORDER BY` and no entry there fails.
+
+**Workaround used here:** `EA17` carries no `ORDER BY` at all, and returns five
+rows keyed by `kind` so there is nothing an order would tell you. A `UNION`
+result that genuinely needs sorting has no known workaround on this build --
+sort it in the caller.
 
 ---
 
@@ -320,7 +355,7 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ---
 
-## 10. The embedded build does not register an alias introduced by a second `WITH`
+## 10. The 0.6.1 embedded build does not register an alias introduced by a second `WITH`
 
 > Not filed upstream. Tracked here as #56 — unlike notes 1-9 this is a
 > disagreement between two builds, not a behaviour of the server.
@@ -480,6 +515,76 @@ adopting it now would settle that question by the back door. The distinction
 matters: *fix deferred* and *no fix known* are different states, and someone
 reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 `tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`.
+
+---
+
+## 12. The 1.7.0 server does not traverse variable-length relationships; embedded 1.7.1 does
+
+> Not filed upstream yet. Found 2026-09-10 while adding `EA17` (#35). Like
+> notes 10 and 11 this is a build disagreement rather than a behaviour of one
+> engine -- but unlike them it is the **server** that is wrong, and it is
+> silent.
+>
+> **Version labels, because this file carries two vintages.** The rest of this
+> page describes `samyama` **0.6.1** embedded against the **1.7.0** server,
+> which is what `pyproject.toml`'s `samyama>=0.6.0` resolved when notes 1-11
+> were written. This note was measured against **1.7.1** embedded, the floor
+> #105 pins (landing with #104). So the comparison below is 1.7.0 server against 1.7.1 embedded, and
+> the conclusion "the server is the one that is wrong" is really "the server at
+> 1.7.0 does not do what the embedded build at 1.7.1 does". Whether 1.7.0
+> *embedded* traverses has not been measured; there is no reason to think the
+> defect is HTTP-specific rather than a fix that landed between the two.
+
+**Severity: correctness. Returns fewer rows rather than erroring.**
+
+A four-node chain `a -> b -> c -> d`, loaded identically into both builds, then
+`MATCH (a:P)-[:R<pattern>]->(b:P) WHERE a.id = "a" RETURN b.id`:
+
+| pattern | server 1.7.0 | embedded 1.7.1 |
+|---|---|---|
+| `*0..` | `['a']` | `['a', 'b', 'c', 'd']` |
+| `*0..3` | `['a']` | `['a', 'b', 'c', 'd']` |
+| `*1..3` | `[]` | `['b', 'c', 'd']` |
+| `*` | `[]` | `['b', 'c', 'd']` |
+| `*0..1` | `['a']` | `['a', 'b']` |
+| `*2..2` | `[]` | `['c']` |
+
+**The server matches the zero-length case and nothing else**, for every form,
+bounded or not. It does not error; it returns a smaller answer.
+
+`size(r)` on a variable-length relationship is a second, louder symptom on the
+same build: `Type error: size() requires string, list, or path`. `length(p)`
+and `size(relationships(p))` parse there, and then report the zero-length
+result, which is worse.
+
+**What it costs the catalog, measured rather than reasoned.** `EA07` and
+`EA17` are the two queries with a variable-length pattern. `EA17` raises. **For
+`EA07` the two builds return byte-identical rows** -- checked on one scale-1.0
+graph loaded into both, comparing row content and not row counts.
+
+That is not what this note predicts, and the prediction is what was wrong. An
+earlier draft here said `EA07` "silently drops everything deeper", reasoned from
+the table above and not measured. `EA07` ends `ORDER BY latency_ms ASC LIMIT
+10`, and the ten lowest-latency paths are reachable at zero hops on this graph,
+so the smaller candidate set produces the same answer. That is luck, not
+robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
+
+**No workaround.** There is no way to express "walk a chain of unknown length"
+that the 1.7.0 server executes. The options are an engine that does it
+(embedded 1.7.1 does), or not asking the question over HTTP.
+
+**`EA17` therefore depends on #105**, the floor raise that lands with #104. It needs an engine at 1.7.1, both for this
+and because its per-leg second `WITH` introduces new aliases -- note 10's shape,
+which 0.6.1 rejects. The floor in `pyproject.toml` is what decides this, and it
+is `samyama>=0.6.0` until #104 merges -- so today it admits a build on which
+`EA17` fails outright. In practice pip resolves 1.7.1 (published 2026-08-27),
+which is why the suite is green.
+
+When #104 merges, that floor becomes `>=1.7.1` and this paragraph's "today"
+stops being true. Nothing in the suite reads the floor, so nothing will say so
+-- re-read this note when #104 lands. (Naming a test here that pinned it would
+be the better fix; there isn't one, and claiming otherwise is how a page starts
+asserting enforcement it does not have.)
 
 ---
 

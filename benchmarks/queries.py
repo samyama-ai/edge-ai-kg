@@ -139,6 +139,24 @@ RETURN op.name AS operator, count(DISTINCT d.id) AS deployments_at_risk,
                      "pipeline, model, quantized variant, deployment, board."),
         "why_graph": ("A path query. The whole point of the KG -- the physical "
                       "chain from electrode to silicon is a path, not a table."),
+        # `*0..3` is a fixed bound on a chain of unknown length, and it is
+        # lossy **today**. Measured at `--scale 1.0`: the longest `NEXT_STAGE`
+        # chain is 13 hops, and lifting the bound to `*0..` changes the top ten
+        # -- `Chest mic array` and `Thermistor array` drop out, `ECG 3-lead` and
+        # `ECG 12-lead` come in. The row count is 10 either way, which is why
+        # the difference is easy to miss.
+        #
+        # It stays bounded anyway. The 1.7.0 server traverses neither form --
+        # it matches only the zero-length case, bounded or not (note 12) -- and
+        # this bounded form is the one measured to return byte-identical rows
+        # on both builds, because its ten lowest-latency paths sit at zero hops.
+        # That is luck of this data and this `LIMIT`, not robustness, and
+        # lifting the bound would be an unmeasured change to the one
+        # variable-length query that currently answers the same over HTTP.
+        #
+        # `tests/test_blast_radius_semantics.py::test_ea07s_fixed_bound_is_lossy
+        # _and_that_is_a_known_trade` pins the cost on a purpose-built chain, so
+        # this stops being prose the moment it stops being true.
         "cypher": """
 MATCH (s:Sensor)-[:FEEDS]->(st:SignalStage)-[:NEXT_STAGE*0..3]->(last:SignalStage)
       -[:PRECEDES]->(m:Model)<-[:VARIANT_OF]-(v:ModelVariant)
@@ -319,6 +337,95 @@ MATCH (k:Kernel)
 WITH k.provenance AS provenance, k.source AS source, count(k.id) AS kernels
 RETURN provenance, source, kernels
 ORDER BY kernels DESC
+""",
+    },
+    {
+        "id": "EA17",
+        "title": "BLAST RADIUS: this sensor stops -- what stops with it?",
+        "question": ("Sensor `sensor:00000` fails. What depends on it, and how "
+                     "much of that stops *only* because of it?"),
+        "why_graph": (
+            "Two numbers, because reachable is not the same as stopped. "
+            "`affected` is everything downstream; `only_via_me` is the subset "
+            "with no other live feeder -- the part that actually goes dark. A "
+            "stage fed by three sensors is a firebreak, not a casualty, and a "
+            "reachability query alone reports it as one. The `NEXT_STAGE` chain "
+            "is of unknown length, so both need `*0..`."),
+        # `only_via_me` is the second number because reachability is not the
+        # answer: `etl/generate.py:434` samples every sensor's chain from one
+        # shared 16-stage pool, so an unbounded walk reaches most of the fleet.
+        # The ClinicalTask leg matches `o.modality = s.modality` for the same
+        # reason -- a task's other sensors replace this one only if they supply
+        # the same modality.
+        #
+        # Five constraints, each written up where it can be checked rather than
+        # repeated here. `tests/test_blast_radius.py`'s module docstring is the
+        # long form:
+        #
+        #   1. The `OPTIONAL MATCH` legs use note 1's trailing-rebind shape.
+        #      Validated at `--scale 1.0`, 0 disagreements. Do not edit those
+        #      patterns without re-running `pytest --full-scale`.
+        #   2. Needs 1.7.1 (note 10's shape, per-leg second `WITH`); #105.
+        #   3. `+1/+2/+4/+5` are schema-fixed hops, not a depth bound. The
+        #      variable part is `size(r)`, which is what `*0..` is for.
+        #   4. The sensor id appears ten times; retarget with
+        #      `retargeted_ea17`, never by hand. An unknown id gives an empty
+        #      blast radius rather than an error, as `EA01` and `EA06` do.
+        #   5. No `ORDER BY` (note 3c) and no `WHERE` on `only_via_me`
+        #      (note 11); `o.id IS NOT NULL` guards note 8b -- `<>` against a
+        #      null property matches.
+        #
+        # **Embedded only.** The 1.7.0 server does not traverse the
+        # variable-length walk and rejects `size(r)` on it (note 12), so
+        # `run_benchmark` over HTTP records a per-query failure. Constraint 2
+        # means embedded 0.6.1 rejects it too: the floor that excludes 0.6.1 is
+        # #105, and until it lands pip resolving 1.7.1 is what keeps the
+        # catalog sweep green.
+        "cypher": """
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(x:SignalStage)
+WHERE s.id = "sensor:00000"
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x)
+WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WITH x.id AS thing, min(size(r)) + 1 AS depth, count(DISTINCT o.id) AS others
+WITH "SignalStage" AS kind, count(thing) AS affected,
+     sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
+RETURN kind, affected, only_via_me, nearest
+UNION ALL
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m:Model)
+WHERE s.id = "sensor:00000"
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m)
+WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WITH m.id AS thing, min(size(r)) + 2 AS depth, count(DISTINCT o.id) AS others
+WITH "Model" AS kind, count(thing) AS affected,
+     sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
+RETURN kind, affected, only_via_me, nearest
+UNION ALL
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+WHERE s.id = "sensor:00000"
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
+WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WITH d.id AS thing, min(size(r)) + 4 AS depth, count(DISTINCT o.id) AS others
+WITH "Deployment" AS kind, count(thing) AS affected,
+     sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
+RETURN kind, affected, only_via_me, nearest
+UNION ALL
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
+WHERE s.id = "sensor:00000"
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
+WHERE o.id IS NOT NULL AND o.id <> "sensor:00000"
+WITH b.id AS thing, min(size(r)) + 5 AS depth, count(DISTINCT o.id) AS others
+WITH "Board" AS kind, count(thing) AS affected,
+     sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
+RETURN kind, affected, only_via_me, nearest
+UNION ALL
+MATCH (t:ClinicalTask)-[:REQUIRES_SENSOR]->(s:Sensor)
+WHERE s.id = "sensor:00000"
+OPTIONAL MATCH (t)-[:REQUIRES_SENSOR]->(o:Sensor)
+WHERE o.id IS NOT NULL AND o.id <> "sensor:00000" AND o.modality = s.modality
+WITH t.id AS thing, 1 AS depth, count(DISTINCT o.id) AS others
+WITH "ClinicalTask" AS kind, count(thing) AS affected,
+     sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
+RETURN kind, affected, only_via_me, nearest
 """,
     },
 ]

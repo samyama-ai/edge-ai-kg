@@ -1,8 +1,15 @@
 """Zero rows is an answer, so the catalog is driven to it deliberately.
 
-All sixteen catalog queries return rows against the shipped graph. That is what
-a demo needs and not what a test needs: a query only ever run against data that
+Every catalog query returns rows against the shipped graph. That is what a demo
+needs and not what a test needs: a query only ever run against data that
 satisfies it cannot tell "the answer is none" from "the query is broken" (#27).
+
+That claim is checked rather than assumed --
+`tests/test_correctness.py::test_every_catalog_query_runs_and_returns_rows`
+sweeps the catalog -- though it is checked for 14 of the 17. Three ids are
+excused there: `EA04`, whose combination may legitimately not occur at the
+fixture's scale, and `EA01` and `EA02`, which carry a non-strict `xfail` for
+engine note 10.
 
 It matters here more than most repos, because the catalog's central question is
 a **negative** -- operators with *no* kernel -- so an empty result is the
