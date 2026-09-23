@@ -12,16 +12,16 @@ Two things are checked here, and the second is the one that matters.
 
 The catalog entry points here for these, because each is a paragraph:
 
-1. **Note 1's trailing-rebind shape.** Each `OPTIONAL MATCH` leg re-binds a
-   variable the first `MATCH` already bound (`x`, `m`, `d`, `b`, `t`) in
-   trailing position -- which `CLAUDE.md` says produces an unenforced join. It
-   does not here: compared against a Python breadth-first search at
-   `--scale 1.0`, all 14 sensors, both counts and the depth, **0 disagreements**
-   -- re-run after the bindings were made anonymous and the `<>` predicates
-   guarded, because that rule is the reason a pattern edit is not cosmetic
-   (`test_ea17_matches_ground_truth_at_full_scale`, `--full-scale`). Do not edit
-   those patterns without re-running it: a small graph cannot settle it, and the
-   failure is silent in the direction that looks like the finding.
+1. **Note 1's trailing-rebind shape.** Each `OPTIONAL MATCH` leg re-binds, in
+   trailing position, the variable its own `MATCH` bound one line above -- `x`
+   in the stage leg, `m`, `d` and `b` in the others -- which `CLAUDE.md` says
+   produces an unenforced join. It does not here: compared against a Python
+   breadth-first search at `--scale 1.0`, all 14 sensors, both counts and the
+   depth, **0 disagreements** (`test_ea17_matches_ground_truth_at_full_scale`,
+   `--full-scale`). The fixture-scale comparison in this module runs every
+   time and would catch an inflated count; the full-scale one is what settles
+   *cardinality*, which note 1 says a small graph cannot. Do not edit those
+   patterns without re-running it.
 2. **It needs the `samyama>=1.7.1` floor #104 landed.** Each leg's second
    `WITH` introduces all-new aliases -- note 10's shape, which 0.6.x rejects,
    so on a build below the floor `EA17` does not run at all.
@@ -184,12 +184,22 @@ class Truth:
         # routed this through a stage would make that depth wrong -- and wrong
         # in the same direction as the query, which is the pair of errors that
         # cancel and leave a green test.
+        # Both ends. Checking only the target left the other half of "one hop
+        # from a ClinicalTask to a Sensor" unexamined: an edge from something
+        # else *to* a Sensor would satisfy the target check and still mean the
+        # depth of 1 was measuring a different path.
         off_sensor = {tgt for sensors in self.requires.values() for tgt in sensors
                       if self.labels.get(tgt) != "Sensor"}
+        off_task = {src for src in self.requires
+                    if self.labels.get(src) != "ClinicalTask"}
         assert not off_sensor, (
             f"REQUIRES_SENSOR points at {sorted(off_sensor)[:3]}, which is not "
             f"a Sensor, so ClinicalTask is no longer one hop from the sensor "
             f"and `by_kind`'s depth of 1 is wrong. Derive it instead.")
+        assert not off_task, (
+            f"REQUIRES_SENSOR starts at {sorted(off_task)[:3]}, which is not a "
+            f"ClinicalTask. `by_kind` counts these as tasks at depth 1, so the "
+            f"kind is as load-bearing as the hop count.")
         self.modality = {row["id"]: row.get("modality")
                          for row in fleet.nodes.get("Sensor", ())}
         self.reachable = {row["id"]: self._reachable_from(row["id"])
@@ -314,7 +324,7 @@ def retargeted_ea17(sensor_id: str) -> str:
     """
     original = BY_ID["EA17"]["cypher"]
     # Count, not membership. `f'"{sensor_id}"' in cypher` is trivially true
-    # when `sensor_id` *is* `sensor:00000` -- which is the first sensor in the
+    # when `sensor_id` *is* `EA17_SUBJECT` -- which is the first sensor in the
     # fleet and the one most callers pass -- so the "catalog subject moved"
     # check never fired for the commonest case.
     occurrences = original.count(f'"{EA17_SUBJECT}"')
@@ -323,7 +333,7 @@ def retargeted_ea17(sensor_id: str) -> str:
         f"{EA17_SUBJECT_OCCURRENCES}. Either a leg was added or removed -- in "
         f"which case update EA17_SUBJECT_OCCURRENCES here -- or the catalog's "
         f"subject moved and this retarget no longer rewrites every leg.")
-    cypher = original.replace('"sensor:00000"', f'"{sensor_id}"')
+    cypher = original.replace(f'"{EA17_SUBJECT}"', f'"{sensor_id}"')
     assert cypher.count(f'"{sensor_id}"') == occurrences, (
         f"retargeting to {sensor_id} rewrote "
         f"{cypher.count(f'{chr(34)}{sensor_id}{chr(34)}')} of {occurrences} "
@@ -431,12 +441,10 @@ def test_ea17_matches_ground_truth_at_full_scale(request, engine_factory,
 def test_ea17_binds_nothing_it_does_not_use():
     """A named node in a pattern that nothing references reads as a join.
 
-    `EA17` is five legs of one long pattern, and the whole question about it --
-    asked in review more than once -- is which variables are joined to which.
-    Names that are bound and never used make that harder to answer, and three
-    of them (`st`, `v`, and `m`/`d` in the later legs) were doing exactly that.
-    Anonymous nodes say "this hop exists and I do not refer to it", which is
-    the truth.
+    `EA17` is five legs of one long pattern, and the question about it is
+    which variables are joined to which. A name that is bound and never used
+    makes that harder to answer; an anonymous node says "this hop exists and I
+    do not refer to it", which is the truth.
 
     Per leg, because `UNION ALL` legs share no scope: a name used in leg 2 is
     still unused in leg 4.
@@ -466,16 +474,19 @@ def test_ea17_never_compares_an_id_with_a_bare_inequality():
     stops, silently, in the direction that looks like good news.
     """
     cypher = BY_ID["EA17"]["cypher"]
-    # Per leg and per property, not per line. A line-based check passed when
-    # the guard sat on the previous line, and passed when the guard was on a
-    # *different* property than the one compared -- `x.id IS NOT NULL AND
-    # o.id <> "..."` reads fine to it and guards nothing.
-    unguarded = [
-        f"leg {n}: {prop}"
-        for n, leg in enumerate(cypher.split("UNION ALL"), 1)
-        for prop in re.findall(r"(\w+\.\w+)\s*<>", leg)
-        if not re.search(rf"{re.escape(prop)}\s+IS NOT NULL", leg)
-    ]
+    # Per `WHERE` clause. The guard has to sit in the same clause as the
+    # comparison it protects -- a guard on a different property, or in the
+    # leg's other `WHERE`, constrains different rows and protects nothing.
+    unguarded = []
+    for n, leg in enumerate(cypher.split("UNION ALL"), 1):
+        for clause in re.split(r"\b(?:WITH|RETURN|MATCH|OPTIONAL MATCH)\b", leg):
+            if "WHERE" not in clause:
+                continue
+            where = clause[clause.index("WHERE"):]
+            unguarded.extend(
+                f"leg {n}: {prop}"
+                for prop in re.findall(r"(\w+\.\w+)\s*<>", where)
+                if not re.search(rf"{re.escape(prop)}\s+IS NOT NULL", where))
     assert not unguarded, (
         f"`<>` on a property with no `IS NOT NULL` for that same property in "
         f"the same leg: {unguarded}. Engine note 8b says `<>` matches nulls."

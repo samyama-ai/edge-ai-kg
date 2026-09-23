@@ -164,6 +164,27 @@ def test_a_board_shared_through_a_different_deployment_is_not_exclusive(engine_f
     )
 
 
+def one_row_per_kind(records):
+    """`{kind: (affected, only_via_me)}`, refusing a kind that appears twice.
+
+    `EA17` returns one row per kind by construction -- each leg ends in a
+    `WITH "<kind>" AS kind, ...` over the whole leg -- so a dict comprehension
+    reads naturally and silently keeps the last row if that ever stops being
+    true. A second row for a kind would mean a leg's grouping had changed, and
+    every assertion below would then be checking half an answer while looking
+    exactly as it does now.
+    """
+    import collections
+
+    seen = collections.Counter(row[0] for row in records)
+    duplicated = sorted(kind for kind, n in seen.items() if n > 1)
+    assert not duplicated, (
+        f"EA17 returned more than one row for {duplicated}. Each leg groups to "
+        f"a single row per kind, so this means a leg's grouping changed -- the "
+        f"assertions below would silently read whichever row came last.")
+    return {row[0]: (row[1], row[2]) for row in records}
+
+
 def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
     """The reason `EA17` is `*0..` and not `*0..N`.
 
@@ -201,8 +222,8 @@ def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
     unbounded = BY_ID["EA17"]["cypher"]
     bounded = unbounded.replace("*0..]", "*0..3]")
 
-    got_unbounded = {r[0]: (r[1], r[2]) for r in client.query(unbounded, GRAPH).records}
-    got_bounded = {r[0]: (r[1], r[2]) for r in client.query(bounded, GRAPH).records}
+    got_unbounded = one_row_per_kind(client.query(unbounded, GRAPH).records)
+    got_bounded = one_row_per_kind(client.query(bounded, GRAPH).records)
 
     assert got_unbounded["SignalStage"][0] == depth, (
         f"unbounded should reach all {depth} stages, got {got_unbounded}")
@@ -277,10 +298,13 @@ def test_ea07s_fixed_bound_is_lossy_and_that_is_a_known_trade(engine_factory):
     wrong -- that is what `test_fixed_depth_misses_the_far_end_of_a_long_chain`
     above demonstrates. `EA07` walks the same chain and still says `*0..3`.
 
-    That is a deliberate trade, not an oversight, and the reason is note 12:
-    `*0..` is the construct the 1.7.0 HTTP server refuses, so lifting `EA07`'s
-    bound would make it a second embedded-only query. `EA17` is already the one
-    query that cannot be asked over HTTP.
+    That is a deliberate trade, not an oversight, and the reason is note 12.
+    Stated as that note states it: the 1.7.0 server does not *refuse* a
+    variable-length walk, it returns only the zero-length match and says
+    nothing -- the silent half. What it refuses is `size(r)` on one, which is
+    why `EA17` raises there rather than quietly under-reporting. Lifting
+    `EA07`'s bound would therefore not raise; it would make `EA07` silently
+    wrong over HTTP, which is worse than the trade it keeps.
 
     The cost is real and is asserted here rather than described. On the shipped
     fleet at `--scale 1.0` the longest `NEXT_STAGE` chain is 13 hops and the two
@@ -334,6 +358,39 @@ def test_ea07s_fixed_bound_is_lossy_and_that_is_a_known_trade(engine_factory):
     )
 
 
+def answered_within(client, cypher, seconds):
+    """Run `cypher` and fail if it has not returned inside `seconds`.
+
+    The test below exists because an unbounded walk over a cyclic graph could
+    in principle not terminate, and a test for that which simply calls the
+    query would *itself* hang -- reporting as a stuck suite rather than as a
+    finding, which is the least legible failure this catalog could produce.
+
+    A worker thread and a join, rather than `pytest-timeout`: the repo does
+    not depend on it, and adding a plugin for one assertion is a larger change
+    than the assertion. **What this cannot do is stop the query.** If the
+    engine holds the GIL for the whole call the join still returns after the
+    timeout and the failure is reported, but the process stays busy until the
+    engine gives up; Python cannot kill a thread. So this converts a hang into
+    a named failure, and does not promise a clean exit after one.
+    """
+    import threading
+
+    out = {}
+
+    def run():
+        out["rows"] = client.query(cypher, GRAPH).records
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert not worker.is_alive(), (
+        f"EA17 did not return within {seconds}s on a cyclic NEXT_STAGE chain. "
+        f"The walk is `*0..` with no depth cap, so this is the query failing "
+        f"to terminate -- in `run_benchmark` it would read as a hung sweep.")
+    return out["rows"]
+
+
 def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
     """`EA17` walks `NEXT_STAGE*0..` with no depth cap. The fleet has cycles.
 
@@ -369,7 +426,7 @@ def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
         ("SignalStage", "stage:b", "NEXT_STAGE", "SignalStage", "stage:a", None),
     ])
 
-    rows = client.query(retargeted_ea17("sensor:cycle"), GRAPH).records
+    rows = answered_within(client, retargeted_ea17("sensor:cycle"), seconds=30)
     by_kind = {row[0]: row[1] for row in rows}
     assert by_kind.get("SignalStage") == 2, (
         f"the two stages of a cyclic chain should both be in the blast "

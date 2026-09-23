@@ -195,17 +195,20 @@ catalog query uses a single sort key *and* that the result really is sorted.
 
 ### 3c. `ORDER BY` after `UNION ALL` is dropped
 
-Measured 2026-09-09 while writing `EA17` (#35), which is five legs joined by `UNION ALL`.
+Measured 2026-09-09 while writing `EA17` (#35), which is five legs joined
+by `UNION ALL`.
 Appending `ORDER BY affected DESC` to the whole statement returned the rows in
 leg order -- `16, 60, 1440, 120, 4` -- unchanged and unsorted. No error.
 
 Same family as note 3 and the same severity: with `LIMIT` it would be an
 arbitrary N dressed as a top-N. `test_order_by_is_actually_applied` cannot
 assert this note -- `EA17` deliberately carries no `ORDER BY`, so there is no
-sort to check applied. It no longer *skips* silently, though: an unsorted query
-must name itself in that test's `NO_ORDER_BY` with its reason, so `EA17` is
-covered by an explicit allowlist rather than by escaping the filter. Adding a
-query with no `ORDER BY` and no entry there fails.
+sort to check applied. What the allowlist does is narrower than "covered", and
+worth stating exactly: an unsorted query must name itself in that test's
+`NO_ORDER_BY` with its reason, so a query that *loses* its `ORDER BY` fails
+rather than quietly leaving the sweep. **Nothing tests this note itself** --
+that would need a `UNION ALL` with an `ORDER BY` the catalog deliberately does
+not contain, and the reproduction above is the only evidence for it.
 
 **Workaround used here:** `EA17` carries no `ORDER BY` at all, and returns five
 rows keyed by `kind` so there is nothing an order would tell you. A `UNION`
@@ -360,8 +363,10 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ## 10. The 0.6.1 embedded build does not register an alias introduced by a second `WITH`
 
-> Not filed upstream. Tracked here as #56 — unlike notes 1-9 this is a
-> disagreement between two builds, not a behaviour of the server.
+> Not filed upstream. Tracked here as #56, and **resolved**: it read as a
+> disagreement between two builds and turned out to be version skew -- 0.6.1
+> from pip against a 1.7.0 server. Kept as history, because the wrong
+> conclusion is the useful part.
 
 **Severity: correctness. Raises on the embedded build, correct on the server.**
 
@@ -442,12 +447,15 @@ embedded, returning rows on a fixture and zero on the fleet.
 
 That is a statement about `EA18` on 1.7.1, not a verdict on the note itself.
 The note was written against 0.6.1, and #56 settled the wider question: the
-embedded-versus-server split was version skew, the floor is now
-`samyama>=1.7.1`, and `tests/test_empty_answers.py::test_ea01_zero_row_case`
-is live and passing rather than `xfail(strict=True)`. What is still unmeasured
-is the **1.7.0 server**, which nothing here re-probed -- so this note stays
-binding for the server path. Recorded so the next reader does not conclude
-`EA18` is untested against the note.
+split was version skew, the floor is now `samyama>=1.7.1`, and
+`tests/test_empty_answers.py::test_ea01_zero_row_case` is live and passing
+rather than `xfail(strict=True)`.
+
+**Nothing here stays binding.** The server was the build that answered this
+shape *correctly*, so there is no server path to keep working around -- what
+is unmeasured is 1.7.0 **embedded**, which nobody has run, and that matters
+only to someone pinning an engine below the floor. Recorded so the next reader
+does not conclude `EA18` is untested against the note.
 
 ---
 
@@ -539,12 +547,16 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 
 > Not filed upstream yet. Found 2026-09-10 while adding `EA17` (#35). Like
 > notes 10 and 11 this is a build disagreement rather than a behaviour of one
-> engine -- but unlike them it is the **server** that is wrong, and it is
-> silent.
+> engine -- but unlike them it is the **server** that is wrong. **Silent for
+> `EA07`'s shape** -- a bounded walk returns the zero-length match and no
+> error -- and **loud for `EA17`'s**, where `size(r)` raises a type error. The
+> silent half is the dangerous one; the loud half is why `EA17` is
+> embedded-only.
 >
-> **Version labels, because this file carries two vintages.** The rest of this
-> page describes `samyama` **0.6.1** embedded against the **1.7.0** server,
-> which is what `pyproject.toml` resolved when notes 1-11 were written. This
+> **Version labels, because this file carries two vintages.** Notes 1-11
+> describe `samyama` **0.6.1** embedded against the **1.7.0** server, which is
+> what `pyproject.toml` resolved when they were written; notes 12, 13 and 13b
+> are the 1.7.1 vintage. This
 > note was measured against **1.7.1** embedded, the floor #104 landed. So the
 > comparison below is 1.7.0 server against 1.7.1 embedded, and
 > the conclusion "the server is the one that is wrong" is really "the server at
@@ -590,10 +602,10 @@ robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
 that the 1.7.0 server executes. The options are an engine that does it
 (embedded 1.7.1 does), or not asking the question over HTTP.
 
-**`EA17` therefore needs the 1.7.1 floor**, which #104 landed. It needs an engine at 1.7.1, both for this
-and because its per-leg second `WITH` introduces new aliases -- note 10's shape,
-which 0.6.1 rejects. `pyproject.toml` declares `samyama>=1.7.1` since #104, so
-the floor no longer admits a build on which `EA17` fails outright.
+**`EA17` therefore needs the `samyama>=1.7.1` floor that #104 landed** -- for
+this note, and because its per-leg second `WITH` introduces new aliases, which
+is note 10's shape and 0.6.1 rejects. The floor no longer admits a build on
+which `EA17` fails outright.
 
 `tests/test_engine_version.py` reads that floor and re-runs note 11's
 reproduction, so a downgrade fails loudly rather than silently changing what

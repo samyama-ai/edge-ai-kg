@@ -250,10 +250,15 @@ one command.
 A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
 and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
-2026-09-09 with `python -m benchmarks.snapshot` (#45). 16 of the 17 catalog
-queries then present were verified to return rows against the imported snapshot; `EA17`
-needs variable-length traversal, which the 1.7.0 server does not do (engine
-note 12).
+2026-09-09 with `python -m benchmarks.snapshot` (#45).
+
+**16 of the 17 catalog queries that existed on that date** were verified to
+return rows against the imported snapshot. The seventeenth was `EA17`, which
+raises there rather than returning nothing: the 1.7.0 server rejects `size(r)`
+on a variable-length relationship (engine note 12). `EA18` and `EA19` post-date
+the snapshot run and were **not** part of it, so this paragraph describes 17
+queries deliberately -- restating it as 19 would claim a verification nobody
+performed.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
 below a fresh build's 25,150 / 76,303: it was exported from an earlier build and
