@@ -43,7 +43,7 @@ question of an alerting theme this repo does not otherwise have. That is a
 reason to decide #113 and this together, not a reason to pretend the
 dependency is absent.
 
-## The three reasons against, answered one at a time
+## The three reasons against, taken one at a time
 
 **1. "No upstream supplies it, so a `Site` spine would be invented wholesale."**
 True, and unchanged. What is answerable is the risk behind it — that generated
@@ -83,8 +83,8 @@ register rather than demonstrating a question.
 
 `alerting-scope.md` named the join point in advance, and this follows it:
 
-> *"If the decision is revisited, the join point is `Deployment`, not `Sensor`
-> and not `Board`."*
+> *"**If the decision is revisited**, the join point is `Deployment`, not
+> `Sensor` and not `Board`."*
 
 `Deployment` it is. A deployment is one installed instance — this variant, on
 this board, with these measurements — while a `Board` is a product type that

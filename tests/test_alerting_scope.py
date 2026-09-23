@@ -378,3 +378,40 @@ def test_the_operator_name_clash_still_exists(fleet):
         "`Operator` no longer looks like an ONNX operator, so the name-clash "
         "warning in docs/alerting-scope.md may no longer apply."
     )
+
+
+def test_every_quote_from_the_decline_is_verbatim():
+    """`location-scope.md` argues against a page it quotes; the quotes must hold.
+
+    The reversal's whole method is "here is what the decline said, and here is
+    what changed". A quote that has drifted from its source -- even by a
+    dropped `**` -- makes the argument look like it is answering something
+    nobody wrote, and this is the one kind of error a reader cannot catch
+    without opening both files.
+
+    Only block-quoted, italicised strings are checked, which is how that page
+    marks a quotation from another document. Whitespace and the `> ` prefix
+    are normalised, because line wrapping is not part of the quote.
+    """
+    import re
+
+    reversal = (ROOT / "docs" / "location-scope.md").read_text(encoding="utf-8")
+    decline = (ROOT / "docs" / "alerting-scope.md").read_text(encoding="utf-8")
+
+    def flatten(text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"^> ?", "", text, flags=re.MULTILINE)).strip()
+
+    source = flatten(decline)
+    quotes = [quoted
+              for block in re.findall(r"(?:^> .*\n)+", reversal, re.MULTILINE)
+              for quoted in re.findall(r'\*"(.+?)"\*', flatten(block), re.DOTALL)]
+    assert quotes, (
+        "no quotations found in docs/location-scope.md. Either the page stopped "
+        "quoting the decline -- in which case its argument needs re-reading -- "
+        "or the `> *\"...\"*` convention changed and this test with it.")
+    missing = [q for q in quotes if q not in source]
+    assert not missing, (
+        f"docs/location-scope.md quotes {missing} as coming from "
+        f"docs/alerting-scope.md, and that text is not in it. Copy the "
+        f"sentence again rather than paraphrasing it: the reversal's argument "
+        f"rests on answering what the decline actually said.")
