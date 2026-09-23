@@ -11,8 +11,7 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 ![Edge AI KG — the catalog questions answered](demo/edgeai-questions.gif)
 
-*16 of the 17 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing one is `EA17`, which was added after this was recorded (issue #35, PR #96) rather than left
-out of it. The last four run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+*16 of the 19 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (issue #35, PR #96), `EA18` (#37) and `EA19` (#40), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
 *Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
@@ -127,29 +126,42 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 6 of the 17 catalog queries return rows**, 11 come
+**Against the HTTP server, 6 of the 19 catalog queries return rows**, 13 come
 back empty, none error:
 
 | | Queries |
 |---|---|
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
-| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17` |
+| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19` |
+
+`EA18` and `EA19` are the two entries here **not** from the server run, which
+predates both. Their place in the table is **measured embedded**, against the
+real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
+query and compares the result to this table. **Over HTTP it is expected, not
+measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
+`Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
+`EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
+build. This section already records that an earlier claim here did not survive
+re-measurement, so the distinction is kept rather than smoothed over.
 
 Re-measured 2026-09-09, server 1.7.0 against embedded 1.7.1 over the same real
-layer: the partition above is identical on both. `EA10` and `EA12` are empty on
-*both* — they lost their rows to an upstream ONNX Runtime refresh, not to a
-build difference, which an earlier version of this section reported as a
-divergence by comparing a fresh embedded run against a recorded server figure.
+layer: the partition above is identical on both, for the seventeen queries that
+existed then — `EA18` and `EA19` are covered by the embedded check only. `EA10`
+and `EA12` are empty on *both* — they lost their rows to an upstream ONNX
+Runtime refresh, not to a build difference, which an earlier version of this
+section reported as a divergence by comparing a fresh embedded run against a
+recorded server figure.
 
 **"Identical" is a claim about this table, not about the two builds.** On the
 **full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
-comparing row *content*: row counts match for 16 of 17 (`EA17` raises on the
-server, see below), and **seven queries return the same number of different
-rows** — `EA01`, `EA02`, `EA08`, `EA09`, `EA10`, `EA11`, `EA13`. Every one is a
-tie under `ORDER BY … LIMIT`, where an arbitrary N of many equal-ranked rows
-comes back, except `EA10`, which differs in the sixteenth significant digit of a
-float. Those are not different answers, but they are not "no disagreements"
-either, and comparing lengths would have hidden all seven.
+comparing row *content*: row counts match for 16 of the 17 in the catalog on
+that date (`EA17` raises on the server, see below; `EA18` and `EA19` were added
+afterwards and are not in this run), and **seven queries return the same number
+of different rows** — `EA01`, `EA02`, `EA08`, `EA09`, `EA10`, `EA11`, `EA13`.
+Every one is a tie under `ORDER BY … LIMIT`, where an arbitrary N of many
+equal-ranked rows comes back, except `EA10`, which differs in the sixteenth
+significant digit of a float. Those are not different answers, but they are not
+"no disagreements" either, and comparing lengths would have hidden all seven.
 
 **This does not contradict the engine-notes section below.** That section
 describes `samyama` 0.6.1, where `EA01`, `EA02` and `EA04` were wrong against
@@ -306,11 +318,12 @@ Two things worth knowing before you quote the number:
   76,303 a fresh build produces. It was exported from a slightly earlier build,
   and `data/` is not pinned (see `docs/build-manifest.json`).
 
-16 of the 17 catalog queries were verified to return rows against the imported
-snapshot, not just against a freshly-loaded graph — re-check with
-`--verify-queries` below. The exception is `EA17`, which needs an engine that
-walks variable-length paths; the 1.7.0 server does not (engine note 12), and it
-raises there rather than quietly answering one hop deep.
+16 of the 17 catalog queries then present were verified to return rows against
+the imported snapshot, not just against a freshly-loaded graph — re-check with
+`--verify-queries` below. `EA18` and `EA19` postdate that run. The exception is
+`EA17`, which needs an engine that walks variable-length paths; the 1.7.0 server
+does not (engine note 12), and it raises there rather than quietly answering one
+hop deep.
 
 Reproduce, including the export side (0.63 s, 989 KB):
 
@@ -333,19 +346,29 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 ## The query catalog
 
-17 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
-the question it answers and why it's awkward without a graph. All 17 return
-rows against the **full** graph on the **embedded** build — median 5.8 ms,
-slowest `EA17` at 95 ms, at `--scale 1.0`. Over HTTP it is 16 of 17: `EA17`
-raises on the 1.7.0 server (engine note 12).
+19 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
+the question it answers and why it's awkward without a graph. On the
+**embedded** build, 18 of the 19 return rows against the **full** graph —
+median 5.8 ms, slowest `EA17` at 95 ms, at `--scale 1.0`. Over HTTP it is 17:
+`EA17` raises on the 1.7.0 server (engine note 12).
+
+The other one is `EA18`, which asks which deployments miss a clinical task's
+latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs
+are inside budget, the worst at 54.5% of it — that is a property of the data
+rather than of the engine, so it holds wherever the query runs. The empty result
+is the answer rather than a gap, and `tests/test_latency_budget.py` pins both
+the zero and the reason for it.
 
 (Re-measured at 1.7.1 over 17 queries with
 `python -m benchmarks.run_benchmark`; the previous 14 ms / 73 ms pair was 16
 queries at 0.6.1 and is not comparable — the engine moved and so did the
-catalog. These two are hand-recorded and **not pinned by a test**, unlike the
-node and edge counts on this page, which `tests/test_published_counts.py`
-checks: they are machine-dependent, so the command is the thing to
-trust, not the numbers. Expect them to drift.)
+catalog. `EA18` and `EA19` postdate that run. Timed separately on 2026-09-21,
+embedded 1.7.1 at `--scale 1.0`, median of five after one warm-up: `EA18` 37.5
+ms (36.9 ms when first recorded), above the median and well under `EA17`, and
+`EA19` 0.1 ms. These figures are hand-recorded and **not pinned by a test**,
+unlike the node and edge counts on this page, which
+`tests/test_published_counts.py` checks: they are machine-dependent, so the
+command is the thing to trust, not the numbers. Expect them to drift.)
 
 Against `--layers real` only 6 return rows. Which six is
 [tabulated under Data](#data-whats-real-whats-synthetic) — that table is the
@@ -375,6 +398,8 @@ engine that walks variable-length paths**, which the 1.7.0 server does not
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
 | **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12)**:** this sensor stops — what stops with it, and what stops *only* because of it? |
+| **EA18** | **EMPTY ON THIS FLEET:** which deployments miss a clinical task's latency budget, and which operators have no kernel on their accelerator? |
+| **EA19** | **COMPLIANCE:** this sensor fails — which certifications does that touch, through the tasks that require it? |
 
 ## Engine notes
 
@@ -435,7 +460,7 @@ returns plausible rows is not evidence that it is right.
 etl/          onnx_catalog.py, ort_kernels.py, mlperf_tiny.py, real_layer.py (real)
               generate.py (synthetic) + loader.py
 schema/       edge_ai_kg.cypher — indexes and documented relationship shapes
-benchmarks/   the 17-query catalog + runner
+benchmarks/   the 19-query catalog + runner
 mcp_server/   7 MCP tools shaped around deployment questions
 demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording

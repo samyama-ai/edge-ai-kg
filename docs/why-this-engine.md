@@ -94,7 +94,7 @@ Two practical notes, both measured:
   signature, and it is exactly the "returns nothing rather than erroring" shape
   `engine-notes.md` catalogues.
 
-**Measured by absence, still true:** of the 17 catalog queries, two (`EA07` and
+**Measured by absence, still true:** of the 19 catalog queries, two (`EA07` and
 `EA17`) use a variable-length path and none uses `shortestPath` or any of the
 algorithms above. They are available and unused.
 
@@ -190,7 +190,7 @@ floor was `samyama>=0.6.0`, which admitted that build; **#104 raised it to
 `>=1.7.1`**, so convergence is **available**, not hypothetical, on every build
 this repo now allows.
 
-**But this repo does not use it.** The catalog is 17 Cypher queries and not one
+**But this repo does not use it.** The catalog is 19 Cypher queries and not one
 of them is a vector search. The only vector code here is
 `benchmarks/vector_probe.py`, which exists to *probe* the feature for this page
 and is imported by nothing — an earlier version of this sentence said a grep
@@ -296,7 +296,7 @@ existed, and the contract test was written to permit exactly that phrasing.
 | ~48K nodes/s, ~3.0K edges/s ingest | **Measured** | `python -m benchmarks.ingest` |
 | `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
 | | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
-| 17-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` for EA01-EA16; `pytest tests/test_blast_radius.py` for EA17, which needs its own oracle |
+| 19-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` for EA01-EA16; `pytest tests/test_blast_radius.py` for EA17, `pytest tests/test_latency_budget.py` for EA18 and `pytest tests/test_certification_alerts.py` for EA19, each of which needs its own oracle |
 | Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Unmeasured** | #47 — and Memgraph is the likelier winner |

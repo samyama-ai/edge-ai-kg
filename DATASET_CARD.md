@@ -55,7 +55,7 @@ library's coverage) and **`Deployment`** (one variant landed on one board).
 
 | Task | Description |
 |---|---|
-| Graph query benchmarking | 17-query catalog with recorded questions, timings and expected shapes |
+| Graph query benchmarking | 19-query catalog with recorded questions, timings and expected shapes |
 | Multi-hop retrieval / GraphRAG | Dense, typed, semantically meaningful multi-hop paths over a technical domain |
 | Anti-join / negation evaluation | "Which operator has *no* kernel here" — coverage-gap reasoning |
 | Impact analysis | Blast radius of removing a single node (a dropped kernel) |
@@ -251,7 +251,7 @@ A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
 and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 2026-09-09 with `python -m benchmarks.snapshot` (#45). 16 of the 17 catalog
-queries were verified to return rows against the imported snapshot; `EA17`
+queries then present were verified to return rows against the imported snapshot; `EA17`
 needs variable-length traversal, which the 1.7.0 server does not do (engine
 note 12).
 

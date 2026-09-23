@@ -445,6 +445,170 @@ WITH "ClinicalTask" AS kind, count(thing) AS affected,
 RETURN kind, affected, only_via_me, nearest
 """.replace("{subject}", f'"{EA17_SUBJECT}"'),
     },
+    {
+        "id": "EA18",
+        "title": "SILENT DEGRADATION: over the latency budget, and why",
+        "question": ("Which deployments miss the latency budget of a clinical "
+                     "task they serve, and which of their operators have no "
+                     "kernel on the accelerator they run on?"),
+        "why_graph": (
+            "The alert nobody can raise today. Nothing about the sensor "
+            "changes and nothing about the reading changes -- the device keeps "
+            "reporting healthy -- but an operator with no kernel falls back to "
+            "the CPU and the budget is gone. The measurement and the budget sit "
+            "on different labels three hops apart (`Deployment` to "
+            "`ModelVariant` to `Model` to `ClinicalTask`), and the cause sits "
+            "on a fourth branch through `USES_ACCELERATOR`. A threshold system "
+            "watching latency sees the symptom; only the graph names the "
+            "operators responsible in the same row."),
+        # `collect(CASE ... ELSE NULL END)` drops the nulls -- asserted on
+        # every call by `tests/test_latency_budget.py::run_ea18`, not assumed --
+        # so a deployment over budget with every kernel present comes back with
+        # `[]` rather than being filtered out. That case is the point: over budget and
+        # *not* because of fallback is a different alert, and dropping those
+        # rows would report the cause as universal.
+        #
+        # `d.latency_ms > t.latency_budget_ms` compares a float property with an
+        # int one. Engine note 4 is the int/float coercion weakness -- a literal
+        # whose type does not match the column, or an int sentinel in `min()`;
+        # this is property-to-property, and it was checked rather than assumed
+        # -- 309.291 > 200 is true on 1.7.1, as are the `toFloat()` and literal
+        # spellings.
+        #
+        # `sum(CASE ...)` is engine note 11's shape, which returns a different
+        # type on each build. Nothing here filters on `fallback_ops`, it is only
+        # ordered by, so the note's silently-dropped `WHERE` cannot apply. Do
+        # not add `WHERE fallback_ops > 0` without reading that note.
+        #
+        # The second and third `WITH`s introduce new aliases -- engine note
+        # 10's shape, which raised on embedded 0.6.1. It does not on 1.7.1:
+        # `tests/test_latency_budget.py` runs this embedded and passes. So
+        # `EA18` is deliberately **not** in `NOTE_10_QUERIES`: the mark would
+        # XPASS on every run and excuse nothing, and on 0.6.1 this query was
+        # never run at all. It depends on the 1.7.1 floor (#105), as `EA17`
+        # does; the note records this under "EA18 (#37)".
+        #
+        # `over_by_ms` is computed in its own `WITH`, not beside the
+        # aggregates. Engine note 13b: an expression mixing a grouping key with
+        # an aggregate in the same projection returns NULL, silently -- so
+        # `d.latency_ms - min(budget_ms)` alongside them gave a null column and
+        # an ORDER BY on nothing.
+        #
+        # A deployment whose model solves several breached tasks does not get
+        # an inflated `fallback_ops`, but not because the duplicate task paths
+        # collapse -- they do not. The first `WITH` groups by the deployment
+        # and operator *properties* (never the bare nodes, per note 9) while
+        # `t` is still bound, so `count(k.id)` is multiplied by the number of
+        # breached tasks: one operator with one kernel and two breached tasks
+        # gives `kernels_here = 2`. What saves the count is that the second
+        # `WITH` only asks whether it is **zero**, and a multiple of zero is
+        # zero -- so the operator is either covered or it is not, whatever the
+        # multiplier. `operators` is a `collect` over the same grouping, so it
+        # is not duplicated either. The generator emits one `SOLVES` per model
+        # today, so none of this can arise yet, which is why it is written down
+        # rather than tested.
+        #
+        # `min(budget_ms)` across several breached tasks takes the **tightest**
+        # budget, which maximises `over_by_ms`. That is the intended reading --
+        # the deployment has to satisfy every task it serves, so the strictest
+        # one is the binding constraint -- and it is stated here because the
+        # alternative (the budget of the worst-served task) is just as
+        # plausible to a reader and would give a different number.
+        #
+        # Ordered by `over_by_ms`, not by `fallback_ops`. Sorting on the
+        # fallback count puts the zero-fallback rows last, so on a fleet with
+        # more than 20 breaches `LIMIT 20` would truncate exactly the rows that
+        # are over budget for some *other* reason -- the more surprising alert,
+        # and the one this query is careful to keep. Overshoot is also the
+        # ordering an operator wants: worst breach first. One key, because
+        # engine note 3b drops every key after the first.
+        #
+        # The trailing re-bind of `a` is note 1's shape and is validated at
+        # `--scale 1.0` by
+        # `tests/test_latency_budget.py::test_ea18_matches_ground_truth_at_full
+        # _scale_with_an_injected_breach`, which raises one deployment's latency
+        # over its task's budget so the query has rows at that cardinality and
+        # compares them against Python. Removing the join fails it.
+        #
+        # On the shipped fleet this returns **no rows**: measured at
+        # `--scale 1.0`, all 1,440 (deployment, task) pairs are inside budget,
+        # the worst at 54.5% of it. That is the honest answer, not a broken
+        # query -- `tests/test_latency_budget.py` proves it fires where a
+        # breach exists, and pins the zero.
+        "cypher": """
+MATCH (t:ClinicalTask)<-[:SOLVES]-(m:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)-[:USES_ACCELERATOR]->(a:Accelerator)
+WHERE d.latency_ms > t.latency_budget_ms
+MATCH (m)-[:USES_OPERATOR]->(op:Operator)
+OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op), (k)-[:RUNS_ON]->(a)
+WITH d.id AS deployment, d.latency_ms AS latency_ms, op.id AS op_id,
+     op.name AS op_name, min(t.latency_budget_ms) AS budget_ms, count(k.id) AS kernels_here
+WITH deployment, latency_ms, min(budget_ms) AS budget_ms,
+     sum(CASE WHEN kernels_here = 0 THEN 1 ELSE 0 END) AS fallback_ops,
+     collect(CASE WHEN kernels_here = 0 THEN op_name ELSE NULL END) AS operators
+WITH deployment, latency_ms, budget_ms, latency_ms - budget_ms AS over_by_ms,
+     fallback_ops, operators
+RETURN deployment, latency_ms, budget_ms, over_by_ms, fallback_ops, operators
+ORDER BY over_by_ms DESC
+LIMIT 20
+""",
+    },
+    {
+        "id": "EA19",
+        "title": "COMPLIANCE: this sensor fails -- which certifications does that touch?",
+        "question": ("Sensor `sensor:00000` fails. Which certifications are "
+                     "implicated, through the clinical tasks that require it?"),
+        "why_graph": (
+            "The difference between an ops ticket and a reportable event. "
+            "`Certification` and `Sensor` share no edge: they meet only through "
+            "`ClinicalTask`, which `REQUIRES_SENSOR` on one side and is "
+            "`GOVERNED_BY` on the other. A table of sensors cannot answer it "
+            "without knowing to join through tasks, and for a medical or "
+            "industrial device that join decides who has to be told, and how "
+            "fast."),
+        # Deliberately one linear pattern, no `OPTIONAL MATCH` and no
+        # re-binding. `EA17` needs note 1's trailing-rebind shape because an
+        # anti-join has no other spelling on this build; this question does
+        # not, so it does not carry the risk. That is worth stating rather
+        # than leaving the next reader to wonder why two neighbouring alerting
+        # queries look so different.
+        #
+        # Grouped by the three `Certification` properties rather than by the
+        # node: note 9 says `count(DISTINCT cert)` over a multi-variable MATCH
+        # returns rows of 1, so the grouping key has to be properties.
+        #
+        # The `DISTINCT` inside `count(DISTINCT t.id)` is **not** load-bearing
+        # on today's data and was checked rather than assumed: the pattern
+        # yields one row per (task, certification) pair, so `count(t.id)`
+        # returns the same number, and removing it fails nothing. It stays as
+        # insurance against a second `REQUIRES_SENSOR` edge between the same
+        # pair, which the loader does not currently produce -- said plainly,
+        # because a comment claiming a guard is load-bearing when it is not is
+        # how the next person leaves a real one out.
+        #
+        # An unknown sensor id yields no rows rather than an error, the same
+        # shape `EA01` and `EA17` have.
+        #
+        # `ORDER BY tasks_affected DESC LIMIT 20` has no tiebreaker, and note
+        # 3b forbids a second key. It does not matter here: the generator emits
+        # six certifications at every scale, so a sensor implicates at most six
+        # rows and `LIMIT 20` never truncates -- ties change the order, never
+        # the set. `tests/test_certification_alerts.py` compares sorted rows and
+        # pins the six, so a catalog that outgrows the limit fails there first.
+        #
+        # The subject is hardcoded, like `EA17`'s. Neither has a parameterised
+        # tool in `mcp_server/server.py`, and that is a gap rather than an
+        # oversight to hide: the MCP surface covers none of the alerting
+        # queries yet, and exposing them is #49's scope.
+        "cypher": """
+MATCH (s:Sensor)<-[:REQUIRES_SENSOR]-(t:ClinicalTask)-[:GOVERNED_BY]->(cert:Certification)
+WHERE s.id = "sensor:00000"
+WITH cert.name AS certification, cert.body AS body, cert.class AS cert_class,
+     count(DISTINCT t.id) AS tasks_affected
+RETURN certification, body, cert_class, tasks_affected
+ORDER BY tasks_affected DESC
+LIMIT 20
+""",
+    },
 ]
 
 BY_ID = {q["id"]: q for q in QUERIES}

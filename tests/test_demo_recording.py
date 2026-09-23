@@ -164,10 +164,14 @@ def test_the_recording_shows_the_current_real_kernel_count(fresh):
 # needs `asciinema` and `agg` (#30 owns that).
 #
 # This is not a general excuse list. Each entry is a query the recording
-# predates, and the README caption is worded to match -- "16 of the 17 catalog
-# queries run end to end", not "all". If the caption ever says "all" again while
-# this set is non-empty, `test_the_readme_caption_does_not_overclaim` fails.
-ADDED_AFTER_THE_RECORDING = {"EA17"}   # #35, added 2026-09-09
+# predates, and the README caption is worded to match -- it counts rather than
+# saying "all". The exact numbers are derived from this set and the catalog
+# size, and are asserted by `test_the_readme_caption_does_not_overclaim`, which
+# is why they are not repeated here: quoting them went stale the moment `EA18`
+# landed and the caption moved from "16 of the 17" to "16 of the 18".
+ADDED_AFTER_THE_RECORDING = {"EA17",   # #35, added 2026-09-09
+                             "EA18",   # #37, added 2026-09-15
+                             "EA19"}   # #40, added 2026-09-17
 
 
 def test_the_recording_still_covers_every_catalog_query():
