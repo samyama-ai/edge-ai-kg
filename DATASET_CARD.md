@@ -394,6 +394,32 @@ sort key *and* actually returns sorted rows. See `docs/engine-notes.md`.
 
 ---
 
+## Freshness
+
+**Refresh cadence:** The real and synthetic layers behave differently, and this
+repository has no automated refresh for either:
+- **onnx/onnx** and **microsoft/onnxruntime** are fetched from their `main`
+  branches, which move continuously with every upstream commit -- there is no
+  fixed release cadence to track, and a re-fetch will drift from what is cached
+  here (see "Out-of-scope uses" above: "It moves. Re-fetch before drawing
+  conclusions.").
+- **mlcommons/tiny_results_v1.2** is a frozen, already-published benchmark round;
+  it will not change, though MLCommons periodically publishes new rounds (later
+  numbered TinyML results) that this repo does not track.
+- The **synthetic** fleet layer has no upstream to refresh against at all -- it
+  is regenerated deterministically from `--seed`/`--scale`, not refreshed from a
+  live source.
+
+Rebuilding the real layer requires manually re-running
+`python -m etl.download_data`; there is no scheduled job that does this.
+
+**Data as of:** The cached real-source documents under `data/onnx/`,
+`data/onnxruntime/` and `data/mlperf-tiny/` were fetched 2026-08-14 (git log on
+`etl/`, corroborated by the gitignored cache files' filesystem timestamps). The
+synthetic fleet was generated the same day with `--seed 20260814` (the seed
+value is itself the generation date). `DATASET_CARD.md` was last written
+2026-08-14 and has not been updated since.
+
 ## Licensing
 
 - **This dataset and its generator**: Apache-2.0.
@@ -405,6 +431,9 @@ sort key *and* actually returns sorted rows. See `docs/engine-notes.md`.
 
 ## Citation
 
+Please cite this repository if you use it. See [`CITATION.cff`](CITATION.cff) for
+machine-readable metadata (CFF 1.2.0), which mirrors the bibtex below.
+
 ```bibtex
 @misc{edge_ai_kg_2026,
   title  = {Edge AI Deployment Knowledge Graph},
@@ -415,6 +444,10 @@ sort key *and* actually returns sorted rows. See `docs/engine-notes.md`.
   howpublished = {\url{https://git.samyama.ai/Samyama.ai/edge-ai-kg}}
 }
 ```
+
+**No DOI.** This release has not been deposited to Zenodo, so there is no DOI to
+cite. Getting one is open work -- it requires a human to make the Zenodo deposit
+(KG-06).
 
 ## Contact
 

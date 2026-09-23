@@ -77,6 +77,14 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
+    # Two `count(n)` sanity queries, used to decide whether the graph is empty.
+    # The loader lives in `benchmarks/neo4j_client.py` and the natural hero
+    # query in `benchmarks/natural_ea01.py`. Scanned because the guard's
+    # contract is "every file with Cypher is read".
+    "benchmarks/compare_neo4j.py",
+    # `NATURAL_EA01`, the hand-written hero query. Filters `m.id` and `a.id`,
+    # which every label already indexes, so it justifies nothing new.
+    "benchmarks/natural_ea01.py",
     # The engine-notes probe. Listed because it holds Cypher, and inert: every
     # probe builds its own throwaway labels (`:B2`, `:D3`, `:V4`, ...), which
     # name nothing the schema indexes. Notes 2 and 3 used to build real
