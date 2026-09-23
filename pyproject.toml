@@ -77,6 +77,13 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # a process the previous panic has not touched).
 "benchmarks/vector_probe.py" = ["S311", "S324", "S603"]
 
+# S603: the fixture module runs `sys.executable -m pytest` over a copy of the
+# root `conftest.py` in a tmp directory, to check *where* the engine skip
+# happens -- the argument list is literal and the directory is pytest's own
+# `tmp_path`. Running it is the only way to pin that property; importing the
+# fixture cannot see the difference.
+"tests/test_embedded_engine_fixture.py" = ["S603"]
+
 # BLE001/PERF203: the catalog sweep catches per-query so it reports every
 # failure rather than stopping at the first -- the same reason
 # `benchmarks/run_benchmark.py` is exempt, and the engine raises untyped errors
@@ -86,6 +93,20 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # there is no fixed argv to pass instead -- and the string comes from the person
 # running the benchmark, not from data.
 "benchmarks/snapshot.py" = ["BLE001", "PERF203", "S602"]
+
+# BLE001/PERF203: the sweep catches per query so it reports every result, and
+# both engines raise untyped errors. S110: the catalog warm-up pass ignores
+# failures on purpose -- a query one engine refuses must still warm the other,
+# and a warm-up that aborted on the first refusal would leave the timed sweep
+# measuring a cold process. No S310 here: this module opens no URLs, and an
+# ignore describing another file is worse than none.
+"benchmarks/compare_neo4j.py" = ["BLE001", "PERF203", "S110"]
+
+# BLE001: `timed` catches whatever either engine raises, because a failure is a
+# result here -- one refusal must not take the other fifteen queries with it,
+# and both engines raise untyped errors. No PERF203: the `try` wraps the repeat
+# loops rather than sitting inside them, so there is nothing for it to flag.
+"benchmarks/sweep.py" = ["BLE001"]
 
 # S310: the Neo4j URL is typed by whoever runs the comparison, like `--url`
 # everywhere else here; there is no untrusted input to sanitise. All HTTP in

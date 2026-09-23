@@ -77,6 +77,14 @@ INDEX_RE = re.compile(r"^CREATE INDEX ON :(\w+)\((\w+)\)$")
 # Every non-test file that writes Cypher. Completeness is asserted below rather
 # than trusted -- this list being short is what made an index look unused.
 CYPHER_SOURCES = (
+    # Two `count(n)` sanity queries, used to decide whether the graph is empty.
+    # The loader lives in `benchmarks/neo4j_client.py` and the natural hero
+    # query in `benchmarks/natural_ea01.py`. Scanned because the guard's
+    # contract is "every file with Cypher is read".
+    "benchmarks/compare_neo4j.py",
+    # `NATURAL_EA01`, the hand-written hero query. Filters `m.id` and `a.id`,
+    # which every label already indexes, so it justifies nothing new.
+    "benchmarks/natural_ea01.py",
     # The engine-notes probe. Listed because it holds Cypher, and inert: every
     # probe builds its own throwaway labels (`:B2`, `:D3`, `:V4`, ...), which
     # name nothing the schema indexes. Notes 2 and 3 used to build real
@@ -248,12 +256,23 @@ def test_every_file_holding_cypher_is_scanned():
     `m.family` would have had `Model(family)` reported as an orphan and deleted.
 
     `tests/` is excluded deliberately. Tests are not what an index is there to
-    serve, and letting one justify an index would make the check circular.
+    serve, and letting one justify an index would make the check circular. The
+    root `conftest.py` is excluded for the same reason -- it is test
+    infrastructure that happens not to live under `tests/`, and its only Cypher
+    is `MATCH (n) RETURN count(n.id)`, checking that a fixture's graph really
+    was emptied. The delete itself is `etl.loader.reset_graph`, which is scanned.
+
+    That exclusion is an exact match on the root file, not a pattern. A
+    `demo/conftest.py` would still be scanned, and deliberately so: a conftest
+    beside production code is as likely to be fixture plumbing as it is to be
+    something that justifies an index, and this check should ask rather than
+    assume. There is only the one today.
     """
     holding = set()
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
-        if rel.startswith((".venv/", "tests/")) or "egg-info" in rel:
+        if (rel.startswith((".venv/", "tests/")) or rel == "conftest.py"
+                or "egg-info" in rel):
             continue
         if re.search(r"\bMATCH\s*\(", path.read_text(encoding="utf-8")):
             holding.add(rel)

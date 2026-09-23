@@ -68,6 +68,8 @@ ruff check .                            # clean; config in pyproject.toml
 python -m demo.demo --fast              # 6-beat story, self-contained
 python -m demo.questions --only EA01 EA06 --fast
 python -m benchmarks.run_benchmark --only EA01 --rows 20
+python -m benchmarks.compare_neo4j --repeats 15 --natural   # head-to-head vs Neo4j (needs one running and NEO4J_PASSWORD set)
+python -m benchmarks.compare_neo4j --repeats 15 --force-wipe # same, against a server that already holds a fleet
 python -m etl.loader --layers real      # load only the public-source subgraph
 python -m etl.loader --no-verify        # skip the post-load edge count
 
