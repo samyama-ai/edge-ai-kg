@@ -118,7 +118,7 @@ real/synthetic split is therefore *queryable* (see EA16), not a README claim.
 
 ### The query catalog is the single source of truth
 
-`benchmarks/queries.py` holds 16 entries (`EA01`–`EA16`), each with
+`benchmarks/queries.py` holds 19 entries (`EA01`–`EA19`), each with
 `question` / `why_graph` / `cypher`, exported as `QUERIES` and `BY_ID`. It is
 consumed by `benchmarks/run_benchmark.py`, `demo/questions.py` and
 `tests/test_correctness.py`. Editing a query changes the benchmark, the demo and
@@ -160,14 +160,25 @@ The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
 `docs/engine-notes.md` carries a banner saying the same; rewriting the notes
-themselves is #94.
+themselves is #109 (which replaces #94, closed unmerged).
 
 `tests/test_engine_version.py` keeps the floor honest -- it asserts the
 declared dependency, the running engine, **and** re-runs note 11's own
 reproduction, because note 11 does not raise. On a downgraded build it makes
 `EA04` return confident extra rows rather than fail.
 
-The rules that follow from notes 1-9:
+**Notes 12, 13 and 13b belong with 1-9, not with the carve-out above** -- all
+three return wrong rows rather than erroring. Note 12: the 1.7.0 server does
+not *traverse* a variable-length relationship the embedded 1.7.1 build walks,
+and it does not error, it returns fewer rows -- which is why `EA17` is
+embedded-only rather than reshaped. Notes 13 and 13b were measured on embedded
+1.7.1 while writing `EA18`: a `WHERE` on an `OPTIONAL MATCH` mentioning a
+**`WITH`-introduced** alias drops the unmatched rows, and an expression mixing
+a grouping key with an aggregate in one projection returns `NULL`. Note 13 has
+a rule in the list below; 13b's workaround is to compute the expression one
+`WITH` later.
+
+The rules that follow from notes 1-9 and 13:
 
 - **Project through `WITH` before `RETURN`, and sort on the `WITH` alias.**
   `ORDER BY` on a `RETURN`-introduced alias is silently dropped. With `LIMIT`
@@ -186,6 +197,11 @@ The rules that follow from notes 1-9:
   with `WITH` + an aggregate to deduplicate.
 - **No negated pattern predicates.** Anti-joins are
   `OPTIONAL MATCH ... WITH ... count(k) AS n ... WHERE n = 0`.
+- **Never filter an `OPTIONAL MATCH` on a `WITH`-introduced alias.** It drops
+  the unmatched rows -- the `OPTIONAL` becomes an inner join, silently, which
+  turns the anti-join above into the opposite of what it is for (note 13). A
+  literal or a `MATCH`-bound alias is safe; if a `WITH` alias is unavoidable,
+  `collect` and filter after the aggregation.
 - **Keep numeric literal types matching the stored property type.** `WHERE x > 0.5`
   against an int-typed property returns nothing; `min(CASE ... ELSE 999999 END)`
   returns the int sentinel while `999999.0` works.

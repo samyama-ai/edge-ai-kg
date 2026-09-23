@@ -128,14 +128,14 @@ def test_the_decision_document_exists():
 
 
 def test_the_pending_claim_about_ea17_matches_the_catalog():
-    """The doc says `#35` is not delivered and that a test pins it. This is it.
+    """The doc says `#35` is delivered as `EA17`, and this is what pins it.
 
-    Without this the sentence is unenforced -- and the page asserts enforcement,
-    which is worse than silence. If #96 merges, `EA17` joins the catalog and
-    "the catalog is `EA01`-`EA16`" becomes false with the suite green; if #96 is
-    abandoned, the sentence stays correct and this keeps passing.
+    Without this the sentence is unenforced -- and the page asserts
+    enforcement, which is worse than silence. It fails in both directions: if
+    the page claims `#35` is pending while `EA17` is in the catalog, and if
+    `EA17` is reverted while the page still says it is delivered.
 
-    Keyed on the catalog rather than on the PR's state, because the catalog is
+    Keyed on the catalog rather than on any PR's state, because the catalog is
     what the sentence actually claims and is the thing this repo can see.
     """
     from benchmarks.queries import BY_ID

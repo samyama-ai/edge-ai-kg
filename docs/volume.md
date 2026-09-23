@@ -68,13 +68,75 @@ kernel. They diverge:
 `EA11` is the anti-join written as
 `OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op), (k)-[:RUNS_ON]->(a:Accelerator)`
 — the comma-separated multi-variable shape `docs/engine-notes.md` note 1 warns
-about. It is the only catalog query whose cost grows faster than the graph, and
-the shape is the plausible reason.
+about. Until `EA17` arrived it was the only catalog query whose cost grows
+faster than the graph, and the shape is the plausible reason. `EA17` is now
+steeper still — see below.
 
 **At 10.0 it is 4.4 s** — slow but usable, and the gap to `EA08` is now 3.2x
 where at scale 1.0 the two were identical. This is a trajectory rather than a
 problem today; extrapolating the same exponent to 100x puts `EA11` in minutes
 while `EA08` stays in seconds.
+
+### `EA17` is the new most expensive query, and it grows faster than `EA11`
+
+Added with `EA17` (issue #35, PR #96) and measured separately, because the run
+above predates it. Same machine, **embedded**, schema applied, catalog warmed,
+median of 5, 2026-09-10.
+
+Run mode is part of the result rather than a detail: on the **1.7.0** server
+`EA17` raises as soon as its traversal binds anything (engine note 12), so
+these figures cannot be reproduced over `--url` against that build. Where
+nothing binds — `--layers real`, which has no `Sensor` — it returns 0 rows
+*without* erroring, so "cannot run over HTTP at all" would be too strong.
+
+Whether a **1.7.1 server** still refuses it is unmeasured: the published image
+`ghcr.io/samyama-ai/samyama-graph:1` is 1.7.0, and no 1.7.1 server has been
+run here. Note 12's title names 1.7.0 for that reason, and this paragraph
+should not be read as covering a build nobody has tested.
+
+**Different engine build from the rest of this page.** Everything above was
+measured on `samyama` **0.6.1**, the build in use when that table was taken;
+this one on **1.7.1**, which `pyproject.toml` has floored since #104.
+Growth columns are comparable, absolute milliseconds across the two tables are
+not — and the shared queries show it: `EA11` reads 33 ms here against 118 ms
+above, `EA08` 48 ms against 118 ms. Read each table's growth column, not across
+them.
+
+| query | 1.0 | 2.0 | growth |
+|---|---:|---:|---|
+| `EA17` | **95 ms** | **431 ms** | **×4.5 — superlinear** |
+| `EA11` | 33 ms | 98 ms | ×2.9 — superlinear |
+| `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
+| catalog total (all 17, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear |
+
+The graph doubles between those columns — 76,303 edges at 1.0 against 152,717
+at 2.0, and 25,150 nodes against 48,907 — so ×2 is the linear line. Everything
+above it is superlinear in the graph, which is what the column is for.
+
+**An earlier version of this table was measured without indexes** and is
+withdrawn: it read `EA17` 105/480 ms and a 340 ms catalog total, and had
+`EA13` at 22.8 ms where the indexed figure is 0.7 ms. The load helper used here
+did not call `apply_schema`, the same omission that invalidated the first Neo4j
+comparison in #47. Both tables above are indexed.
+
+`EA17` is the slowest query in the catalog at both sizes and the only one whose
+cost grows faster than `EA11`. The shape explains it: **four of its five legs**
+carry an unbounded `*0..` in the main pattern *and* another inside an
+`OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
+has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
+`etl/generate.py` samples each sensor's chain from one shared pool in random
+order, so one sensor contributes `s7 -> s1` and another `s1 -> s7`.
+Relationship-uniqueness stops it looping forever. **Why that is expensive is
+inferred, not measured**: `min(size(r))` asks for one shortest path per
+endpoint, and a planner doing a breadth-first search would not need to see the
+others — so the ×4.5 growth is consistent with enumerating them, but nothing
+here inspects a plan. The engine exposes no `EXPLAIN`, so confirming it would
+mean instrumenting the engine rather than the query.
+
+**Not run above 2.0.** Both figures are well inside a demo's patience;
+extrapolating ×4.5 puts `EA17` past a second somewhere around 3.0 and into
+`EA11`-at-10.0 territory soon after. Anyone loading a larger fleet should time
+it before putting it in front of someone.
 
 ## Correctness at scale — the half that matters more
 

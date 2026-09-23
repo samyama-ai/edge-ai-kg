@@ -1,8 +1,24 @@
 """Zero rows is an answer, so the catalog is driven to it deliberately.
 
-All sixteen catalog queries return rows against the shipped graph. That is what
-a demo needs and not what a test needs: a query only ever run against data that
+Every catalog query returns rows against the shipped graph. That is what a demo
+needs and not what a test needs: a query only ever run against data that
 satisfies it cannot tell "the answer is none" from "the query is broken" (#27).
+
+That claim is checked rather than assumed --
+`tests/test_correctness.py::test_every_catalog_query_runs_and_returns_rows`
+sweeps the catalog -- though it is checked for 17 of the 19. Two ids are
+excused there, both named in that module's `EMPTY_IS_A_VALID_ANSWER` with the
+test that pins each zero: `EA04`, whose combination may legitimately not occur
+at the fixture's scale, and `EA18`, which is empty because no deployment in
+this fleet misses a latency budget. `EA01` and `EA02` used to be excused too,
+under a non-strict `xfail` for engine note 10; #104 raised the engine floor to
+1.7.1, the note stopped reproducing, and those marks are gone.
+
+The alerting queries keep their zero-and-one-row pairs beside their other
+fixtures rather than here: `EA18` in `tests/test_latency_budget.py` (over budget
+and within it), `EA19` in `tests/test_certification_alerts.py` (a governed task
+and an ungoverned one). This module covers the catalog queries that have no
+module of their own.
 
 It matters here more than most repos, because the catalog's central question is
 a **negative** -- operators with *no* kernel -- so an empty result is the
@@ -58,7 +74,8 @@ filters `m.id = "model:00000"` and `a.id = "accel:00001"` -- so its opening
 `MATCH` bound nothing and `[]` came back regardless of the graph. An xfailed
 test hides that; an unmarked one does not, but only if something can tell empty
 from vacuous. That something is the control, and `EA01` was the one query in
-this module without one (Tarun's review on #94).
+this module without one (Tarun's review, made on #94 before that PR was
+closed and rebuilt as #109).
 """
 import pytest
 
