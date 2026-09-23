@@ -48,9 +48,9 @@ and what does it cost me when it can't?**
 | `SignalStage` | 16 | id, name, kind, window_ms, cost_kmacs |
 | `Sensor` | 14 | id, name, modality, sample_rate_hz, channels, adc_bits |
 | `Dataset` | 12 | id, name, source, subjects, hours, license |
+| `Site` | 12 | id, name, kind, campus, region |
 | `Vendor` | 8 (+7 real) | id, name, country |
 | `Runtime` | 7 (+6 real) | id, name, version, format |
-| `Site` | 12 | id, name, kind, campus, region |
 | `Certification` | 6 | id, name, body, class |
 | `BenchmarkTask` | 0 (+4 real) | id, name, code, dataset, metric, quality_target |
 
