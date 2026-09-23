@@ -55,7 +55,7 @@ library's coverage) and **`Deployment`** (one variant landed on one board).
 
 | Task | Description |
 |---|---|
-| Graph query benchmarking | 19-query catalog with recorded questions, timings and expected shapes |
+| Graph query benchmarking | 20-query catalog with recorded questions, timings and expected shapes |
 | Multi-hop retrieval / GraphRAG | Dense, typed, semantically meaningful multi-hop paths over a technical domain |
 | Anti-join / negation evaluation | "Which operator has *no* kernel here" — coverage-gap reasoning |
 | Impact analysis | Blast radius of removing a single node (a dropped kernel) |

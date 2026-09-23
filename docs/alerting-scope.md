@@ -32,7 +32,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
 | #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #110) |
-| #36 | root cause versus symptom | no | **take** |
+| #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
 | #37 | silent degradation against a latency budget | no | **take** |
 | #40 | which certifications a failure implicates | no | **take** |
 | #42 | a worked demo beat | no | **take** |

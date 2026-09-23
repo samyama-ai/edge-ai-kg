@@ -11,7 +11,7 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 ![Edge AI KG — the catalog questions answered](demo/edgeai-questions.gif)
 
-*16 of the 19 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (issue #35, PR #96), `EA18` (#37) and `EA19` (#40), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+*16 of the 20 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA21` (#36), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
 *Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
@@ -126,27 +126,33 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 6 of the 19 catalog queries return rows**, 13 come
+**Against the HTTP server, 6 of the 20 catalog queries return rows**, 14 come
 back empty, none error:
 
 | | Queries |
 |---|---|
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
-| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19` |
+| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA21` |
 
-`EA18` and `EA19` are the two entries here **not** from the server run, which
-predates both. Their place in the table is **measured embedded**, against the
+`EA18`, `EA19` and `EA21` are the three entries here **not** from the server
+run, which predates all of them. Their place in the table is **measured
+embedded**, against the
 real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
 query and compares the result to this table. **Over HTTP it is expected, not
 measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
 `Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
 `EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
-build. This section already records that an earlier claim here did not survive
-re-measurement, so the distinction is kept rather than smoothed over.
+build. `EA21` opens on a `Sensor` too, and carries a second reason it cannot
+be read off the server run: it walks `NEXT_STAGE*0..`, the variable-length
+shape the 1.7.0 server rejects outright for `EA17` (engine note 12). Nothing
+here has run it there. This section already records that an earlier claim did
+not survive re-measurement, so the distinction is kept rather than smoothed
+over.
 
 Re-measured 2026-09-09, server 1.7.0 against embedded 1.7.1 over the same real
 layer: the partition above is identical on both, for the seventeen queries that
-existed then — `EA18` and `EA19` are covered by the embedded check only. `EA10`
+existed then — `EA18`, `EA19` and `EA21` are covered by the embedded check
+only. `EA10`
 and `EA12` are empty on *both* — they lost their rows to an upstream ONNX
 Runtime refresh, not to a build difference, which an earlier version of this
 section reported as a divergence by comparing a fresh embedded run against a
@@ -346,11 +352,13 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 ## The query catalog
 
-19 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
+20 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. On the
-**embedded** build, 18 of the 19 return rows against the **full** graph —
-median 5.8 ms, slowest `EA17` at 95 ms, at `--scale 1.0`. Over HTTP it is 17:
-`EA17` raises on the 1.7.0 server (engine note 12).
+**embedded** build, **19 of the 20 return rows** against the **full** graph at
+`--scale 1.0` — `EA21` answers in 23 ms, and the 5.8 ms median and 95 ms
+`EA17` are from the sweep taken before it. Over HTTP the count is 17 of the 19
+measured there; `EA17` raises on the 1.7.0 server (engine note 12) and `EA21`
+uses the same variable-length walk but has not been run there.
 
 The other one is `EA18`, which asks which deployments miss a clinical task's
 latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs

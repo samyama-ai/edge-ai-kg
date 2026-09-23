@@ -19,6 +19,19 @@ from __future__ import annotations
 # finding rather than an editing mistake.
 EA17_SUBJECT = "sensor:00000"
 
+# `EA20` is deliberately absent here: it is claimed by the `Site` spine PR
+# (#115), which was pushed first. A gap in the numbering costs nothing; two
+# queries sharing an id costs a silent collision in `BY_ID`, where the second
+# would overwrite the first and the catalog would simply be one query short.
+#
+# `EA21`'s alerting set: the sensors paging right now. Written once and
+# interpolated, for the same reason as `EA17_SUBJECT` -- the query names it
+# twice, and a set rewritten in one place and not the other would rank one
+# population against a different one, which reads as a finding rather than an
+# edit. `retargeted_ea20` in `tests/test_root_cause.py` is how a caller asks
+# about a different set.
+EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
+
 QUERIES: list[dict] = [
     {
         "id": "EA01",
@@ -608,6 +621,58 @@ RETURN certification, body, cert_class, tasks_affected
 ORDER BY tasks_affected DESC
 LIMIT 20
 """,
+    },
+    {
+        "id": "EA21",
+        "title": "ROOT CAUSE: twenty alerts, one fault -- which one is upstream?",
+        "question": ("These sensors are all alerting at once. Which of them is "
+                     "upstream of the others, and which are downstream "
+                     "symptoms of it?"),
+        "why_graph": (
+            "The failure that makes alerting hated is twenty pages at 3am for "
+            "one fault. Ranking them needs a model of what feeds what: sensor "
+            "A is upstream of sensor B when B's pipeline is reachable from "
+            "A's. A time-series alerting system cannot do this at all -- it "
+            "holds thresholds and history, not dependencies -- and in SQL it "
+            "is a recursive CTE over an edge table. Here it is one "
+            "reachability pattern, and the ranking falls out of counting."),
+        # `OPTIONAL MATCH`, so an alert with nothing downstream still gets a
+        # row. Not a detail: the case that proves this ranks by dependency
+        # rather than by degree is the one where the alerts are independent
+        # and every count is 0. An inner `MATCH` drops those rows, and the
+        # output then reads "no answer" instead of "no root".
+        #
+        # `s` is re-bound in **leading** position, which is not note 1's shape
+        # -- that is a *trailing* bound variable in a second `MATCH`, where the
+        # join is not enforced. Measured rather than argued: in
+        # `tests/test_root_cause.py` a sensor whose chain touches nothing else
+        # scores 0 on a fixture where an unenforced join would score 3.
+        #
+        # `*0..` includes the zero-length walk, so two sensors feeding the
+        # *same* stage each count the other. Deliberate -- they are peers, and
+        # a symmetric +1 leaves their relative order unchanged -- but it means
+        # `downstream_alerts` is "alerts I can reach", not "alerts strictly
+        # beneath me". The known-root fixture pins the asymmetric case, which
+        # is the one a reader acts on.
+        #
+        # `o.id IS NOT NULL` guards note 8b: `<>` matches a null property, so
+        # without it a `Sensor` carrying no `id` would count as downstream of
+        # everything.
+        #
+        # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts that
+        # reach the same number of others, and their order among themselves
+        # carries no meaning. `LIMIT 20` is the page a human reads; the alert
+        # set is three ids, so it never truncates.
+        "cypher": """
+MATCH (s:Sensor)
+WHERE s.id IN {alerts}
+OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
+WHERE o.id IN {alerts} AND o.id IS NOT NULL AND o.id <> s.id
+WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts
+RETURN alert, downstream_alerts
+ORDER BY downstream_alerts DESC
+LIMIT 20
+""".replace("{alerts}", "[" + ", ".join(f'"{a}"' for a in EA21_ALERTS) + "]"),
     },
 ]
 
