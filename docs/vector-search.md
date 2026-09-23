@@ -17,12 +17,13 @@
 > add_vector: 307 accepted, none failed
 > vector_search: 40 of 40 unseen operators queried, none failed
 >
-> Every unseen operator searched without panicking. docs/vector-search.md records
-> 0.6.1 panicking on the 9th of 40 here, so on this build that reproduction does
-> not reproduce -- which is a statement about the build you just ran, not about
-> any version number. Note what it does not show: the engine *accepts* the workload,
-> and nothing here says whether the nearest neighbour returned is the useful one.
-> Judging the answers is #48.
+> All 40 hold-out searches ran without panicking. docs/vector-search.md
+> records 0.6.1 panicking on the 9th of its 40, so on this build that reproduction
+> does not reproduce -- a statement about the build you just ran, not about any
+> version number. The hold-out is `min(40, len(rows))`, so 40 is this fleet's
+> share rather than a fixed 40. Note what it does not show: the engine *accepts*
+> the workload, and nothing here says whether the nearest neighbour returned is
+> the useful one. Judging the answers is #48.
 > ```
 >
 > Against 0.6.1 that same run panicked on the 9th of 40. **So the blocker is
@@ -152,7 +153,8 @@ Volume alone is fine. 336 distinct vectors index and search without complaint.
 This is a separate finding from the panic, and useful on its own.
 
 On 0.6.1 every metric panicked on the same two-call reproduction, so the
-panic was not metric-specific. Each row below runs in a **fresh process** -- recoverability
+panic was not metric-specific. Each row below runs in a **fresh process** --
+recoverability
 after a panic is uninvestigated, so sharing one would make rows 2-6
 order-dependent -- and `index accepted` is recorded separately from the panic,
 so "accepted without complaint" is a measurement rather than an inference:

@@ -28,9 +28,13 @@
 > python -m benchmarks.engine_notes_probe --scale 300
 > ```
 >
-> `--scale` is not optional for a meaningful answer: without it note 1 reports
-> INCONCLUSIVE, because its own text below says a 6-node reproduction proves
-> nothing and the default fixture is exactly that.
+> `--scale` is not optional for a meaningful answer. Without it note 1 is
+> **not run at all** -- the probe skips it and reports INCONCLUSIVE, rather
+> than running a small fixture and discarding the verdict. Its own text below
+> is why: a 6-node reproduction proves nothing, because the join bug only
+> appears once cardinalities are real. The CLI also refuses `--scale` under 10,
+> where a cartesian product and the correct answer are too close to tell
+> apart.
 >
 > **The workarounds stay for now, and this file is not yet history.** Two
 > reasons, both narrow. Notes 1-9 were measured against the **1.7.0 HTTP
@@ -482,9 +486,13 @@ was **not** this note — EA04 has a single `WITH`. See note 11.
 > needs a check that does not depend on someone noticing.
 
 **Severity when live: correctness. Silently returned rows a WHERE should have
-removed.** On 1.7.1 the aggregate is an `int` and `WHERE hits > 0` filters
-correctly; `WHERE hits > 0.0` is also correct now, where the 1.7.0 server
-returned no rows for it.
+removed.** Re-measured on embedded `samyama` 1.7.1 (2026-09-23), running the
+statement below: the aggregate comes back as an `int` (`2`, `0`), `WHERE hits
+> 0` returns `[['A', 2]]`, and `WHERE hits > 0.0` returns `[['A', 2]]` too --
+so the float literal is no longer a way to lose the row. The "1.7.0 server
+returned no rows for `> 0.0`" half of the table below is the original 2026-08-31
+measurement and has **not** been re-run; the server has not been re-probed by
+anything in this repo.
 
 Four nodes, two groups, one of which should be filtered out:
 

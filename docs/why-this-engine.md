@@ -43,22 +43,20 @@ mode a database can have:
 
 **Measured.** The hero query is written *around* note 1, which is why `EA04`
 uses conditional aggregation instead of the natural self-join. Four test
-functions were marked `xfail` because the two builds disagreed; that turned out
-to be an outdated pip engine rather than a real divergence, and pinning
-`samyama>=1.7.1` removed those marks and *that* disagreement (#56).
+functions carried `xfail` marks because the two builds disagreed — the README
+names them — and that turned out to be an outdated pip engine rather than a
+real divergence, so pinning `samyama>=1.7.1` removed the marks and *that*
+disagreement (#56). One disagreement survives on the real layer, tracked in
+#114.
 
-**Not every disagreement, though.** One survives on the real layer — the
-embedded build answers `EA08`, `EA10` and `EA12` differently from the server —
-and the 1.7.1 upgrade did not touch it. See the README.
-
-It is worth being clear about what that does *not* buy either. Notes 1-9 are the
-cost this section is about, and the rules built on them all still stand. That is
-now a narrower statement than it reads: re-probed on 2026-09-21 by the probe
-#104 landed, **none of notes 1-6, 8 and 9 reproduces on embedded 1.7.1**
-either (`python -m benchmarks.engine_notes_probe --scale 300`). 2026-09-08 is
-a different event -- #56's pip upgrade, which resolved notes 10 and 11. Note 7
-is not among
-them and has no probe -- "the `--graph` argument is ignored" is a property of
+It is worth being clear about what that does *not* buy either. Notes 1-9 are
+the cost this section is about, and the rules built on them all still stand.
+That is now a narrower statement than it reads: **none of notes 1-6, 8 and 9
+reproduces on embedded 1.7.1** either
+(`python -m benchmarks.engine_notes_probe --scale 300`). See the banner on
+[`docs/engine-notes.md`](engine-notes.md) for which build and which date each
+half of that was measured on. Note 7 is not among
+them and has no probe — "the `--graph` argument is ignored" is a property of
 the OSS HTTP path, and embedded has no tenant boundary to ignore, so it stands
 un-re-measured.
 

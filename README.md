@@ -134,9 +134,10 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA11` |
 
-**The embedded build still answers three of them differently** on the same data
-— `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports 6 and
-10. That is a divergence beyond [engine notes 10 and 11](docs/engine-notes.md),
+**The embedded build still answers three of them differently** on the same
+data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
+6 and 10. That is a divergence beyond
+[engine notes 10 and 11](docs/engine-notes.md),
 and **it is the one thing the 1.7.1 upgrade did not fix**: re-measured on
 2026-09-08 against `samyama` 1.7.1, the embedded split is unchanged at
 `EA05, EA08, EA13, EA14, EA15, EA16` returning rows and the other ten empty,
@@ -144,11 +145,11 @@ none erroring. The table above is the server's answer, which is the one a
 `--url` user sees.
 
 So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
-divergence remains open behind them — tracked in **#56's own thread**, which
-is where the row-count gap was measured, rather than as an engine note. It needs its own investigation: unlike notes 10 and 11
-it has **no minimal reproduction yet** — only the whole real layer and a
-different row count — so it is not written up as an engine note, which would
-imply a shape someone could avoid.
+divergence remains open behind them. It is tracked in **#114**, which carries
+the measurement and what would close it. It is not written up as an engine
+note because it has **no minimal reproduction yet** — only the whole real
+layer and a different row count — and a note without one would imply a shape
+someone could avoid.
 
 `EA01` and `EA02` are empty rather than erroring here, on both builds — and were
 before the upgrade too. Note 10 made them raise on the old embedded build, but
@@ -358,10 +359,17 @@ the type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
 **Both are resolved (#56).** There was nothing to file: the cause was version
 skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
 unpinned and resolved **0.6.1**, while everything else was measured against the
-1.7.0 server — a different release line, not a patch apart. The floor is now `samyama>=1.7.1`,
-neither note reproduces, and the four test functions they excused — six xfail
-reports, since two were parametrised sweeps — pass unmarked. Notes 10
-and 11 are kept in the notes file as history.
+1.7.0 server — a different release line, not a patch apart. The floor is now
+`samyama>=1.7.1` and neither note reproduces.
+
+The marks they excused came off in `d37836c`, and they were four test
+functions reporting six xfails, because two of the four are parametrised
+sweeps carrying a mark for `EA01` and one for `EA02`:
+`test_ea04_quantization_unlock_is_not_a_cartesian_product`,
+`test_every_catalog_query_runs_and_returns_rows`,
+`test_order_by_is_actually_applied` and
+`tests/test_empty_answers.py::test_ea01_zero_row_case`. All four pass
+unmarked now. Notes 10 and 11 are kept in the notes file as history.
 
 **Notes 10 and 11 have no workaround, and need none** — they are resolved, and
 the floor is what resolved them. Each of notes 1-9 is documented with a minimal
