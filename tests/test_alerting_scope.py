@@ -291,9 +291,11 @@ def test_the_site_label_carries_only_what_the_decision_allows(fleet):
 def test_vendor_country_is_the_only_near_miss_and_is_empty_where_it_is_real(fleet):
     """Named in the document so nobody mistakes it for a deployment location.
 
-    Two claims, because the earlier version of this test made neither. It was
-    called `..._is_still_the_only_near_miss` and never checked uniqueness, and
-    its value assertion passed if a single vendor out of fifteen carried one.
+    Two claims, and the name promises both: that `country` is the *only*
+    property a reader could mistake for a location, and that it is empty on
+    every real-layer vendor. A uniqueness check that never enumerates the
+    other labels, or a value check satisfied by one vendor out of fifteen,
+    would leave the document's "one near-miss" claim unenforced.
     """
     assert "country" in properties_of(fleet, "Vendor"), (
         "`Vendor.country` is gone. docs/alerting-scope.md calls it out as the "

@@ -558,14 +558,14 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             fits = 1 if (memory_kb <= b["ram_kb"] and v["size_kb"] <= b["flash_kb"]) else 0
 
             did = _rid("deploy", len(deployments))
-            # Placement draws from `site_rng`, **not** the shared `rng`. Taking
-            # it from the shared stream shifted every subsequent draw, so every
-            # deployment metric after the first changed for an unchanged seed:
-            # measured, `deploy:00001` went from latency 87.684 / power 3990.6
-            # to 78.036 / 3591.96 purely by adding this line. This module's
-            # contract is that a seed reproduces the graph byte-for-byte, and
-            # `docs/data-provenance.md`'s cost-model figures rest on it, so a
-            # new field must not be able to move an old one.
+            # Placement draws from `site_rng`, **not** the shared `rng`. A
+            # draw taken from the shared stream shifts every draw after it, so
+            # one new field moves every deployment metric at an unchanged seed:
+            # measured, `deploy:00001` reads 78.036 / 3591.96 that way against
+            # 87.684 / 3990.6 here. This module's contract is that a seed
+            # reproduces the graph byte-for-byte and
+            # `docs/data-provenance.md`'s cost-model figures rest on it, so any
+            # field added later needs its own stream for the same reason.
             #
             # One site per deployment: a deployment is one installed unit, so
             # it is in exactly one place -- which is what makes "how many of

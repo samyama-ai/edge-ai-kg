@@ -149,11 +149,10 @@ def test_there_is_more_than_one_campus_to_group_by(fleet):
 def test_site_names_stay_distinct_where_the_suffix_list_wraps():
     """Above `--scale 1.04` the suffix list runs out, and `EA20` groups by name.
 
-    Measured, not reasoned about: `SITE_SUFFIXES` holds 12 names, so the 13th
-    site is where the wrap begins. Before the wrap number was added, site 13
-    was a second `Ward 3` in the same campus as the first -- and `EA20` groups
-    by `(campus, name)`, so the two merged into one row and each
-    under-reported the other's deployments.
+`SITE_SUFFIXES` holds 12 names, so the 13th site is where the wrap begins.
+    Without the wrap number it is a second `Ward 3` in the same campus as the
+    first -- and `EA20` groups by `(campus, name)`, so the two merge into one
+    row and each under-reports the other's deployments.
 
     Checked over a range rather than at one scale, because the collision moves
     with the campus cycle: every site must be distinct by id, and distinct by
@@ -199,12 +198,11 @@ def test_a_tiny_scale_still_has_two_places_to_compare():
 def test_placing_sites_did_not_move_any_deployment_metric(operators):
     """The `Site` draw must not consume from the generator's shared stream.
 
-    It did, once. `rng.choice(sites)` inside the deployment loop shifted every
-    later draw, so adding a location silently changed the cost model: measured
-    at seed 20260814, `deploy:00001` went from latency 87.684 / power 3990.6 to
-    78.036 / 3591.96 with no other edit. `etl/generate.py`'s contract is that a
-    seed reproduces the graph byte-for-byte, and `docs/data-provenance.md`'s
-    figures rest on it.
+A `rng.choice(sites)` in the deployment loop shifts every later draw, so a
+    location silently changes the cost model: at seed 20260814 that spelling
+    gives `deploy:00001` latency 78.036 / power 3591.96 against the 87.684 /
+    3990.6 below. `etl/generate.py`'s contract is that a seed reproduces the
+    graph byte-for-byte, and `docs/data-provenance.md`'s figures rest on it.
 
     The values below are that contract, recorded from `main` before `Site`
     existed. If this fails, either a draw was added to the shared stream --
