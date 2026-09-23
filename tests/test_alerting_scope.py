@@ -22,6 +22,7 @@ stale the moment the takeable half moved.
 """
 from __future__ import annotations
 
+import collections
 import pathlib
 
 import pytest
@@ -164,7 +165,12 @@ def test_the_pending_claim_about_ea17_matches_the_catalog():
 
 
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
-    """#34, #38 and #39 were declined. A label appearing means that was reversed."""
+    """#38 and #39 stand declined; #34 was reversed for `Site` alone.
+
+    A label from any of the three families appearing here means a decision
+    moved without anyone writing it down -- which is the thing this file
+    exists to make impossible, not the thing it forbids.
+    """
     # Every declared label, not only the populated ones. A `Site` gated behind a
     # layer or a scale threshold would yield zero rows at this fixture's seed
     # and scale, reversing the #34 decision in the schema while this reported
@@ -173,7 +179,8 @@ def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
     added = {label: why for label, why in DECLINED_LABELS.items() if label in present}
     assert not added, (
         f"labels this repo decided not to add are now in the graph: {added}. "
-        f"That is not a test failure so much as a decision reversal -- update "
+        f"That is not a test failure so much as a decision reversal -- record "
+        f"it the way docs/location-scope.md records #34's, update "
         f"docs/alerting-scope.md and DATASET_CARD.md, or drop the label."
     )
 
@@ -246,6 +253,39 @@ def test_the_site_spine_is_exactly_what_was_agreed(fleet):
     targets = {tgt_label for _sl, _s, rel, tgt_label, _t, _p in fleet.edges
                if rel == "DEPLOYED_AT"}
     assert targets == {"Site"}, f"DEPLOYED_AT points at {sorted(targets)}, not Site"
+
+    # Cardinality, not just direction. `docs/location-scope.md` rests on "one
+    # installed instance, in exactly one place" -- a deployment at two sites
+    # turns EA20's per-site count into a set union and the counts stop summing
+    # to the fleet.
+    placements = collections.Counter(
+        src for _sl, src, rel, _tl, _t, _p in fleet.edges if rel == "DEPLOYED_AT")
+    multi = {did: k for did, k in placements.items() if k > 1}
+    assert not multi, (
+        f"deployments placed more than once: {sorted(multi)[:3]}. "
+        f"docs/location-scope.md commits to one site per deployment.")
+
+
+def test_the_site_label_carries_only_what_the_decision_allows(fleet):
+    """The reversal is bounded by *shape* too, not only by label name.
+
+    #34 was taken as "where a deployment sits", explicitly not as an asset
+    register: `docs/location-scope.md` says there is no move history, no
+    commissioning date, no asset tag and no person. Those would arrive as
+    properties on `Site` rather than as a new label, so `DECLINED_LABELS`
+    above cannot see them coming.
+    """
+    allowed = {"id", "name", "kind", "campus", "region", "provenance", "source"}
+    present = properties_of(fleet, "Site")
+    extra = sorted(present - allowed)
+    assert not extra, (
+        f"`Site` grew {extra}. docs/location-scope.md commits to a place and "
+        f"nothing else -- a commissioning date or an owner is the CMDB "
+        f"duplication that decision accepts as its cost. Widen the decision "
+        f"first, then this list."
+    )
+    assert "id" in present and "campus" in present, (
+        f"`Site` lost {sorted(allowed - present)}; EA20 groups by campus")
 
 
 

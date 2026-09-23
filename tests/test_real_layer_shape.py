@@ -9,7 +9,7 @@ Measured (see the README section this pins): **it is connected** -- 1,240 nodes,
 kernel registers. It is not 1,030 orphans.
 
 What it is missing is a *half*, not the joins. The real layer carries the
-hardware and kernel spine and none of the clinical one, so six labels and eleven
+hardware and kernel spine and none of the clinical one, so seven labels and eleven
 edge types are empty -- including `USES_OPERATOR`, which is the edge the hero
 question traverses. That is why 8 of the 16 catalog queries measured for this
 were empty against it -- `EA20` joined the catalog later and is empty against it
@@ -39,7 +39,11 @@ LABELS_PRESENT = {"Vendor", "SoC", "Accelerator", "Board", "Runtime",
                   "Operator", "Kernel", "Model", "BenchmarkTask", "Deployment"}
 # The clinical spine, entirely generated.
 LABELS_ABSENT = {"ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
-                 "Dataset", "Certification"}
+                 "Dataset", "Certification",
+                 # `Site` is generated-only by decision (#34,
+                 # docs/location-scope.md), so the real layer never carries
+                 # one. Listing it here is what fails if that ever changes.
+                 "Site"}
 
 EDGES_PRESENT = {"HAS_SOC", "IMPLEMENTS", "MADE_BY", "MEASURES", "ON_BOARD",
                  "PROVIDED_BY", "RUNS_ON", "SOLVES", "TARGETS",

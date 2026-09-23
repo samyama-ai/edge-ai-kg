@@ -161,6 +161,7 @@ scalar. It is good enough to make *structural* questions behave sensibly. It is
 | `SignalStage` | 16 | id, name, kind, window_ms, cost_kmacs |
 | `Sensor` | 14 | id, name, modality, sample_rate_hz, channels, adc_bits |
 | `Dataset` | 12 | id, name, source, subjects, hours, license |
+| `Site` | 12 | id, name, kind, campus, region |
 | `Vendor` | 15 | id, name, country |
 | `Runtime` | 13 | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
@@ -179,6 +180,7 @@ Every node has a globally unique `id` of the form `<prefix>:<5-digit>`.
 | `ON_BOARD` | Deployment → Board | 1,513 |
 | `VIA_RUNTIME` | Deployment → Runtime | 1,500 |
 | `USES_ACCELERATOR` | Deployment → Accelerator | 1,451 |
+| `DEPLOYED_AT` | Deployment → Site | 1,440 |
 | `USES_OPERATOR` | Model → Operator `{count}`, SignalStage → Operator | 1,069 |
 | `TARGETS` | Runtime → Accelerator | 429 |
 | `VARIANT_OF` | ModelVariant → Model | 240 |
@@ -250,8 +252,8 @@ one command.
 A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
 and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
-2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries
-in that build
+2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries in
+that build
 were verified to return rows against the imported snapshot.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
@@ -366,7 +368,7 @@ can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
 ### Known limitations
 
-1. **Heavily skewed to `Kernel`** — 22,578 of 25,162 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
+1. **Heavily skewed to `Kernel`** — 22,578 of 25,162 nodes (90%) are kernels, and 3 edge types carry 87% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
 2. **The cost model is the ground truth**, so any model trained on it recovers the model, not reality.
 3. **Operator categories are heuristic** — regex over operator names with a short override table; some assignments are debatable.
 4. **Uniform random structure** — real fleets cluster (vendors reuse IP, boards share SoC families). Sampling here is close to uniform, so the graph has less community structure than a real one.

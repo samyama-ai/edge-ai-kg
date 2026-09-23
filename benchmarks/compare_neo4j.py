@@ -14,9 +14,11 @@ generated fleet, and prints every query including the ones we lose.
 ## What makes this believable, and what does not
 
 **Same query text, both engines.** The 16 catalog queries measured in
-`docs/neo4j-comparison.md` parse on Neo4j 5
-unchanged -- checked before any of this was written. Nothing is translated, so
-there is no translation to argue with.
+`docs/neo4j-comparison.md` parse on Neo4j 5 unchanged. `EA20` joined the
+catalog with #34, after that run, and **has not been tried on Neo4j** -- the
+sweep will run it, and whether it parses there is unmeasured. The 16 were
+checked before any of this was written. Nothing is translated, so there is no
+translation to argue with.
 
 **These are our query shapes, and it is worth knowing whether that helps us.**
 `docs/engine-notes.md` records that the catalog is shaped around Samyama's
@@ -104,7 +106,8 @@ def load_samyama(client, fleet) -> float:
     schema -- 486 edges/s against 3,110.
 
     Worse than a slow load, it meant **the query comparison ran Samyama with no
-    indexes at all while Neo4j had all 22**, which is not a comparison. Both
+    indexes at all while Neo4j had all 22 the schema declared then**, which is
+    not a comparison. Both
     engines now get their indexes before anything is timed.
 
     `apply_schema` runs **outside** the returned time, which is what
@@ -176,7 +179,8 @@ def _verify_reused(neo, nodes: int, edges_expected: int) -> None:
     # creates plain RANGE indexes -- a UNIQUE or TEXT index on the same
     # `label.property` is a different structure with different lookup
     # behaviour. Counting either as the index we asked for would time an
-    # unindexed or differently-indexed Neo4j while reporting all 22 verified.
+    # unindexed or differently-indexed Neo4j while reporting every index
+    # verified.
     present = {f"{labels[0]}.{properties[0]}"
                for labels, properties, state, kind in neo.run(
                    "SHOW INDEXES YIELD labelsOrTypes, properties, state, type "

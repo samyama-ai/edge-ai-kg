@@ -1,11 +1,12 @@
 # Where a deployment sits, and why that is now in the graph
 
-Answers #34, and **reverses the decline recorded in
-[`alerting-scope.md`](alerting-scope.md)** on 2026-09-23.
+Answers #34. **Reverses the decline recorded in
+[`alerting-scope.md`](alerting-scope.md)** — that decline was written on
+2026-09-10; this reversal is dated **2026-09-23**.
 
 > **This is a proposal, not a settled call.** `alerting-scope.md` declined #34
-> with three reasons, and this page does not pretend they evaporated — two are
-> answered below and **one is accepted as a real cost**. @TarunAllam owns the
+> with three reasons, and this page does not pretend they evaporated. Only
+> **one is answered** below; the other **two are accepted as real costs**. @TarunAllam owns the
 > decision. **If the decline stands, the PR carrying this page should be closed
 > rather than merged**, and `alerting-scope.md`'s section reads as written with
 > its "superseded" banner removed. The code is then what the "yes" branch would
@@ -18,9 +19,9 @@ already answer, decline every one that needs a new label this repo would have to
 invent.* `Site` needs invention, so #34 was declined — while the same page
 recorded what it cost:
 
-> *"which sensors are on this floor", "is this a site-wide failure or one
-> device", and the "which sites" half of #33's who is affected are unanswerable
-> here and will stay so.*
+> *"which sensors are on this floor"*, *"is this a site-wide failure or one
+> device"*, and the "which sites" half of #33's *who is affected* are
+> unanswerable here and will stay so.
 
 #34 is the issue asking for exactly those. So the question is not whether the
 rule was applied correctly — it was — but whether the cost it names is one this
@@ -32,10 +33,15 @@ asks once it knows what broke.
 
 Both of those are **merged but not yet on `main`**: they landed on
 `test/embedded-engine-fixture-only` after the PR that carried it to `main` had
-closed, and #113 is the open PR that delivers them. This page does not depend
-on that landing — `EA20` uses `Deployment` and `Board`, which are on `main`
-today — but the argument for reversing the decline is weaker if the alerting
-theme never arrives, and that is worth stating rather than glossing.
+closed, and #113 is the open PR that delivers them.
+
+Be clear about what that does to this argument. `EA20` itself depends on
+nothing off-`main` — it walks `Site`, `Deployment` and `Board`, all present
+here — so the code stands on its own. **The argument does lean on work that is
+not on `main` yet**, and if #113 never lands, the reversal is buying the first
+question of an alerting theme this repo does not otherwise have. That is a
+reason to decide #113 and this together, not a reason to pretend the
+dependency is absent.
 
 ## The three reasons against, answered one at a time
 

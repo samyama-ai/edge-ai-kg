@@ -61,21 +61,27 @@ That is the alerting theme and the hero question meeting in one row.
 
 `#35` is **not** delivered on `main`. `EA17` is written and reviewed in #96,
 which is open at the time of writing; until it merges the catalog is
-`EA01`-`EA16` and this row is a decision to take the work, not a claim that it
+`EA01`-`EA16` plus `EA20` and this row is a decision to take the work, not a claim that it
 is done. `tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
 pins that distinction rather than trusting this sentence: it fails if `EA17`
 joins `benchmarks/queries.py` while this paragraph still says it has not, and
-fails the other way if the paragraph goes but the catalog is still `EA01`-`EA16`.
+fails the other way if the paragraph goes but `EA17` is still absent.
 
-## Why the three are declined
+## Why the three were declined (two still are)
 
 ### #34 — location is deployment-time state, not catalog state
 
-> **Superseded 2026-09-23 by [`location-scope.md`](location-scope.md), which
-> reverses this.** The argument below is kept verbatim rather than rewritten:
-> it is the case against, it is still the strongest statement of what a `Site`
-> spine costs, and two of its three reasons are accepted there rather than
-> answered. Read both before changing either.
+> **Superseded on 2026-09-23 — the reversal's date, not the decline's — by
+> [`location-scope.md`](location-scope.md).** Everything below this banner is
+> the original text, unedited: it is the case against, it is still the
+> strongest statement of what a `Site` spine costs, and two of its three
+> reasons are *accepted* there rather than answered. Read both before changing
+> either.
+>
+> One sentence below is now out of date in a way worth flagging rather than
+> editing: **"is this a site-wide failure or one device"** is the question
+> `EA20` answers. Naming the cost that precisely is what made the reversal
+> arguable, so the sentence is left exactly as it was written.
 
 `Sensor` carries `modality`, `sample_rate_hz`, `channels`, `adc_bits`. `Board`
 carries a form factor and a price. **Nothing anywhere carries a place**, and the
@@ -104,10 +110,8 @@ Three reasons not to add it:
 
 **What that costs, stated plainly:** *"which sensors are on this floor"*,
 *"is this a site-wide failure or one device"*, and the "which sites" half of
-#33's *who is affected* are unanswerable here. `#40` still answers the
-regulatory half. (The second of those three is what `EA20` now answers, and
-naming the cost this precisely is what made the reversal arguable — see
-[`location-scope.md`](location-scope.md).)
+#33's *who is affected* are unanswerable here and will stay so. `#40` still
+answers the regulatory half.
 
 **If the decision is revisited**, the join point is `Deployment`, not `Sensor`
 and not `Board`. A deployment is already "this variant, on this board, with

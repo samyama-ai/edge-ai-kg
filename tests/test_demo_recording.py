@@ -169,6 +169,54 @@ ADDED_SINCE_RECORDING = {
 }
 
 
+def test_the_added_since_recording_list_is_still_true():
+    """An allowlist nobody prunes is an allowlist that stops meaning anything.
+
+    Two ways it rots, both checked: an id that is no longer in the catalog at
+    all (renamed or reverted), and an id the recording *does* show -- which
+    means the GIF was re-recorded and the entry is now excusing nothing.
+    """
+    from benchmarks.queries import BY_ID
+
+    unknown = sorted(set(ADDED_SINCE_RECORDING) - set(BY_ID))
+    assert not unknown, (
+        f"{unknown} is excused as 'added since the recording' but is not in "
+        f"the catalog. Remove the entry -- it cannot excuse a query nobody has."
+    )
+    text = cast_text()
+    recorded = sorted(qid for qid in ADDED_SINCE_RECORDING if qid in text)
+    assert not recorded, (
+        f"{recorded} now appears in the recording, so the GIF was re-recorded. "
+        f"Drop it from ADDED_SINCE_RECORDING and update the README caption, or "
+        f"the next dropped query hides behind this entry."
+    )
+
+
+def test_the_readme_caption_counts_what_the_recording_shows():
+    """The caption is the claim a visitor reads; nothing checked it before.
+
+    It says "N of the M catalog queries run end to end". `M` is the catalog
+    size and `N` is what the recording actually shows, so both are derivable
+    and neither needs to be trusted.
+    """
+    from benchmarks.queries import BY_ID
+
+    claim = re.search(r"\*(\d+) of the (\d+) \[catalog queries\]", README.read_text(encoding="utf-8"))
+    assert claim, (
+        "the README caption no longer reads '<N> of the <M> [catalog queries]'. "
+        "If it was reworded, update this test with it -- the caption is the "
+        "first claim a visitor reads."
+    )
+    shown, total = int(claim.group(1)), int(claim.group(2))
+    assert total == len(BY_ID), (
+        f"the caption says {total} catalog queries; there are {len(BY_ID)}")
+    text = cast_text()
+    really_shown = sum(1 for qid in BY_ID if qid in text)
+    assert shown == really_shown, (
+        f"the caption claims {shown} queries run end to end; the recording "
+        f"shows {really_shown}")
+
+
 def test_the_recording_still_covers_every_catalog_query():
     """Structure, not figures -- so this one is asserted rather than excused.
 

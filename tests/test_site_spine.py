@@ -16,6 +16,7 @@ unknown multiplicity and nothing in the query would say so.
 from __future__ import annotations
 
 import collections
+import re
 
 import pytest
 
@@ -29,9 +30,24 @@ GRAPH = "default"
 SCALE = 0.3
 SEED = 4242
 
-# The board `EA20` asks about, read from the query rather than restated: a test
-# that hardcoded its own id would keep passing after the catalog moved on.
-RECALLED_BOARD = BY_ID["EA20"]["cypher"].split('b.id = "')[1].split('"')[0]
+def _recalled_board() -> str:
+    """The board id `EA20` asks about, read from the query rather than restated.
+
+    A hardcoded copy here would keep passing after the catalog moved on, which
+    is the failure this avoids. The pattern is anchored on the whole predicate
+    and fails loudly with the line it could not read, rather than raising
+    `IndexError` from a bare `split` three frames away from the cause.
+    """
+    match = re.search(r'b\.id\s*=\s*"([^"]+)"', BY_ID["EA20"]["cypher"])
+    assert match, (
+        "EA20 no longer filters on a literal `b.id = \"...\"`. This module "
+        "recomputes its ground truth from that id, so update this reader "
+        "together with the query."
+    )
+    return match.group(1)
+
+
+RECALLED_BOARD = _recalled_board()
 
 
 @pytest.fixture(scope="module")
@@ -44,13 +60,24 @@ def operators():
 
 @pytest.fixture(scope="module")
 def fleet(operators):
-    """Generated layer only -- the real layer has no sites, by design."""
+    """Generated layer only -- the real layer has no sites, by design.
+
+    Nothing below may mutate this. `build_real` appends to the `Fleet` it is
+    given, so a fixture that called it on this object would leave the
+    invariant tests reading a two-layer graph -- and passing or failing by
+    which test ran first. `loaded` builds its own fleet for that reason.
+    """
     return gen.generate(seed=SEED, scale=SCALE, operators=operators)
 
 
 @pytest.fixture(scope="module")
-def loaded(engine_factory, operators, fleet):
-    """That same fleet in an embedded engine, plus the real layer.
+def loaded(engine_factory, operators):
+    """An equivalent fleet in an embedded engine, plus the real layer.
+
+    Its **own** `Fleet`, not the `fleet` fixture: `build_real` mutates what it
+    is handed, and sharing one object made the invariant tests above depend on
+    whether this had run yet. Same seed and scale, so it is the same generated
+    graph.
 
     Both layers, because `EA20` sweeps every `Deployment` in the graph and the
     real layer contributes 73 of them at `--scale 1.0`. If those were reachable
@@ -60,6 +87,7 @@ def loaded(engine_factory, operators, fleet):
     from etl import real_layer
 
     client = engine_factory()
+    fleet = gen.generate(seed=SEED, scale=SCALE, operators=operators)
     real_layer.build_real(fleet, operators)
     for label in NODE_LABELS:
         if fleet.nodes.get(label):
@@ -118,6 +146,82 @@ def test_there_is_more_than_one_campus_to_group_by(fleet):
         f"so one campus makes every row site-wide by construction")
 
 
+def test_site_names_stay_distinct_where_the_suffix_list_wraps():
+    """Above `--scale 1.04` the suffix list runs out, and `EA20` groups by name.
+
+    Measured, not reasoned about: `SITE_SUFFIXES` holds 12 names, so the 13th
+    site is where the wrap begins. Before the wrap number was added, site 13
+    was a second `Ward 3` in the same campus as the first -- and `EA20` groups
+    by `(campus, name)`, so the two merged into one row and each
+    under-reported the other's deployments.
+
+    Checked over a range rather than at one scale, because the collision moves
+    with the campus cycle: every site must be distinct by id, and distinct by
+    name *within* its campus.
+    """
+    from etl import sites as sites_mod
+
+    for count in (13, 24, 25, 40):
+        built = sites_mod.build_sites(count, lambda kind, i: f"{kind}:{i:05d}")
+        assert len({s["id"] for s in built}) == len(built), (
+            f"{count} sites do not have distinct ids")
+        by_campus = collections.defaultdict(list)
+        for site in built:
+            by_campus[site["campus"]].append(site["name"])
+        clashes = {campus: names for campus, names in by_campus.items()
+                   if len(set(names)) != len(names)}
+        assert not clashes, (
+            f"at {count} sites, these campuses carry a repeated name: "
+            f"{ {c: sorted(n) for c, n in clashes.items()} }. `EA20` groups by "
+            f"(campus, name), so the rows merge and both are under-reported.")
+
+
+def test_a_tiny_scale_still_has_two_places_to_compare():
+    """Below about `--scale 0.125` the rounding gave one site in one campus.
+
+    One place makes "is this site-wide or one device" unanswerable by
+    construction -- every row is site-wide when there is nowhere else -- so
+    `MIN_SITES` floors it. The floor is a property of `build_sites`, checked
+    here at the scales that used to collapse rather than at the shipped one.
+    """
+    from etl import sites as sites_mod
+
+    for scaled_count in (0, 1):
+        built = sites_mod.build_sites(scaled_count, lambda kind, i: f"{kind}:{i:05d}")
+        assert len(built) >= sites_mod.MIN_SITES, (
+            f"a scaled count of {scaled_count} gave {len(built)} sites")
+        assert len({s["campus"] for s in built}) >= 2, (
+            f"a scaled count of {scaled_count} gave one campus "
+            f"({[s['campus'] for s in built]}); the campus list must cycle "
+            f"before the floor is reached, or the floor buys nothing")
+
+
+def test_placing_sites_did_not_move_any_deployment_metric(operators):
+    """The `Site` draw must not consume from the generator's shared stream.
+
+    It did, once. `rng.choice(sites)` inside the deployment loop shifted every
+    later draw, so adding a location silently changed the cost model: measured
+    at seed 20260814, `deploy:00001` went from latency 87.684 / power 3990.6 to
+    78.036 / 3591.96 with no other edit. `etl/generate.py`'s contract is that a
+    seed reproduces the graph byte-for-byte, and `docs/data-provenance.md`'s
+    figures rest on it.
+
+    The values below are that contract, recorded from `main` before `Site`
+    existed. If this fails, either a draw was added to the shared stream --
+    which is a bug -- or the cost model changed on purpose, in which case these
+    move together with the published figures.
+    """
+    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
+    first = {row["id"]: row for row in full.nodes["Deployment"][:2]}
+    assert (first["deploy:00000"]["latency_ms"],
+            first["deploy:00000"]["power_mw"]) == (309.291, 769.61)
+    assert (first["deploy:00001"]["latency_ms"],
+            first["deploy:00001"]["power_mw"]) == (87.684, 3990.6), (
+        "deployment metrics moved for an unchanged seed. If a new field draws "
+        "from the shared `rng`, give it its own `random.Random` as the site "
+        "placement has.")
+
+
 def test_sites_are_deterministic_from_the_seed(operators):
     """Same seed, same placement -- the graph is reproducible or it is nothing."""
     again = gen.generate(seed=SEED, scale=SCALE, operators=operators)
@@ -146,7 +250,7 @@ def test_the_real_layer_gets_no_sites(operators, fleet):
     assert not (real_ids & set(after)), "a real deployment was given a synthetic site"
 
 
-def test_ea20_stays_inside_its_limit_at_shipped_scales(fleet):
+def test_ea20_stays_inside_its_limit_at_shipped_scales(operators):
     """`LIMIT 12` must not truncate, or the tail is an arbitrary pick among ties.
 
     `EA20` orders by `on_recalled_board`, where ties are common -- most sites
@@ -155,7 +259,10 @@ def test_ea20_stays_inside_its_limit_at_shipped_scales(fleet):
     limit is checked against the site count rather than assumed generous.
     """
     limit = int(BY_ID["EA20"]["cypher"].rsplit("LIMIT", 1)[1])
-    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=None)
+    # The shipped seed and scale, with the cached operators this module already
+    # has -- `operators=None` made the generator re-read them from disk, which
+    # is a second source for the same data inside one test run.
+    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
     assert len(full.nodes["Site"]) <= limit, (
         f"scale 1.0 generates {len(full.nodes['Site'])} sites and EA20 keeps "
         f"{limit}; the rows past the limit would be an arbitrary choice among "
@@ -177,6 +284,14 @@ def test_ea20_counts_match_ground_truth(loaded):
     records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
 
     placements, boards = deployed_at(fleet), on_board(fleet)
+    # One board per deployment, checked here rather than assumed: the ground
+    # truth below counts a deployment as "on the recalled board" from this
+    # mapping, and a deployment with two `ON_BOARD` edges would keep only the
+    # last while `EA20` counted rows for both.
+    board_edges = collections.Counter(
+        src for _sl, src, rel, _tl, _tgt, _p in fleet.edges if rel == "ON_BOARD")
+    doubled = {did: k for did, k in board_edges.items() if k > 1}
+    assert not doubled, f"deployments on more than one board: {sorted(doubled)[:3]}"
     by_site = {s["id"]: s for s in fleet.nodes["Site"]}
     here: dict[str, int] = collections.Counter()
     recalled: dict[str, int] = collections.Counter()
@@ -210,16 +325,59 @@ def test_ea20_ranks_the_worst_hit_site_first(loaded):
 def test_ea20_separates_a_site_wide_failure_from_one_device(loaded):
     """The question in the title, answered on the fixture rather than argued.
 
-    A site whose recalled count equals its deployment count is site-wide; one
-    with a single hit is one device. Both shapes have to be *distinguishable*
-    in the result, or the query answers nothing the issue asked for.
+    At this fixture's scale every site holds at least one of the recalled
+    boards -- 4 sites and 36 boards leave nowhere for a clean miss -- so what
+    is asserted here is what this graph can actually show: a site where *some*
+    but not all deployments are affected, and no site claiming more hits than
+    it has deployments. The unaffected case needs the shipped graph and is
+    checked by the `--full-scale` test below.
     """
     client, _fleet = loaded
     records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
     fractions = {(row[0], row[1]): (row[3], row[4]) for row in records}
-    assert any(hit == 0 for hit, _total in fractions.values()), (
-        "no unaffected site in the fixture, so the query cannot be shown to "
-        "discriminate; widen the fleet or pick another board")
+    assert fractions, "EA20 returned nothing against a loaded fixture"
+    impossible = {k: v for k, v in fractions.items() if v[0] > v[1]}
+    assert not impossible, (
+        f"sites reporting more recalled boards than deployments: {impossible}. "
+        f"`on_recalled_board` counts rows and `deployments_here` counts "
+        f"distinct ids, so this is what a multiplied join looks like.")
     assert any(0 < hit < total for hit, total in fractions.values()), (
         f"no partially affected site in {fractions}; without one, "
         f"'site-wide or one device' is not a distinction this row can make")
+
+
+def test_ea20_shows_both_affected_and_untouched_sites_at_full_scale(
+        request, engine_factory, operators):
+    """The distinction the issue asks for, on the graph the docs describe.
+
+    Gated on `--full-scale` because it builds the shipped fleet (seed 20260814,
+    `--scale 1.0`) rather than this module's small one. That flag landed with
+    #108 and had no caller; this is one, which is also the answer to "why is it
+    registered if nothing reads it".
+
+    Measured on that graph: of 12 sites, **6 hold none of `board:00003` and 6
+    hold some but not all** -- so "replace one unit here" and "leave that site
+    alone" are both readable off the same column. The numbers are not asserted
+    exactly, because they move with the seed; what is asserted is that both
+    kinds exist.
+    """
+    if not request.config.getoption("--full-scale"):
+        pytest.skip("needs --full-scale: builds the shipped fleet at scale 1.0")
+
+    from etl import real_layer
+
+    client = engine_factory()
+    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
+    real_layer.build_real(full, operators)
+    for label in NODE_LABELS:
+        if full.nodes.get(label):
+            create_nodes(client, GRAPH, label, full.nodes[label])
+    create_edges(client, GRAPH, full.edges)
+
+    records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
+    counts = [(row[3], row[4]) for row in records]
+    assert any(hit == 0 for hit, _total in counts), (
+        f"every site at scale 1.0 holds a recalled board: {counts}. The "
+        f"'is it site-wide' question needs an untouched site to contrast with.")
+    assert any(0 < hit < total for hit, total in counts), (
+        f"no partially affected site at scale 1.0: {counts}")

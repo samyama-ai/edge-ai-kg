@@ -9,7 +9,7 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue" alt="License"></a>
 
-![Edge AI KG — 16 questions answered](demo/edgeai-questions.gif)
+![Edge AI KG — 16 questions answered, recorded 2026-08-14](demo/edgeai-questions.gif)
 
 *16 of the 17 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. `EA20` (#34) was added after this was recorded, not left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
@@ -130,7 +130,7 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 8 of the 16 catalog queries measured then returned rows**, 8 came
+**Against the HTTP server, 8 of the 16 catalog queries in that run returned rows**, 8 came
 back empty, none error:
 
 | | Queries |
@@ -291,8 +291,9 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 ## The query catalog
 
 17 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
-the question it answers and why it's awkward without a graph. All 16 return
-rows; median 14 ms, slowest 73 ms. **EA13–EA16 run entirely on real data**, so
+the question it answers and why it's awkward without a graph. The 16 measured in
+that run all returned rows; median 14 ms, slowest 73 ms. `EA20` joined later
+(#34) and is not in those timings. **EA13–EA16 run entirely on real data**, so
 their answers can be checked against the upstream sources.
 
 | id | Question |
@@ -313,6 +314,7 @@ their answers can be checked against the upstream sources.
 | **EA14** | **REAL:** MLPerf Tiny v1.2 throughput leaders per benchmark task |
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
+| **EA20** | A board is recalled — which sites run it, and is that site-wide or one device? |
 
 ## Engine notes
 
