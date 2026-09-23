@@ -288,7 +288,6 @@ def test_the_site_label_carries_only_what_the_decision_allows(fleet):
         f"`Site` lost {sorted(allowed - present)}; EA20 groups by campus")
 
 
-
 def test_vendor_country_is_the_only_near_miss_and_is_empty_where_it_is_real(fleet):
     """Named in the document so nobody mistakes it for a deployment location.
 

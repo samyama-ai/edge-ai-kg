@@ -180,7 +180,6 @@ FORM_FACTORS = ["wearable-band", "patch", "chest-module", "handheld",
                 "bedside-module", "implant-adjacent", "m.2-module", "som"]
 
 
-
 def _rid(prefix: str, n: int) -> str:
     return f"{prefix}:{n:05d}"
 
