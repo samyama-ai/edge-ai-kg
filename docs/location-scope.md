@@ -6,8 +6,10 @@ Answers #34, and **reverses the decline recorded in
 > **This is a proposal, not a settled call.** `alerting-scope.md` declined #34
 > with three reasons, and this page does not pretend they evaporated — two are
 > answered below and **one is accepted as a real cost**. @TarunAllam owns the
-> decision; if the answer is still no, revert this and the sentence in
-> `alerting-scope.md` stands as written.
+> decision. **If the decline stands, the PR carrying this page should be closed
+> rather than merged**, and `alerting-scope.md`'s section reads as written with
+> its "superseded" banner removed. The code is then what the "yes" branch would
+> have cost, made concrete — which is easier to judge than the argument alone.
 
 ## What was decided before, and what changed
 
@@ -23,9 +25,17 @@ recorded what it cost:
 #34 is the issue asking for exactly those. So the question is not whether the
 rule was applied correctly — it was — but whether the cost it names is one this
 repo should keep paying. This page says no, for one reason: **the alerting
-theme this repo did take is incomplete without a place.** `EA17` says what
-stops, `EA19` says which certifications are implicated, and neither can say
-*where to send someone*, which is the first thing an operations team asks.
+theme this repo did take is incomplete without a place.** `EA17` (what stops)
+and `EA19` (which certifications are implicated) answer the other halves, and
+neither can say *where to send someone* — the first thing an operations team
+asks once it knows what broke.
+
+Both of those are **merged but not yet on `main`**: they landed on
+`test/embedded-engine-fixture-only` after the PR that carried it to `main` had
+closed, and #113 is the open PR that delivers them. This page does not depend
+on that landing — `EA20` uses `Deployment` and `Board`, which are on `main`
+today — but the argument for reversing the decline is weaker if the alerting
+theme never arrives, and that is worth stating rather than glossing.
 
 ## The three reasons against, answered one at a time
 
