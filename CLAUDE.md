@@ -120,7 +120,8 @@ real/synthetic split is therefore *queryable* (see EA16), not a README claim.
 
 ### The query catalog is the single source of truth
 
-`benchmarks/queries.py` holds 16 entries (`EA01`–`EA16`), each with
+`benchmarks/queries.py` holds 17 entries (`EA01`–`EA16` and `EA20`; 17-19 are
+reserved for the alerting stack that has not reached `main`), each with
 `question` / `why_graph` / `cypher`, exported as `QUERIES` and `BY_ID`. It is
 consumed by `benchmarks/run_benchmark.py`, `demo/questions.py` and
 `tests/test_correctness.py`. Editing a query changes the benchmark, the demo and

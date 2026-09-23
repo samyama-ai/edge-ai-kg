@@ -159,17 +159,28 @@ def test_the_recording_shows_the_current_real_kernel_count(fresh):
     )
 
 
+# Queries added to the catalog *after* the recording was made. A query here is
+# a re-record TODO; a query missing that is *not* here is a dropped query, which
+# is the failure this test exists for. Keeping the two apart matters: excusing
+# every absence would turn the check off, and asserting every query would make
+# the suite red for the ordinary act of adding one.
+ADDED_SINCE_RECORDING = {
+    "EA20": "#34 — the Site spine, added 2026-09-23",
+}
+
+
 def test_the_recording_still_covers_every_catalog_query():
     """Structure, not figures -- so this one is asserted rather than excused.
 
-    The README calls it "all 16 catalog queries run end to end". A recording
-    that silently dropped one would keep that caption while making it false,
-    and no figure comparison would notice.
+    The README says "16 of the 17 catalog queries run end to end" and names the
+    exception. A recording that silently dropped one would keep that caption
+    while making it false, and no figure comparison would notice.
     """
     from benchmarks.queries import BY_ID
     text = cast_text()
     missing = [qid for qid in BY_ID if qid not in text]
-    assert not missing, (
-        f"the recording does not show {missing}; the README claims all "
-        f"{len(BY_ID)} catalog queries run end to end"
+    dropped = [qid for qid in missing if qid not in ADDED_SINCE_RECORDING]
+    assert not dropped, (
+        f"the recording no longer shows {dropped}; these are not new queries, "
+        f"so the recording lost them"
     )

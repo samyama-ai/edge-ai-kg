@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 
+from etl import sites as sites_mod
 from etl.onnx_catalog import Operator, load_cached
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -179,6 +180,7 @@ FORM_FACTORS = ["wearable-band", "patch", "chest-module", "handheld",
                 "bedside-module", "implant-adjacent", "m.2-module", "som"]
 
 
+
 def _rid(prefix: str, n: int) -> str:
     return f"{prefix}:{n:05d}"
 
@@ -255,6 +257,13 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
     certs = [{"id": _rid("cert", i), "name": nm, "body": body, "class": cls}
              for i, (nm, body, cls) in enumerate(CERTIFICATIONS)]
     fleet.add_nodes("Certification", certs)
+
+    # ---------------- Sites (#34) ----------------
+    # The shape, and the decision behind it, are in `etl/sites.py` and
+    # `docs/location-scope.md`. Generated-layer only: the real layer is never
+    # placed.
+    sites = sites_mod.build_sites(n(len(sites_mod.SITE_SUFFIXES)), _rid)
+    fleet.add_nodes("Site", sites)
 
     # ---------------- Datasets ----------------
     datasets = [{"id": _rid("dataset", i), "name": nm, "source": src,
@@ -547,8 +556,15 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             fits = 1 if (memory_kb <= b["ram_kb"] and v["size_kb"] <= b["flash_kb"]) else 0
 
             did = _rid("deploy", len(deployments))
+            # One site per deployment, drawn from the same `rng` as everything
+            # else so the assignment is part of the seed. A deployment is one
+            # installed unit, so it is in exactly one place -- which is what
+            # makes "how many of this site's deployments are on the recalled
+            # board" a count rather than a set union.
+            site = rng.choice(sites)
             deployments.append({
                 "id": did,
+                "_site": site["id"],
                 "latency_ms": latency_ms,
                 "power_mw": power_mw,
                 "energy_mj": round(energy_mj, 4),
@@ -567,6 +583,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
         fleet.add_edge("Deployment", d["id"], "ON_BOARD", "Board", d["_board"], None)
         fleet.add_edge("Deployment", d["id"], "VIA_RUNTIME", "Runtime", d["_rt"], None)
         fleet.add_edge("Deployment", d["id"], "USES_ACCELERATOR", "Accelerator", d["_accel"], None)
+        fleet.add_edge("Deployment", d["id"], "DEPLOYED_AT", "Site", d["_site"], None)
 
     return fleet
 

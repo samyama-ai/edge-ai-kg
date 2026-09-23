@@ -312,7 +312,7 @@ def test_every_node_label_row_declares_its_layer():
     bare = {label for label, (_gen, real) in node_counts().items() if real == 0}
     generated_only = {
         "ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
-        "Dataset", "Certification",
+        "Dataset", "Certification", "Site",
     }
     # Equality, not a one-way subset. The subset form caught a label that gained
     # real nodes and kept a bare count, but not the reverse -- a label listed

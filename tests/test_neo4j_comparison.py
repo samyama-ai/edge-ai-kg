@@ -46,8 +46,8 @@ def test_every_schema_index_is_created_on_neo4j_too():
     from tests.test_schema_indexes import declared_indexes
 
     declared = declared_indexes()
-    assert len(declared) == 22, (
-        f"the schema declares {len(declared)} indexes, not 22. If that is "
+    assert len(declared) == 23, (
+        f"the schema declares {len(declared)} indexes, not 23. If that is "
         f"deliberate, update this number and the module docstring, which "
         f"publishes it as a fairness condition."
     )

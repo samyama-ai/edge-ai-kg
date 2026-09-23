@@ -28,8 +28,8 @@ and what it costs when those two sets do not line up.
 > `"synthetic"`) and a `source`. Read
 > [Real vs. synthetic](#real-vs-synthetic) before using or quoting anything.
 
-**25,150 nodes · 76,303 edges · 16 node labels · 22 edge types**
-**1,035 real nodes from 3 public sources · 24,115 generated**
+**25,162 nodes · 77,743 edges · 17 node labels · 23 edge types**
+**1,035 real nodes from 3 public sources · 24,127 generated**
 
 ---
 
@@ -251,10 +251,11 @@ A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
 and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries
+in that build
 were verified to return rows against the imported snapshot.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
-below a fresh build's 25,150 / 76,303: it was exported from an earlier build and
+below a fresh build's 25,162 / 77,743: it was exported from an earlier build and
 the upstream inputs are not pinned.
 
 ---
@@ -348,10 +349,15 @@ rather than overlooked, with the reasoning in
 [`docs/alerting-scope.md`](docs/alerting-scope.md) and the wider
 can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
-- **No physical location.** Nothing carries a site, zone, room or coordinate.
-  `Vendor.country` is where a vendor is headquartered, not where anything is
-  installed. No upstream source supplies deployment location, so a `Site` spine
-  would be invented wholesale (#34).
+- **Location only for generated deployments.** `Site` carries a campus and a
+  region, and `Deployment -[:DEPLOYED_AT]-> Site` places each of the 1,440
+  generated deployments (#34). It is synthetic throughout, with fictional
+  campus names: **no real node is placed**, because no upstream source publishes
+  where a submission ran. `Vendor.country` is still where a vendor is
+  headquartered, not where anything is installed. Nothing carries a room, a
+  coordinate or a move history — the reasoning, including the two objections
+  accepted rather than answered, is in
+  [`docs/location-scope.md`](docs/location-scope.md).
 - **No ownership.** No team, contact or `OWNS` edge — same reason. Note also
   that `Operator` is already taken here and means an ONNX operator (#39).
 - **No alerting state.** No `Alert`, `Rule` or `Threshold`. Thresholding a
@@ -360,7 +366,7 @@ can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
 ### Known limitations
 
-1. **Heavily skewed to `Kernel`** — 22,578 of 25,150 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
+1. **Heavily skewed to `Kernel`** — 22,578 of 25,162 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
 2. **The cost model is the ground truth**, so any model trained on it recovers the model, not reality.
 3. **Operator categories are heuristic** — regex over operator names with a short override table; some assignments are debatable.
 4. **Uniform random structure** — real fleets cluster (vendors reuse IP, boards share SoC families). Sampling here is close to uniform, so the graph has less community structure than a real one.

@@ -13,7 +13,8 @@ generated fleet, and prints every query including the ones we lose.
 
 ## What makes this believable, and what does not
 
-**Same query text, both engines.** All 16 catalog queries parse on Neo4j 5
+**Same query text, both engines.** The 16 catalog queries measured in
+`docs/neo4j-comparison.md` parse on Neo4j 5
 unchanged -- checked before any of this was written. Nothing is translated, so
 there is no translation to argue with.
 
@@ -40,7 +41,7 @@ faster everywhere". What it does rule out is the specific objection that these
 timings are a thumb on the scale against Neo4j, at least on the query the repo
 is built around.
 
-**Indexes on both sides.** `schema/edge_ai_kg.cypher`'s 22 indexes are created
+**Indexes on both sides.** `schema/edge_ai_kg.cypher`'s 23 indexes are created
 on Neo4j too, in its own syntax. Without that the comparison measures index
 availability rather than engines.
 

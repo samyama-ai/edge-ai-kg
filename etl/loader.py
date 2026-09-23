@@ -31,7 +31,7 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "edge_ai_kg.cy
 NODE_LABELS = [
     "Vendor", "SoC", "Accelerator", "Board", "Runtime", "Operator", "Kernel",
     "Model", "ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
-    "BenchmarkTask", "Dataset", "Certification", "Deployment",
+    "BenchmarkTask", "Dataset", "Certification", "Deployment", "Site",
 ]
 
 

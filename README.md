@@ -1,6 +1,6 @@
 # Edge AI Deployment Knowledge Graph
 
-**25,150 nodes. 76,303 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
+**25,162 nodes. 77,743 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
 
 Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. Every node is stamped `real` or `synthetic`.
 
@@ -11,7 +11,7 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 ![Edge AI KG — 16 questions answered](demo/edgeai-questions.gif)
 
-*All 16 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The last four run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+*16 of the 17 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. `EA20` (#34) was added after this was recorded, not left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
 *Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
@@ -72,10 +72,14 @@ Vendor <- SoC <- Board                        Sensor -> SignalStage -> ... -> Mo
                  TARGETS    PROVIDED_BY                                  ModelVariant
                     +--------- Runtime                                         |
                                                                           Deployment -> Board
+                                                                               |
+                                                                          DEPLOYED_AT
+                                                                               v
+                                                                             Site
 ```
 
-*The diagram is an orientation sketch, not the schema.* It shows 12 of the 16
-node labels and names 3 of the 22 edge types; it **omits** `ClinicalTask`,
+*The diagram is an orientation sketch, not the schema.* It shows 13 of the 17
+node labels and names 4 of the 23 edge types; it **omits** `ClinicalTask`,
 `Certification`, `Dataset` and `BenchmarkTask`, so the clinical spine appears to
 stop at `Model` when it actually continues to a task and its regulatory
 posture. [`docs/schema.md`](docs/schema.md) is the full picture, and
@@ -101,7 +105,7 @@ Full detail in [`docs/schema.md`](docs/schema.md).
 | [mlcommons/tiny_results_v1.2](https://github.com/mlcommons/tiny_results_v1.2) | Apache-2.0 | **73 measured submissions** — real boards from Qualcomm, Renesas, ST, Syntiant, Bosch, with real throughput, accuracy and energy |
 | generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
 
-**1,035 nodes are real; 24,115 are generated.** The split is queryable, not just
+**1,035 nodes are real; 24,127 are generated.** The split is queryable, not just
 documented — every node carries `provenance` and `source`:
 
 ```bash
@@ -126,7 +130,7 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 8 of the 16 catalog queries return rows**, 8 come
+**Against the HTTP server, 8 of the 16 catalog queries measured then returned rows**, 8 came
 back empty, none error:
 
 | | Queries |
@@ -257,11 +261,11 @@ Two things worth knowing before you quote the number:
 
 - **The download is slower than the import.** Fetching the 992 KB file took
   1.14 s here — about four times the import it precedes.
-- **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,150 /
-  76,303 a fresh build produces. It was exported from a slightly earlier build,
+- **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,162 /
+  77,743 a fresh build produces. It was exported from a slightly earlier build,
   and `data/` is not pinned (see `docs/build-manifest.json`).
 
-All 16 catalog queries were verified to return rows against the imported
+All 16 catalog queries in that build were verified to return rows against the imported
 snapshot, not just against a freshly-loaded graph — re-check with
 `--verify-queries` below.
 
@@ -274,7 +278,7 @@ python -m benchmarks.snapshot --url http://127.0.0.1:8080 \
 ```
 
 **Import appends, it does not replace.** Running the import twice against one
-server leaves both copies — 76,303 edges became 152,606. The flow above starts
+server leaves both copies — a recorded 76,303 edges became 152,606. The flow above starts
 from a fresh server so it is correct as written; the benchmark refuses to time
 an import into a non-empty graph for the same reason.
 
@@ -286,7 +290,7 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 ## The query catalog
 
-16 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
+17 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. All 16 return
 rows; median 14 ms, slowest 73 ms. **EA13–EA16 run entirely on real data**, so
 their answers can be checked against the upstream sources.

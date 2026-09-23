@@ -7,7 +7,7 @@ server (`python -m etl.download_data` first, to build `data/`).
 
 ![Edge AI KG — 16 questions answered](edgeai-questions.gif)
 
-Walks all 16 queries in `benchmarks/queries.py`: the plain-English question, the
+Walks all 17 queries in `benchmarks/queries.py`: the plain-English question, the
 Cypher it becomes, the answer, and why the question is awkward without a graph.
 EA13-EA16 run on the real ONNX Runtime and MLPerf Tiny layers, so their answers
 are checkable against the upstream sources. This is what the GIF above records.

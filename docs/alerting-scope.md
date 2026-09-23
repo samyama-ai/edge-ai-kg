@@ -36,7 +36,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | #37 | silent degradation against a latency budget | no | **take** |
 | #40 | which certifications a failure implicates | no | **take** |
 | #42 | a worked demo beat | no | **take** |
-| #34 | where the sensor physically is | `Site` | **decline** |
+| #34 | where the sensor physically is | `Site` | **declined, then taken** — see [`location-scope.md`](location-scope.md) |
 | #39 | who owns the affected asset | `Team` | **decline** |
 | #38 | alert / rule / threshold state | `Alert` | **decline** |
 
@@ -71,6 +71,12 @@ fails the other way if the paragraph goes but the catalog is still `EA01`-`EA16`
 
 ### #34 — location is deployment-time state, not catalog state
 
+> **Superseded 2026-09-23 by [`location-scope.md`](location-scope.md), which
+> reverses this.** The argument below is kept verbatim rather than rewritten:
+> it is the case against, it is still the strongest statement of what a `Site`
+> spine costs, and two of its three reasons are accepted there rather than
+> answered. Read both before changing either.
+
 `Sensor` carries `modality`, `sample_rate_hz`, `channels`, `adc_bits`. `Board`
 carries a form factor and a price. **Nothing anywhere carries a place**, and the
 one near-miss is worth naming so nobody mistakes it for one: `Vendor.country` is
@@ -98,8 +104,10 @@ Three reasons not to add it:
 
 **What that costs, stated plainly:** *"which sensors are on this floor"*,
 *"is this a site-wide failure or one device"*, and the "which sites" half of
-#33's *who is affected* are unanswerable here and will stay so. `#40` still
-answers the regulatory half.
+#33's *who is affected* are unanswerable here. `#40` still answers the
+regulatory half. (The second of those three is what `EA20` now answers, and
+naming the cost this precisely is what made the reversal arguable — see
+[`location-scope.md`](location-scope.md).)
 
 **If the decision is revisited**, the join point is `Deployment`, not `Sensor`
 and not `Board`. A deployment is already "this variant, on this board, with

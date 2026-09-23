@@ -1,6 +1,6 @@
 """Zero rows is an answer, so the catalog is driven to it deliberately.
 
-All sixteen catalog queries return rows against the shipped graph. That is what
+Every catalog query returns rows against the shipped graph. That is what
 a demo needs and not what a test needs: a query only ever run against data that
 satisfies it cannot tell "the answer is none" from "the query is broken" (#27).
 

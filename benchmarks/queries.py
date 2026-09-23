@@ -321,6 +321,33 @@ RETURN provenance, source, kernels
 ORDER BY kernels DESC
 """,
     },
+    # `EA20`, not `EA17`: `EA17`, `EA18` and `EA19` are taken by the alerting
+    # stack (#35, #37, #40), which is merged on `test/embedded-engine-fixture-only`
+    # and has not reached `main`. Reusing a live id would collide the day it
+    # does, and a collision between two different questions is worse than a gap
+    # in the numbering. The gap is the reservation.
+    {
+        "id": "EA20",
+        "title": "Site-wide or one device: where a recalled board is installed",
+        "question": ("A board model is recalled. Which sites run it, how many "
+                     "of each site's deployments does it account for, and is "
+                     "that site-wide or one device?"),
+        "why_graph": ("Two facts about the same site have to arrive in one "
+                      "row: how many deployments it holds, and how many of "
+                      "those are on the recalled board. The graph walks "
+                      "Site<-Deployment->Board once and aggregates both; the "
+                      "relational form is a join plus a correlated subquery "
+                      "per site, and neither is a traversal."),
+        "cypher": """
+MATCH (s:Site)<-[:DEPLOYED_AT]-(d:Deployment)-[:ON_BOARD]->(b:Board)
+WITH s.campus AS campus, s.name AS site, s.kind AS kind,
+     count(DISTINCT d.id) AS deployments_here,
+     sum(CASE WHEN b.id = "board:00003" THEN 1 ELSE 0 END) AS on_recalled_board
+RETURN campus, site, kind, on_recalled_board, deployments_here
+ORDER BY on_recalled_board DESC
+LIMIT 12
+""",
+    },
 ]
 
 BY_ID = {q["id"]: q for q in QUERIES}

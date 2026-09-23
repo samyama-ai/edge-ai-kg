@@ -159,6 +159,17 @@ PUBLISHED_ELSEWHERE: dict[tuple[str, int, str], str] = {
     ("README.md", 76_291, "edges"): "snapshot",
     ("DATASET_CARD.md", 25_145, "nodes"): "snapshot",
     ("DATASET_CARD.md", 76_291, "edges"): "snapshot",
+    # Counts of a graph that was *measured*, before `Site` and its 1,440
+    # `DEPLOYED_AT` edges landed with #34. Re-stating them at today's totals
+    # would claim a run nobody made -- the duplicate-import incident really did
+    # double 76,303 edges, and the 12-query and 16-query benchmark runs really
+    # were taken on the graphs named beside them. Each line says "recorded",
+    # which is what the marker binds the exemption to.
+    ("README.md", 76_303, "edges"): "recorded",
+    ("benchmarks/README.md", 24_115, "nodes"): "recorded",
+    ("benchmarks/README.md", 73_825, "edges"): "recorded",
+    ("benchmarks/README.md", 25_150, "nodes"): "recorded",
+    ("benchmarks/README.md", 76_303, "edges"): "recorded",
 }
 
 

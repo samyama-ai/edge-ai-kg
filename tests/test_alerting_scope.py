@@ -51,11 +51,13 @@ LOCATION_WORDS = frozenset((
     "coordinate", "coordinates", "postcode", "postal",
 ))
 
+# `Site` is deliberately absent from this dict: #34 was declined and then
+# **taken**, and `docs/location-scope.md` records the reversal with the case
+# against. The rest of the #34 family stays declined, so the reversal is one
+# label wide -- a `Zone` or a `Building` appearing is still a decision nobody
+# wrote down. `test_the_site_spine_is_exactly_what_was_agreed` below pins what
+# `Site` is allowed to be.
 DECLINED_LABELS = {
-    # #34 -- physical location. Labels as well as properties: a `Location` node
-    # carrying only `{id, name}` trips no property hint, so guarding one and not
-    # the other left the decision reversible in silence.
-    "Site": "#34 — physical location",
     "Zone": "#34 — physical location",
     "Location": "#34 — physical location",
     "Room": "#34 — physical location",
@@ -79,8 +81,11 @@ DECLINED_LABELS = {
 # permitted labels needs no new label, so `DECLINED_LABELS` cannot see it --
 # an `OWNS` edge from `Vendor` to `Board` would make `DATASET_CARD.md`'s "no
 # team, contact or `OWNS` edge" false with the suite green.
+# `DEPLOYED_AT` is likewise permitted now, and only from `Deployment`, which
+# the pinning test below checks. `LOCATED_AT` and `INSTALLED_AT` stay declined:
+# they would place a *type* -- a board or a sensor -- which is the shape
+# `docs/location-scope.md` argues against.
 DECLINED_EDGES = {
-    "DEPLOYED_AT": "#34 — physical location",
     "LOCATED_AT": "#34 — physical location",
     "INSTALLED_AT": "#34 — physical location",
     "OWNS": "#39 — ownership",
@@ -189,10 +194,17 @@ def test_no_edge_type_this_repo_decided_not_to_add_has_appeared(fleet):
     )
 
 
-def test_nothing_carries_a_physical_location(fleet):
-    """The claim `#34` rests on, and the one most likely to go quietly stale."""
+def test_only_the_site_label_carries_a_physical_location(fleet):
+    """#34 was reversed for `Site` alone; everything else still carries no place.
+
+    The original form of this test asserted that *nothing* carries a location,
+    and it is what caught the reversal when `Site` landed. Deleting it would
+    have removed the only guard over the whole family, so it is narrowed
+    instead: `Site` may carry a place, and a `Board.postcode` or a
+    `Deployment.gps_coordinates` still fails here.
+    """
     found = [f"{label}.{prop}"
-             for label, rows in fleet.nodes.items() if rows
+             for label, rows in fleet.nodes.items() if rows and label != "Site"
              for prop in sorted(properties_of(fleet, label))
              if tokens(prop) & LOCATION_WORDS]
     # Edges carry properties too -- the 6th tuple element -- and a
@@ -204,10 +216,37 @@ def test_nothing_carries_a_physical_location(fleet):
                      for prop in (props or {})
                      if tokens(prop) & LOCATION_WORDS})
     assert not found, (
-        f"location-like properties appeared: {found}. docs/alerting-scope.md "
-        f"says nothing carries a place, and DATASET_CARD.md repeats it. Revisit "
-        f"the decision rather than editing the sentence."
+        f"location-like properties appeared outside `Site`: {found}. "
+        f"docs/location-scope.md reverses #34 for `Site` and for nothing else, "
+        f"and DATASET_CARD.md repeats that. Revisit the decision rather than "
+        f"editing the sentence."
     )
+
+
+def test_the_site_spine_is_exactly_what_was_agreed(fleet):
+    """The reversal, bounded: one label, one edge, and only from `Deployment`.
+
+    `docs/location-scope.md` argues for placing an *instance* and against
+    placing a *type*. Without this, `Board -[:DEPLOYED_AT]-> Site` would satisfy
+    every other test on this page while being the shape that page rejects.
+    """
+    assert "Site" in fleet.nodes, (
+        "`Site` is gone, but docs/location-scope.md says #34 was taken. Either "
+        "the reversal was reverted -- in which case restore `Site` to "
+        "DECLINED_LABELS above and say so in alerting-scope.md -- or the "
+        "generator stopped emitting it."
+    )
+    sources = {src_label for src_label, _s, rel, _tl, _t, _p in fleet.edges
+               if rel == "DEPLOYED_AT"}
+    assert sources == {"Deployment"}, (
+        f"DEPLOYED_AT runs from {sorted(sources)}. docs/location-scope.md "
+        f"places one installed instance, and a Board or a Sensor is a type -- "
+        f"the objection that decision turns on."
+    )
+    targets = {tgt_label for _sl, _s, rel, tgt_label, _t, _p in fleet.edges
+               if rel == "DEPLOYED_AT"}
+    assert targets == {"Site"}, f"DEPLOYED_AT points at {sorted(targets)}, not Site"
+
 
 
 def test_vendor_country_is_the_only_near_miss_and_is_empty_where_it_is_real(fleet):

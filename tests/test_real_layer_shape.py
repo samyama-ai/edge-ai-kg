@@ -11,8 +11,9 @@ kernel registers. It is not 1,030 orphans.
 What it is missing is a *half*, not the joins. The real layer carries the
 hardware and kernel spine and none of the clinical one, so six labels and eleven
 edge types are empty -- including `USES_OPERATOR`, which is the edge the hero
-question traverses. That is why 8 of the 16 catalog queries come back empty
-against it.
+question traverses. That is why 8 of the 16 catalog queries measured for this
+were empty against it -- `EA20` joined the catalog later and is empty against it
+too, since `Site` is generated-only.
 
 These assertions are about **shape, not counts**. The counts move whenever ONNX
 Runtime publishes new kernel registrations -- 734 became 738 during one week --
