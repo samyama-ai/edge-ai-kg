@@ -4,12 +4,22 @@
     python -m demo.demo --url http://127.0.0.1:8080
     python -m demo.demo --fast                   # no typing delays
 
-The story, in five beats:
+The story, in seven beats:
   1. what the graph holds
   2. the question that breaks a document store: what falls back to CPU
   3. what that fallback costs, measured
   4. what quantization unlocks
   5. blast radius: one kernel disappears, what breaks
+  6. electrode to silicon, in one query
+  7. one sensor, one fault, one sentence -- the alert a human is sent
+
+Beat 7 needs the embedded engine, for **two** reasons rather than one. It
+walks `EA17`, which the 1.7.0 server under-traverses and whose `size(r)` it
+rejects (engine note 12) -- and `TASKS_OVER_BUDGET`, below, has an unbounded
+`NEXT_STAGE*0..` walk of its own with the same problem. The guard that keeps
+the embedded-only set honest scans `QUERIES`, and this query is not in the
+catalog, so it cannot see it. If `EA17` is ever reshaped for the server, the
+`--url` skip still has to stay until this query is too.
 """
 from __future__ import annotations
 
@@ -21,6 +31,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
+from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
@@ -60,6 +71,146 @@ def run(client, title: str, cypher: str, note: str = "") -> list:
                   f"{'  --  ' + note if note else ''}[/dim]")
     beat()
     return result.records
+
+
+# Beat 7's one piece of bespoke Cypher, and the reason it is not a catalog
+# entry: `EA18` asks "which deployments miss a clinical task's latency budget"
+# **fleet-wide**, and `EA17` returns per-kind *counts* rather than the ids of
+# the deployments it reached. Neither can answer "how many of **these** tasks
+# -- the ones this sensor feeds -- are over budget", which is the number #42's
+# sentence turns on.
+#
+# **Both** constraints are in the pattern, and the second one is easy to miss.
+# Walking `Sensor <-REQUIRES_SENSOR- ClinicalTask <-SOLVES- Model -> Deployment`
+# alone is wrong: `etl/generate.py` gives each model its `PRECEDES` edge from
+# one sensor picked among those of a matching modality, so a task requiring
+# this sensor is often solved by a model some *other* sensor feeds. Measured on
+# the shipped fleet at `--scale 1.0`: `sensor:00005`'s tasks run on 144
+# deployments its signal never reaches. The subject here, `sensor:00000`, is
+# clean by luck -- which is exactly how this would have shipped unnoticed.
+#
+# So the chain runs `s -> FEEDS -> ... -> PRECEDES -> m -> SOLVES -> t ->
+# REQUIRES_SENSOR -> s`, closing back on the same sensor, and the deployment
+# hangs off `m`. `tests/test_alerting_demo.py` pins the difference on a fixture
+# where the wrong shape blames a deployment the sensor never feeds.
+#
+# `m` is re-bound in **leading** position of the second pattern, not trailing,
+# so engine note 1 does not apply -- and that is measured rather than assumed
+# by the same fixture. Both aggregates count a property (note 9), and there is
+# no `ORDER BY` for note 3 to drop.
+#
+# It returns **no rows at all** when nothing is over budget, rather than a row
+# of zeros: the opening `MATCH` binds nothing, so there is nothing to aggregate
+# over. `alert_sentence` reads a missing row as zero, which is why the
+# no-breach case has a test of its own.
+TASKS_OVER_BUDGET = """
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)
+      -[:PRECEDES]->(m:Model)-[:SOLVES]->(t:ClinicalTask)-[:REQUIRES_SENSOR]->(s),
+      (m)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+WHERE s.id = "{subject}" AND d.latency_ms > t.latency_budget_ms
+WITH count(DISTINCT t.id) AS tasks_over_budget,
+     count(DISTINCT d.id) AS deployments_over_budget
+RETURN tasks_over_budget, deployments_over_budget
+""".replace("{subject}", EA17_SUBJECT)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}" if count == 1 else f"{count:,} {noun}s"
+
+
+def alert_sentence(subject: str, radius: list, budget: list, certs: list) -> str:
+    """The sentence a human is sent, built from the rows the queries returned.
+
+    A function rather than a formatted string inside the beat, for the reason
+    #42 gives: the point of the demo is that the message is a **query result**,
+    not a template somebody maintains forever. A template cannot notice that
+    nothing is over budget today, and would go on implying a breach; this reads
+    every number out of `radius`, `budget` and `certs` and says what is there.
+
+    That is not hypothetical on this repo's own data. `EA18` returns six
+    breaches at `--scale 0.5`, the demo's default, and **none** at `--scale
+    1.0`: the same sentence, generated twice, has to say two different things.
+
+    Takes rows rather than a client so it can be tested without an engine --
+    `tests/test_alerting_demo.py` drives every branch here, including the ones
+    the shipped fleet does not currently produce.
+    """
+    if not radius:
+        return (f"{subject} is degrading, and nothing downstream was found. "
+                f"Either the id is not in the graph or it feeds nothing -- "
+                f"check the id before acting on this.")
+
+    counts = {row[0]: row for row in radius}
+
+    def column(kind: str, index: int) -> int:
+        """One reading of `EA17`'s columns: 1 is `affected`, 2 is `only_via_me`."""
+        return int(counts[kind][index]) if kind in counts else 0
+
+    def affected(kind: str) -> int:
+        return column(kind, 1)
+
+    tasks = affected("ClinicalTask")
+    exclusive = column("ClinicalTask", 2)
+    downstream = ", ".join([
+        _plural(affected("SignalStage"), "signal stage"),
+        _plural(affected("Model"), "model"),
+        _plural(affected("Deployment"), "deployment"),
+        _plural(affected("Board"), "board"),
+    ])
+
+    if tasks == 0:
+        # No budget clause at all: "None of them" would refer to nothing.
+        clinical = "No clinical task depends on it."
+    elif exclusive == 0:
+        clinical = (f"{_plural(tasks, 'clinical task')} depend"
+                    f"{'s' if tasks == 1 else ''} on it, none of them "
+                    f"exclusively.")
+    else:
+        clinical = (f"{_plural(tasks, 'clinical task')} depend"
+                    f"{'s' if tasks == 1 else ''} on it, and "
+                    f"{exclusive:,} of those {'has' if exclusive == 1 else 'have'} "
+                    f"no other source.")
+
+    # A missing row is zero breaches, not missing data: see TASKS_OVER_BUDGET.
+    over_tasks = int(budget[0][0]) if budget else 0
+    over_deployments = int(budget[0][1]) if budget else 0
+    if tasks == 0:
+        degraded = ""
+    elif over_tasks == 0:
+        degraded = "None of them is over its latency budget."
+    else:
+        degraded = (f"{over_tasks:,} of them "
+                    f"{'is' if over_tasks == 1 else 'are'} already over the "
+                    f"latency budget, on "
+                    f"{_plural(over_deployments, 'deployment')}.")
+
+    if certs:
+        named = ", ".join(str(row[0]) for row in certs)
+        compliance = (f"{_plural(len(certs), 'certification')} "
+                      f"{'is' if len(certs) == 1 else 'are'} implicated: "
+                      f"{named}.")
+    else:
+        compliance = "No certification is implicated."
+
+    return (f"{subject} is degrading.\n\n"
+            f"Downstream: {downstream}.\n"
+            f"{(clinical + ' ' + degraded).strip()}\n"
+            f"{compliance}")
+
+
+def closing() -> None:
+    """The panel the walkthrough ends on, however it got there.
+
+    A function because beat 7 can end the demo early over `--url`, and two
+    copies of a closing panel are two things to keep in step.
+    """
+    console.print()
+    console.print(Panel.fit(
+        "[bold]The point[/bold]\n"
+        "Hardware, kernels and models are one connected structure.\n"
+        "Flatten it into JSON and every question above becomes a script.",
+        border_style="bold green"))
+    console.print()
 
 
 def ensure_loaded(client, scale: float) -> None:
@@ -192,13 +343,50 @@ ORDER BY latency_ms ASC
 LIMIT 8
 """, "variable-length path over the DSP chain")
 
+    # ---- Beat 7: one sensor, one fault, one sentence ------------------
     console.print()
-    console.print(Panel.fit(
-        "[bold]The point[/bold]\n"
-        "Hardware, kernels and models are one connected structure.\n"
-        "Flatten it into JSON and every question above becomes a script.",
-        border_style="bold green"))
+    console.rule("[bold]7. One sensor, one fault, one sentence[/bold]")
+    if args.url:
+        # Skipped rather than run and narrated. `EA17` walks `NEXT_STAGE*0..`
+        # and reads `size(r)`; the 1.7.0 server under-traverses the first and
+        # rejects the second (engine note 12), so over HTTP this beat would
+        # either raise mid-demo or -- worse -- print a smaller blast radius,
+        # or "nothing downstream was found", for a sensor that is in the
+        # graph. The alert is the one output in this demo a reader is invited
+        # to trust, so a quietly wrong one is the thing to avoid.
+        say("[yellow]Skipped over --url.[/yellow] This beat walks EA17 and an "
+            "unbounded NEXT_STAGE walk of its own, which the 1.7.0 server does "
+            "not traverse (engine note 12). Run it embedded: "
+            "[bold]python -m demo.demo[/bold]")
+        closing()
+        return
+
+    say(f"3am. [bold]{EA17_SUBJECT}[/bold] starts degrading. What does the "
+        f"on-call engineer actually need to be told?")
+
+    radius = run(client, "EA17 -- blast radius: what stops with it",
+                 BY_ID["EA17"]["cypher"],
+                 "stages, models, deployments, boards and tasks, in one pass")
+    say("`only_via_me` is the column that matters: what has no other source, "
+        "and therefore actually stops.")
+
+    budget = run(client, "Which of those tasks are already over budget",
+                 TASKS_OVER_BUDGET,
+                 "EA18 makes the same budget comparison fleet-wide; this one "
+                 "is scoped to what this sensor feeds")
+    certs = run(client, "EA19 -- certifications implicated",
+                BY_ID["EA19"]["cypher"],
+                "an ops ticket and a reportable event are different things")
+
+    say("Now the message. Every number in it came out of the three answers "
+        "above -- nothing here is a template.")
     console.print()
+    console.print(Panel(alert_sentence(EA17_SUBJECT, radius, budget, certs),
+                        title="[bold]The alert[/bold]", border_style="bold red",
+                        padding=(1, 3)))
+    beat()
+
+    closing()
 
 
 if __name__ == "__main__":
