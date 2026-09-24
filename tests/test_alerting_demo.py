@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import collections
 
+import pytest
+
 from benchmarks.queries import BY_ID, EA17_SUBJECT
 from demo.demo import TASKS_OVER_BUDGET, alert_sentence
 from etl.helpers import create_edges, create_nodes
@@ -170,20 +172,14 @@ def test_the_beat_runs_and_its_sentence_matches_the_rows(
         assert "None of them is over its latency budget." in text
 
 
-def test_tasks_over_budget_matches_ground_truth(
-        engine_factory, operators):  # noqa: F811
-    """`TASKS_OVER_BUDGET` against the same count computed from the `Fleet`.
+def budget_truth(fleet, sensor_id) -> list:
+    """The scoped budget answer, walked from the `Fleet`'s own edges.
 
-    The query is the beat's one piece of bespoke Cypher -- it is not in the
-    catalog, so `tests/test_correctness.py` does not sweep it -- which makes
-    this the only thing standing between the sentence and a plausible wrong
-    number. Walked over the edges here, not re-run as a variant of the same
-    Cypher, and over **the same path the query takes**: an earlier version of
-    both walked `REQUIRES_SENSOR -> SOLVES` only, so the truth agreed with a
-    query that counted deployments the sensor never feeds.
+    Deliberately a different traversal from the query's: a forward walk to the
+    models this sensor feeds, intersected with the tasks that require it. An
+    earlier version walked `REQUIRES_SENSOR -> SOLVES` only, and so agreed with
+    a query that counted deployments the sensor never feeds.
     """
-    client, fleet = build_and_load(engine_factory, operators, seed=SEED, scale=SCALE)
-
     requires, solves, feeds = (collections.defaultdict(set) for _ in range(3))
     nexts, precedes, variant_of, of_variant = (collections.defaultdict(set)
                                                for _ in range(4))
@@ -203,14 +199,14 @@ def test_tasks_over_budget_matches_ground_truth(
         elif rel == "OF_VARIANT":
             of_variant[tgt].add(src)        # variant -> deployments
 
-    reached, queue = set(feeds[EA17_SUBJECT]), list(feeds[EA17_SUBJECT])
+    reached, queue = set(feeds[sensor_id]), list(feeds[sensor_id])
     while queue:
         for stage in nexts[queue.pop()]:
             if stage not in reached:
                 reached.add(stage)
                 queue.append(stage)
     downstream_models = {m for stage in reached for m in precedes[stage]}
-    its_tasks = requires[EA17_SUBJECT]
+    its_tasks = requires[sensor_id]
 
     budgets = {row["id"]: row["latency_budget_ms"]
                for row in fleet.nodes.get("ClinicalTask", ())}
@@ -230,12 +226,95 @@ def test_tasks_over_budget_matches_ground_truth(
                     if measured is not None and measured > budgets[task]:
                         over_tasks.add(task)
                         over_deployments.add(deployment)
+    return [(len(over_tasks), len(over_deployments))] if over_tasks else []
+
+
+def test_tasks_over_budget_matches_ground_truth(
+        engine_factory, operators):  # noqa: F811
+    """`TASKS_OVER_BUDGET` against the same count computed from the `Fleet`.
+
+    The query is the beat's one piece of bespoke Cypher -- it is not in the
+    catalog, so `tests/test_correctness.py` does not sweep it -- which makes
+    this the only thing standing between the sentence and a plausible wrong
+    number. Walked over the edges here, not re-run as a variant of the same
+    Cypher, and over **the same path the query takes**: an earlier version of
+    both walked `REQUIRES_SENSOR -> SOLVES` only, so the truth agreed with a
+    query that counted deployments the sensor never feeds.
+    """
+    client, fleet = build_and_load(engine_factory, operators, seed=SEED, scale=SCALE)
 
     got = _rows(client, TASKS_OVER_BUDGET)
-    want = [(len(over_tasks), len(over_deployments))] if over_tasks else []
+    want = budget_truth(fleet, EA17_SUBJECT)
     assert got == want, (
         f"the scoped budget query returned {got}; the fleet's own edges give "
         f"{want}. One of the two is reading the graph differently.")
+
+
+def test_the_comma_join_holds_at_full_cardinality(request, engine_factory,
+                                                  operators):  # noqa: F811
+    """`TASKS_OVER_BUDGET`'s second pattern, at `--scale 1.0` with real row counts.
+
+    CLAUDE.md is explicit that a re-bind "isn't enforced" and that "at scale,
+    even the comma-separated single-`MATCH` form breaks". This query has one:
+    `(m)<-[:VARIANT_OF]-...` re-binds `m` after the comma. It is in **leading**
+    position rather than trailing, which is not the forbidden shape, but a
+    two-deployment fixture is exactly the cardinality at which the difference
+    does not show, so it is measured here instead.
+
+    A single linear pattern cannot express this question: the chain has to
+    branch at `m`, to the task on one side and the deployment on the other, and
+    the only way to avoid the comma is to re-bind `m` in **trailing** position,
+    which is the shape CLAUDE.md forbids outright. So the comma stays and the
+    join is checked.
+
+    The shipped fleet has no breach at `--scale 1.0`, so an honest check has to
+    make one: every task budget is dropped to 1 ms before loading, which puts
+    most deployments over. That is the row count an unenforced join would
+    inflate -- it would pair every downstream model with every deployment.
+
+    **Measured 2026-09-24 at scale 1.0 with budgets forced to 1 ms**: all 14
+    sensors, up to 396 deployments over budget for one sensor and 3,235 across
+    the fleet, **0 disagreements** with the Python walk.
+
+    Opt-in via `--full-scale`, like `test_ea17_matches_ground_truth_at_full_scale`:
+    the load costs about three minutes. Skipped from the body, not a fixture,
+    because `conftest.py` converts setup-phase skips under `--no-skips` and
+    "you did not ask for the slow check" is not a broken environment.
+    """
+    if not request.config.getoption("--full-scale"):
+        pytest.skip("needs --full-scale (about three minutes to build the graph)")
+
+    from etl import generate as gen
+    from etl.helpers import create_edges as add_edges
+    from etl.helpers import create_nodes as add_nodes
+    from etl.loader import NODE_LABELS
+
+    fleet = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
+    for row in fleet.nodes["ClinicalTask"]:
+        row["latency_budget_ms"] = 1
+    client = engine_factory()
+    for label in NODE_LABELS:
+        if fleet.nodes.get(label):
+            add_nodes(client, GRAPH, label, fleet.nodes[label])
+    add_edges(client, GRAPH, fleet.edges)
+
+    disagreed, busiest = [], 0
+    for row in fleet.nodes["Sensor"]:
+        sensor = row["id"]
+        want = budget_truth(fleet, sensor)
+        got = _rows(client, TASKS_OVER_BUDGET.replace(EA17_SUBJECT, sensor))
+        busiest = max(busiest, want[0][1] if want else 0)
+        if got != want:
+            disagreed.append((sensor, got, want))
+
+    assert busiest > 100, (
+        f"the injected breach only reached {busiest} deployments for the "
+        f"busiest sensor; this check is meant to run at a cardinality where an "
+        f"unenforced join would show, so the injection is not doing its job")
+    assert not disagreed, (
+        f"{len(disagreed)} sensors disagree with the fleet's own edges at "
+        f"scale 1.0: {disagreed[:3]}. The comma-joined second pattern is not "
+        f"enforcing its join at this cardinality.")
 
 
 def test_only_deployments_this_sensor_feeds_are_counted(engine_factory):
@@ -287,6 +366,45 @@ def test_only_deployments_this_sensor_feeds_are_counted(engine_factory):
         "the scoped budget query should see one task and the one deployment "
         "sensor:A actually feeds; two deployments means it is joining through "
         "the task alone, or that the second pattern's join is not enforced")
+
+
+def test_a_task_that_does_not_require_this_sensor_is_not_counted(engine_factory):
+    """The `-[:REQUIRES_SENSOR]->(s)` that closes the loop, pinned directly.
+
+    The other direction of the same pairing. `sensor:A` feeds `model:X`, and
+    `model:X` solves a task that requires only `sensor:B` -- so the deployment
+    is downstream of `sensor:A`, is over budget, and still must not appear in
+    `sensor:A`'s alert: the sentence counts tasks that *depend on this
+    sensor*, and this one does not.
+
+    Without the loop back to `(s)`, the query would count it, and the fleet
+    tests would not notice: stages are sampled from a shared pool, so whether
+    such a model exists at `SCALE = 0.3` is luck.
+    """
+    client = engine_factory()
+    create_nodes(client, GRAPH, "Sensor",
+                 [{"id": "sensor:A", "modality": "ecg"},
+                  {"id": "sensor:B", "modality": "ecg"}])
+    create_nodes(client, GRAPH, "SignalStage", [{"id": "stage:A", "kind": "filter"}])
+    create_nodes(client, GRAPH, "Model", [{"id": "model:X", "name": "X"}])
+    create_nodes(client, GRAPH, "ModelVariant", [{"id": "var:X"}])
+    create_nodes(client, GRAPH, "Deployment",
+                 [{"id": "deploy:X", "latency_ms": 900.0}])
+    create_nodes(client, GRAPH, "ClinicalTask",
+                 [{"id": "task:B", "latency_budget_ms": 100}])
+    create_edges(client, GRAPH, [
+        ("Sensor", "sensor:A", "FEEDS", "SignalStage", "stage:A", None),
+        ("SignalStage", "stage:A", "PRECEDES", "Model", "model:X", None),
+        ("Model", "model:X", "SOLVES", "ClinicalTask", "task:B", None),
+        ("ClinicalTask", "task:B", "REQUIRES_SENSOR", "Sensor", "sensor:B", None),
+        ("ModelVariant", "var:X", "VARIANT_OF", "Model", "model:X", None),
+        ("Deployment", "deploy:X", "OF_VARIANT", "ModelVariant", "var:X", None),
+    ])
+
+    assert _rows(client, TASKS_OVER_BUDGET.replace(EA17_SUBJECT, "sensor:A")) == [], (
+        "sensor:A feeds this deployment, but the breached task requires "
+        "sensor:B. Counting it would put a task in the alert that the line "
+        "above -- 'N clinical tasks depend on it' -- does not count.")
 
 
 def test_the_pages_that_describe_the_beat_are_not_ahead_of_the_code():

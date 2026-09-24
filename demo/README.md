@@ -28,8 +28,10 @@ ending in the sentence an on-call engineer would be sent.
 
 That last beat prints `EA17`, a budget query scoped to the sensor, and `EA19`,
 then builds the message out of the rows they returned. It is not a template:
-at `--scale 0.5` it reports a task already over budget, and at `--scale 1.0`,
-where no deployment misses its budget, it says so instead.
+at `--scale 0.5` it reports one of the sensor's tasks already over budget, and
+at `--scale 1.0`, where nothing this sensor feeds is over its budget, it says
+so instead. The beat needs the embedded engine and skips over `--url`, because
+both of its walks are unbounded (engine note 12).
 
 ```bash
 python -m demo.demo            # embedded

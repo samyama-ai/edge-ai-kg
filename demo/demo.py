@@ -13,10 +13,13 @@ The story, in seven beats:
   6. electrode to silicon, in one query
   7. one sensor, one fault, one sentence -- the alert a human is sent
 
-Beat 7 needs the embedded engine: it walks `EA17`, which the 1.7.0 server
-under-traverses and whose `size(r)` it rejects (engine note 12). Over `--url`
-the beat says so and skips, rather than printing a smaller blast radius as if
-it were the answer.
+Beat 7 needs the embedded engine, for **two** reasons rather than one. It
+walks `EA17`, which the 1.7.0 server under-traverses and whose `size(r)` it
+rejects (engine note 12) -- and `TASKS_OVER_BUDGET`, below, has an unbounded
+`NEXT_STAGE*0..` walk of its own with the same problem. The guard that keeps
+the embedded-only set honest scans `QUERIES`, and this query is not in the
+catalog, so it cannot see it. If `EA17` is ever reshaped for the server, the
+`--url` skip still has to stay until this query is too.
 """
 from __future__ import annotations
 
@@ -195,6 +198,21 @@ def alert_sentence(subject: str, radius: list, budget: list, certs: list) -> str
             f"{compliance}")
 
 
+def closing() -> None:
+    """The panel the walkthrough ends on, however it got there.
+
+    A function because beat 7 can end the demo early over `--url`, and two
+    copies of a closing panel are two things to keep in step.
+    """
+    console.print()
+    console.print(Panel.fit(
+        "[bold]The point[/bold]\n"
+        "Hardware, kernels and models are one connected structure.\n"
+        "Flatten it into JSON and every question above becomes a script.",
+        border_style="bold green"))
+    console.print()
+
+
 def ensure_loaded(client, scale: float) -> None:
     existing = client.query("MATCH (n) RETURN count(n) AS n", GRAPH).records[0][0]
     if existing > 1000:
@@ -336,16 +354,11 @@ LIMIT 8
         # or "nothing downstream was found", for a sensor that is in the
         # graph. The alert is the one output in this demo a reader is invited
         # to trust, so a quietly wrong one is the thing to avoid.
-        say("[yellow]Skipped over --url.[/yellow] This beat walks EA17, which "
-            "the 1.7.0 server does not traverse (engine note 12). Run it "
-            "embedded: [bold]python -m demo.demo[/bold]")
-        console.print()
-        console.print(Panel.fit(
-            "[bold]The point[/bold]\n"
-            "Hardware, kernels and models are one connected structure.\n"
-            "Flatten it into JSON and every question above becomes a script.",
-            border_style="bold green"))
-        console.print()
+        say("[yellow]Skipped over --url.[/yellow] This beat walks EA17 and an "
+            "unbounded NEXT_STAGE walk of its own, which the 1.7.0 server does "
+            "not traverse (engine note 12). Run it embedded: "
+            "[bold]python -m demo.demo[/bold]")
+        closing()
         return
 
     say(f"3am. [bold]{EA17_SUBJECT}[/bold] starts degrading. What does the "
@@ -373,13 +386,7 @@ LIMIT 8
                         padding=(1, 3)))
     beat()
 
-    console.print()
-    console.print(Panel.fit(
-        "[bold]The point[/bold]\n"
-        "Hardware, kernels and models are one connected structure.\n"
-        "Flatten it into JSON and every question above becomes a script.",
-        border_style="bold green"))
-    console.print()
+    closing()
 
 
 if __name__ == "__main__":
