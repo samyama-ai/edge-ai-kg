@@ -35,7 +35,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
-| #42 | a worked demo beat | no | **take** |
+| #42 | a worked demo beat | no | **take** — delivered as beat 7 of `demo.demo` |
 | #34 | where the sensor physically is | `Site` | **decline** |
 | #39 | who owns the affected asset | `Team` | **decline** |
 | #38 | alert / rule / threshold state | `Alert` | **decline** |
