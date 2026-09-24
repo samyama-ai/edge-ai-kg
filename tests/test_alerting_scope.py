@@ -138,9 +138,10 @@ def test_the_delivery_claims_match_the_catalog():
     - every id the page says is delivered must be in `BY_ID`;
     - the range the page states ("the catalog is `EA01`-`EAnn`") must be the
       catalog's actual last id;
-    - and a page still calling an issue pending while its query exists fails,
-      whatever words it uses, because the delivered ids are read from the
-      verdict table rather than from a sentence.
+    - and an issue whose query exists while the page carries no "delivered as"
+      claim for it fails. That is the absence of a claim, not the presence of
+      the word "pending" -- any other wording fails identically, because what
+      is compared is the set of claimed ids against the catalog.
     """
     import re
 

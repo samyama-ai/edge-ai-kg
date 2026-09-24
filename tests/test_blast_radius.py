@@ -22,14 +22,14 @@ The catalog entry points here for these, because each is a paragraph:
    time and would catch an inflated count; the full-scale one is what settles
    *cardinality*, which note 1 says a small graph cannot. Do not edit those
    patterns without re-running it.
-2. **It needs the `samyama>=1.7.1` floor #104 landed.** Each leg's second
-   `WITH` introduces all-new aliases -- note 10's shape, which 0.6.x rejects,
-   so on a build below the floor `EA17` does not run at all.
-   `tests/test_engine_version.py` is what fails if the floor is lowered.
-3. **`+1/+2/+4/+5` are single schema-fixed hops**, not an assumed chain length:
-   `FEEDS`, then `PRECEDES`, then `VARIANT_OF`+`OF_VARIANT`, then `ON_BOARD`.
-   The variable part is `size(r)` over `NEXT_STAGE`. A schema change that
-   inserts a hop must move them.
+2. **It needs the `samyama>=1.7.1` floor #105 wrote and #104 landed.** Each
+   leg's second `WITH` introduces all-new aliases -- note 10's shape, which
+   0.6.x rejects, so below the floor `EA17` does not run at all;
+   `tests/test_engine_version.py` fails if the floor is lowered.
+3. **`+1/+2/+4/+5` are single schema-fixed hops**, not an assumed chain
+   length: `FEEDS`, `PRECEDES`, `VARIANT_OF`+`OF_VARIANT`, `ON_BOARD`. The
+   variable part is `size(r)` over `NEXT_STAGE`; a schema change that inserts
+   a hop must move them.
 4. **The sensor id appears ten times.** Retarget with `.replace`, never by hand;
    `test_retargeting_replaces_every_occurrence_of_the_sensor_id`
    (in `tests/test_blast_radius_semantics.py`) pins it. If the
@@ -47,7 +47,8 @@ When the query and the truth share a *modelling* assumption, agreement proves
 the traversal walks what it was told to walk -- not that walking that is the
 answer to the question. The first version of `EA17` reported plain reachability
 and matched this BFS exactly for all 14 sensors, and both were wrong together:
-`etl/generate.py:434` samples each sensor's chain from one shared 16-stage pool,
+`etl/generate.py` samples each sensor's chain (`rng.sample(stages, ...)`)
+from one shared 16-stage pool,
 so an unbounded walk leaves the sensor's own 3-5 stages and reaches 15 of 16.
 "What stops when this sensor fails" came back as the whole fleet.
 
@@ -243,27 +244,21 @@ class Truth:
     def task_stops_without(self, task: str, sensor_id: str) -> bool:
         """Whether losing this sensor leaves the task short of a modality.
 
-        Not "is this the task's only sensor". `etl/generate.py` links a task to
-        every sensor whose modality it requires, so the other sensors on a task
-        are alternatives only when they supply the same modality. A task needing
+        Not "is this the task's only sensor". `etl/generate.py` links a task
+        to every sensor whose modality it requires, so other sensors are
+        alternatives only when they supply the same modality: a task needing
         ECG and PPG, with two ECG sensors and one PPG, survives losing an ECG
-        sensor and stops on losing the PPG one -- and the previous rule said
-        neither stopped it, because the task had three sensors.
+        sensor and stops on losing the PPG one.
 
-        **This half is a restatement of the query's rule, not an independent
-        check.** `EA17`'s ClinicalTask leg matches `o.modality = s.modality`
-        and so does this; there is no second way to compute "the task loses a
-        modality" that is not the same sentence. Saying otherwise, as an
-        earlier version of this docstring did, overstated what the comparison
-        proves for this one kind.
-
-        What it does prove is that the engine agrees with Python about the
-        rule at full cardinality -- a lost join or a mis-grouped aggregate
-        still shows up here. The *rule itself* is checked independently by
-        `tests/test_blast_radius_semantics.py`, on a fixture with two ECG
-        sensors and one PPG where the right answer is known by construction
-        rather than derived. The other four kinds are genuinely independent:
-        `exclusive` walks every other sensor and subtracts.
+        **This half restates the query's rule rather than checking it
+        independently.** `EA17`'s ClinicalTask leg matches
+        `o.modality = s.modality` and so does this; there is no second way to
+        say "the task loses a modality". What it proves is that the engine
+        agrees with Python at full cardinality -- a lost join or a mis-grouped
+        aggregate still shows up. The *rule* is checked in
+        `tests/test_blast_radius_semantics.py`, on a fixture where the answer
+        is known by construction. The other four kinds are genuinely
+        independent: `exclusive` walks every other sensor and subtracts.
         """
         sensors = self.requires[task]
         if sensor_id not in sensors:
@@ -342,18 +337,24 @@ def retargeted_ea17(sensor_id: str) -> str:
     return cypher
 
 
-def run_ea17(client, sensor_id: str) -> dict[str, tuple[int, int, int]]:
-    cypher = retargeted_ea17(sensor_id)
-    rows = client.query(cypher, GRAPH).records
-    # Keyed by `kind`, so a duplicate would overwrite silently. `EA17` is five
-    # `UNION ALL` legs each returning one row, so two rows for one kind means a
-    # leg started returning more than it aggregates to -- a real change in the
-    # answer, and one this dict would otherwise hide.
+def assert_one_row_per_kind(rows) -> None:
+    """One row per kind, or a dict built from `rows` hides half the answer.
+
+    `EA17` is five `UNION ALL` legs each returning one row, so two rows for a
+    kind means a leg stopped aggregating -- which a dict comprehension would
+    swallow. Shared with `tests/test_blast_radius_semantics.py`, which checks
+    rows it fetched itself: the invariant is `EA17`'s, not one test's.
+    """
     kinds = [row[0] for row in rows]
     assert len(kinds) == len(set(kinds)), (
         f"EA17 returned more than one row for some kind: {kinds}. Each leg "
         f"aggregates to a single row; this mapping would keep only the last."
     )
+
+
+def run_ea17(client, sensor_id: str) -> dict[str, tuple[int, int, int]]:
+    rows = client.query(retargeted_ea17(sensor_id), GRAPH).records
+    assert_one_row_per_kind(rows)
     return {row[0]: (row[1], row[2], row[3]) for row in rows}
 
 
@@ -382,10 +383,9 @@ def test_ea17_reports_every_kind_the_question_names(loaded):
     property of the fixture rather than of the query; `test_ea17_matches_
     ground_truth_for_every_sensor` covers it wherever it does occur.
 
-    The dict comparison there is full equality, so a dropped kind already fails
-    -- an earlier version of this docstring claimed otherwise. Kept as a
-    targeted signal: this one says *which* kind went missing, where the other
-    prints two dicts and leaves the reader to diff them.
+    The dict comparison there is full equality, so a dropped kind already
+    fails. This one is kept as the targeted signal: it names *which* kind went
+    missing, where the other prints two dicts to diff.
     """
     client, fleet = loaded
     sensor_id = fleet.nodes["Sensor"][0]["id"]

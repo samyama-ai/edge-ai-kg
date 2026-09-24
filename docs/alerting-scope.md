@@ -59,21 +59,26 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35`, `#37` and `#40` are delivered — as `EA17`, `EA18` and `EA19` — and
-reach `main` in the same merge as this paragraph, so the page and the queries
-arrive together. The catalog is `EA01`-`EA19`.
+`#35`, `#37` and `#40` are delivered — as `EA17`, `EA18` and `EA19`. The page
+and the queries land together, so wherever this is read the three are in the
+catalog beside it. The catalog is `EA01`-`EA19`.
 
-That is not a promise this page makes about itself:
+That is not a promise this page makes about itself.
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
 reads every "delivered as `EAnn`" **anywhere on this page** — the verdict table
 is where they happen to be written, but the check is not scoped to it — and
-fails if the catalog does not hold one, fails if the stated `EA01`-`EAnn` range
-is not the catalog's actual last id, and fails if an issue is still described
-as pending while its query exists.
+fails three ways: if the catalog does not hold a claimed id, if the stated
+`EA01`-`EAnn` range is not the catalog's actual last id, and if `EA17`, `EA18`
+or `EA19` is in the catalog with **no delivery claim written for it**. That
+last one is about the claim being absent, not about the word "pending": a page
+that described them in any other words would fail it just the same.
 
-`EA17` is the one catalog query the **1.7.0 server** cannot run: that build does
-not traverse variable-length relationships and rejects `size(r)` on one
-(engine note 12). Note 12 is careful about what that does and does not show —
+`EA17` is the one catalog query the **1.7.0 server** cannot answer *at all*:
+that build does not traverse variable-length relationships and rejects
+`size(r)` on one (engine note 12). `EA07` uses a variable-length walk too, but
+a bounded one with no `size(r)`, so the server runs it and returns only the
+zero-length match -- wrong rows rather than an error, which note 12 calls the
+more dangerous half. Note 12 is careful about what that does and does not show —
 1.7.0 *embedded* was never measured, so this may be a fix that landed between
 1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
 it runs on embedded 1.7.1 and fails on the 1.7.0 server.

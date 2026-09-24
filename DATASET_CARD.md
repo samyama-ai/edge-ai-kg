@@ -254,8 +254,10 @@ and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 
 **16 of the 17 catalog queries that existed on that date** were verified to
 return rows against the imported snapshot. The seventeenth was `EA17`, which
-raises there rather than returning nothing: the 1.7.0 server rejects `size(r)`
-on a variable-length relationship (engine note 12). `EA18` and `EA19` post-date
+raised there rather than returning nothing. The *explanation* came a day later:
+engine note 12 -- the 1.7.0 server rejecting `size(r)` on a variable-length
+relationship -- was found 2026-09-10, so the snapshot run recorded the raise
+and note 12 is what later accounted for it. `EA18` and `EA19` post-date
 the snapshot run and were **not** part of it, so this paragraph describes 17
 queries deliberately -- restating it as 19 would claim a verification nobody
 performed.
