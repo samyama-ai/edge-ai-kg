@@ -19,11 +19,19 @@ python -m demo.questions --only EA01 EA06         # just these
 python -m demo.questions --fast                   # no pacing
 ```
 
-## `demo.demo` — the story, in six beats
+## `demo.demo` — the story, in seven beats
 
 What the graph holds, what silently falls back to the CPU, what that costs,
-what quantization unlocks, the blast radius of losing one kernel, and the full
-electrode-to-silicon path.
+what quantization unlocks, the blast radius of losing one kernel, the full
+electrode-to-silicon path, and — added for #42 — one sensor degrading at 3am,
+ending in the sentence an on-call engineer would be sent.
+
+That last beat prints `EA17`, a budget query scoped to the sensor, and `EA19`,
+then builds the message out of the rows they returned. It is not a template:
+at `--scale 0.5` it reports one of the sensor's tasks already over budget, and
+at `--scale 1.0`, where nothing this sensor feeds is over its budget, it says
+so instead. The beat needs the embedded engine and skips over `--url`, because
+both of its walks are unbounded (engine note 12).
 
 ```bash
 python -m demo.demo            # embedded
