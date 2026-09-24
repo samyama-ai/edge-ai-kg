@@ -75,24 +75,27 @@ That is not a promise this page makes about itself.
 reads every "delivered as `EAnn`" **anywhere on this page** — the verdict table
 is where they happen to be written, but the check is not scoped to it — and
 fails three ways: if the catalog does not hold a claimed id, if the stated
-`EA01`-`EAnn` range is not the catalog's actual last id, and if `EA17`, `EA18`
-or `EA19` is in the catalog with **no delivery claim written for it**. That
-last one is about the claim being absent, not about the word "pending": a page
-that described them in any other words would fail it just the same.
+`EA01`-`EAnn` range is not the catalog's actual last id, and if a query named
+in the **verdict table** exists in the catalog with no delivery claim written
+for it. That last one turns on the claim being absent rather than on the word
+"pending", and it reads the table rather than a fixed list of ids.
 
-`EA17` is the one catalog query the **1.7.0 server** cannot answer *at all*:
+What it does not check is the prose: a paragraph elsewhere on this page could
+still describe a shipped query as pending, and only the table is compared
+against the catalog.
+
+`EA17` is the one catalog query the **1.7.0 server** cannot answer at all:
 that build does not traverse variable-length relationships and rejects
 `size(r)` on one (engine note 12). `EA07` uses a variable-length walk too, but
-a bounded one with no `size(r)`, so the server runs it and returns only the
-zero-length match -- wrong rows rather than an error, which note 12 calls the
-more dangerous half. Note 12 is careful about what that does and does not show —
+a bounded one with no `size(r)`, so the server runs it — and note 12 measured
+the two builds returning **byte-identical rows** for it. That is luck rather
+than robustness: `EA07` ends `ORDER BY latency_ms ASC LIMIT 10` and the ten
+lowest-latency paths happen to be reachable at zero hops on this graph, so
+the server's smaller candidate set gives the same answer. Nothing enforces
+it. Note 12 is careful about what that does and does not show —
 1.7.0 *embedded* was never measured, so this may be a fix that landed between
 1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
 it runs on embedded 1.7.1 and fails on the 1.7.0 server.
-`tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog` —
-the same check as above — keeps this honest in both directions: it fails if the
-page calls `#35` pending while `EA17` is in the catalog, and if `EA17` is
-reverted while the page still says it is delivered.
 
 ## Why the three are declined
 

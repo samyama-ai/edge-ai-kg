@@ -253,14 +253,11 @@ and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 2026-09-09 with `python -m benchmarks.snapshot` (#45).
 
 **16 of the 17 catalog queries that existed on that date** were verified to
-return rows against the imported snapshot. The seventeenth was `EA17`, which
-raised there rather than returning nothing. The *explanation* came a day later:
-engine note 12 -- the 1.7.0 server rejecting `size(r)` on a variable-length
-relationship -- was found 2026-09-10, so the snapshot run recorded the raise
-and note 12 is what later accounted for it. `EA18` and `EA19` post-date
-the snapshot run and were **not** part of it, so this paragraph describes 17
-queries deliberately -- restating it as 19 would claim a verification nobody
-performed.
+return rows against the imported snapshot. The seventeenth, `EA17`, raised
+instead: the 1.7.0 server rejects `size(r)` over a variable-length
+relationship ([engine note 12](docs/engine-notes.md)). `EA18` and `EA19`
+post-date this run and were not part of it; the catalog is larger now, and
+this paragraph reports what was verified then.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
 below a fresh build's 25,150 / 76,303: it was exported from an earlier build and

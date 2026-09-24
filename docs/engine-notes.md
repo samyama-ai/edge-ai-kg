@@ -1,16 +1,67 @@
-# Engine notes -- Samyama Graph v1.7.0 (and the embedded build, notes 10-13b)
+# Engine notes -- Samyama Graph (notes 10-13b cover the embedded build)
 
-> **Partly superseded, 2026-09-21.** Notes 10 and 11 are **resolved**: they
-> were `samyama` 0.6.1 against a 1.7.0 server, not two builds disagreeing, and
-> `pyproject.toml` now floors the engine at 1.7.1 (#56). Notes 1-6, 8 and 9 do
-> not reproduce on *embedded* 1.7.1 either -- `python -m
-> benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
-> 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
-> Note 7 has no probe. Notes 1-11 below are the original record, edited only
-> where a later measurement contradicted them. **New, and all measured on
-> embedded 1.7.1:** notes 12, 13 and 13b, section **3c** (`ORDER BY` after
-> `UNION ALL`), and the trailing-rebind addendum under note 1. #109 rewrites notes 10 and 11
-> themselves (it replaces #94, which was closed unmerged).
+Notes 1-9 were measured on the **v1.7.0 server**; notes 10 and 11 on embedded
+**0.6.1** against that server, which is what made them look like a build
+difference. Notes 12, 13 and 13b, section 3c and the trailing-rebind addendum
+under note 1 were all measured on **embedded 1.7.1** and are newer than the
+rest. The banner below gives what has been re-measured since, and when.
+
+> **Ten of the eleven notes do not reproduce on `samyama` 1.7.1 (embedded).**
+> That is two events, and collapsing them into one date would misdate the
+> evidence:
+>
+> - **Notes 10 and 11 (#56):** measured 2026-09-08 on an embedded build moved
+>   from 0.6.1 to 1.7.1. Both stopped reproducing, so the difference was
+>   version skew rather than one between the builds. The `samyama>=1.7.1`
+>   floor that makes 1.7.1 what you install landed afterwards, in `d37836c`
+>   on 2026-09-16.
+> - **Notes 1-6, 8 and 9 (#104):** re-probed by
+>   `benchmarks/engine_notes_probe`, committed 2026-09-16 (`7d0b565`) and
+>   merged to `main` with that PR on 2026-09-21. None of them reproduces
+>   either. Note 1 was run at cardinality 300, where a cartesian product
+>   would return 90,000 rows instead of 300. The sub-behaviours the rules
+>   below depend on -- 3b (only the first `ORDER BY` key), 4b (an int
+>   property against a float literal) and 8b (`<>` matching nulls) -- are
+>   separate probes and are gone too.
+>
+> **Newer than the re-measurement above, and not part of it:** notes 12, 13
+> and 13b, section **3c** (`ORDER BY` after `UNION ALL`) and the
+> trailing-rebind addendum under note 1, all measured on embedded 1.7.1 while
+> writing `EA17` and `EA18`. Notes 10 and 11 were rewritten in their own words
+> by #109, which has merged; this banner no longer forwards to it.
+>
+> The probe is the authority here rather than this paragraph, and it has been
+> wrong before: two of its own review rounds fixed verdicts that read FIXED
+> when the fixture had not been built. Re-run it rather than quoting this.
+>
+> **Note 7 is the exception, and is not measured either way.** It is a property
+> of the OSS *server's* HTTP path, and the probe runs embedded, where there is
+> no tenant boundary to ignore. Do not read "ten of eleven" as evidence about
+> it. Re-run the rest yourself:
+>
+> ```bash
+> python -m benchmarks.engine_notes_probe --scale 300
+> ```
+>
+> `--scale` is not optional for a meaningful answer. Without it note 1 is
+> **not run at all** -- the probe skips it and reports INCONCLUSIVE, rather
+> than running a small fixture and discarding the verdict. Its own text below
+> is why: a 6-node reproduction proves nothing, because the join bug only
+> appears once cardinalities are real. The CLI also refuses `--scale` under 10,
+> where a cartesian product and the correct answer are too close to tell
+> apart.
+>
+> **The workarounds stay for now, and this file is not yet history.** Two
+> reasons, both narrow. Notes 1-9 were measured against the **1.7.0 HTTP
+> server**, and the probe runs **embedded** -- a different binary, which is
+> precisely the assumption #56 punished. And unwinding the workarounds means
+> editing the catalog, the loader and `etl/helpers.py`, which is a change that
+> deserves its own review rather than riding along inside a version pin.
+>
+> So: read the rules below as still binding, and treat their *justification* as
+> pending re-measurement against the server. Whoever picks that up should start
+> from the probe, not from this prose -- asserting "notes 1-9 are unaffected"
+> without running anything is the mistake that produced this banner.
 
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
@@ -20,40 +71,60 @@ Notes 1-9 were observed on the OSS engine at v1.7.0
 (`target/release/samyama --http-port 8080`). Every one of them is load-bearing:
 the loader or the query catalog works around it. Verified 2026-08-14.
 
-**Versions these describe.** Notes 1-9 are the **server** at 1.7.0
-(`ghcr.io/samyama-ai/samyama-graph:1`), as the paragraph above says. Where an
-embedded build is involved -- notes 10 and 11, which compare the two -- it was
-`samyama` 0.6.1 from pip, which is what `pyproject.toml` resolved when they
-were written. **Notes 12, 13 and 13b were measured on embedded 1.7.1.** Since
-#104 the floor is `samyama>=1.7.1`, so a fresh install no longer resolves the
-0.6.1 build notes 10 and 11 describe -- which is why those two are marked
-resolved, and why the rest of this page is pending a re-measurement against the
-server rather than a live record of it.
+**Versions these describe.** The server is
+`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0; the embedded build is
+`samyama` 1.7.1 from pip, pinned by `pyproject.toml` as `samyama>=1.7.1`.
+**Notes 12, 13 and 13b were measured on that embedded 1.7.1 build**, not on
+the server, and are newer than notes 1-11.
 
-**Notes 10 and 11 are a different kind of entry.** Neither is a behaviour of the
-server: both are disagreements between the server and the in-process embedded
-build, neither is filed upstream, and neither is worked around in the catalog
-today -- note 11 has a known workaround that is deliberately deferred to #56,
-note 10 has none established. Between them they are why three tests in
-`tests/test_correctness.py` **were** marked `xfail` until #105 raised the floor
-to `samyama>=1.7.1` and removed every one of them; the table is the record of
-what they excused, not of the suite today:
+**Notes 10 and 11 are resolved, and kept as history (#56).** They were never
+behaviours of the server. They were disagreements between the server and the
+in-process embedded build — and the cause turned out to be version skew rather
+than a design difference: `pyproject.toml` asked for `samyama>=0.6.0` unpinned
+and resolved **0.6.1**, an engine two minor versions behind the 1.7.0 server the
+other notes were measured against. `SamyamaClient.embedded().status()` reports
+the engine's own version, which is what made this visible.
 
-| Test | Excused | Note |
-|---|---|---|
-| `test_every_catalog_query_runs_and_returns_rows` | `[EA01]`, `[EA02]` only | 10 |
-| `test_order_by_is_actually_applied` | `[EA01]`, `[EA02]` only | 10 |
-| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | whole test | **11** |
+Upgrading the embedded build to 1.7.1 makes both notes stop reproducing, and
+`#56`'s question — *which build is authoritative?* — dissolves rather than gets
+answered. There was never a disagreement between two modes of one engine to
+adjudicate; there were two engines. The four tests they excused now pass
+unmarked, and `tests/test_engine_version.py` holds the floor, re-running note
+11's reproduction so a downgrade fails loudly instead of silently.
 
-Three test functions, **five xfailed parameters** in the run output while they
-stood. The two sweeps are parametrised over the catalog so only the affected
-queries were excused: marking either whole would have excused the rest, and those two are
-what `CLAUDE.md` calls the catalog-wide invariant enforcers. The marks are
-applied with `request.applymarker`, not `pytest.xfail()` -- the imperative form
+Four test functions, six xfail reports in the run output — the two sweeps were
+parametrised, so each contributed two:
+
+| Test | Was excused | Mark | Note | Now |
+|---|---|---|---|---|
+| `test_every_catalog_query_runs_and_returns_rows` | `[EA01]`, `[EA02]` | `strict=False` | 10 | passes |
+| `test_order_by_is_actually_applied` | `[EA01]`, `[EA02]` | `strict=False` | 10 | passes |
+| `test_ea04_quantization_unlock_is_not_a_cartesian_product` | whole test | `strict=True` | **11** | passes |
+| `test_empty_answers.py::test_ea01_zero_row_case` | whole test | `strict=True` | 10 | passes, and gained the control it lacked |
+
+**The two mark kinds reported the fix differently, and both were deliberate.**
+The `strict=False` sweeps reported XPASS — a note, not a failure, so the suite
+stayed green while the divergence stayed visible. The two `strict=True` tests
+*failed* the run as `XPASS(strict)`, which is what strictness is for: each
+guards a filter that silently drops rows, and a non-strict mark there could
+outlive the fix and leave the answer unchecked. So the first pair said "you can
+remove us" and the second pair said "you must".
+
+Those marks are gone. The parametrised pair is described here because *how* it
+was written is why this closed cleanly: the sweeps were parametrised over the
+catalog so only the affected queries were excused, and the marks were applied
+with `request.applymarker` rather than `pytest.xfail()`. The imperative form
 never runs the body, so a parameter could only ever report XFAIL and the XPASS
-that says "the divergence is gone, remove the mark" would never arrive.
+that says "the divergence is gone, remove the mark" would never have arrived. It
+did arrive, on the first run against 1.7.1.
 
-Verified 2026-08-28 and 2026-08-31, both tracked at #56.
+Verified 2026-08-28 and 2026-08-31; resolved and re-verified 2026-09-08.
+
+Notes 1-9 keep their workarounds, but "unaffected" would be too strong: none of
+notes 1-6, 8 and 9 reproduces on embedded 1.7.1 either (see the banner at the
+top of this file; note 7 is not probed either way). They were measured against
+the 1.7.0 *server*, which has not been re-probed, so the rules stay binding
+until it is.
 
 ---
 
@@ -373,14 +444,17 @@ Every `count(DISTINCT x)` in the catalog is written `count(DISTINCT x.id)`.
 
 ---
 
-## 10. The 0.6.1 embedded build does not register an alias introduced by a second `WITH`
+## 10. `samyama` 0.6.1 did not register an alias introduced by a second `WITH`
 
-> Not filed upstream. Tracked here as #56, and **resolved**: it read as a
-> disagreement between two builds and turned out to be version skew -- 0.6.1
-> from pip against a 1.7.0 server. Kept as history, because the wrong
-> conclusion is the useful part.
+> **RESOLVED by #56 — version skew, not a build difference. 1.7.1 is the floor.**
+> Not filed upstream; there was nothing to file. This was an old embedded engine
+> against a newer server, not a defect in either. Kept because it explains why
+> `EA01` and `EA02` carried `xfail` marks, and because the *shape* below is worth
+> knowing if anyone meets a 0.6.x build again.
 
-**Severity: correctness. Raises on the embedded build, correct on the server.**
+**Severity when live: correctness. Raised on the embedded build, correct on the
+server.** All eight rows below now agree; verified on 1.7.1 with the same
+statements.
 
 `SamyamaClient.embedded()` (`samyama` 0.6.1 from pip) and the HTTP server
 (`ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0) do not answer the same
@@ -435,22 +509,30 @@ EA01 already needs a `WITH` for its anti-join, so the projection is a second one
 step, not a projection, and nothing about note 3 is involved. It fails because
 the alias is new, which is the rule above.
 
-Both return rows against the server (`run_benchmark` reports 16/16, 0 failed)
-and both fail under `pytest`, which uses the embedded build.
+Both returned rows against the server (`run_benchmark` reported 16/16, 0 failed)
+and both failed under `pytest`, which uses the embedded build. On 1.7.1 they
+agree.
 
-**No workaround adopted** — the queries are not rewritten to avoid the shape,
-because which engine the suite should treat as authoritative is an open
-decision (#56), and rewriting them now would encode a guess as a fix.
+**No workaround was ever adopted**, and that turned out to be the right call —
+the queries were not rewritten to avoid the shape, because which engine the
+suite should treat as authoritative looked like an open decision (#56). Had
+`EA01` and `EA02` been rewritten to appease 0.6.1, the catalog would now carry
+two contorted queries working around an engine the repo no longer installs.
 
 What *was* decided: `test_every_catalog_query_runs_and_returns_rows` and
-`test_order_by_is_actually_applied` carry `xfail(strict=False)` naming this
-note. Both sweep the whole catalog and so hit EA01 and EA02. `pytest` stays
-green and the divergence stays visible in every run rather than as red lines
-nobody reads; `strict=False` means an XPASS is not a failure, so if the embedded
-build starts agreeing the run says so and the marks come off.
+`test_order_by_is_actually_applied` carried `xfail(strict=False)` naming this
+note, on the two parameters only. `strict=False` meant an XPASS was not a
+failure, so if the embedded build ever started agreeing, the run would say so
+and the marks could come off.
+
+**That is exactly what happened.** Upgrading to 1.7.1 turned all four
+parameters XPASS in one run, which is how this note was closed rather than by
+anyone re-deriving it. It is the argument for `strict=False` on a divergence you
+do not control: a mark that can only ever report XFAIL tells you nothing on the
+day the bug is fixed.
 
 The third failing test, `test_ea04_quantization_unlock_is_not_a_cartesian_product`,
-is **not** this note — EA04 has a single `WITH`. See note 11.
+was **not** this note — EA04 has a single `WITH`. See note 11.
 
 **`EA18` (#37) chains three `WITH`s, the second and third introducing all-new
 aliases, and runs embedded without raising.** That is this note's shape, and on
@@ -471,12 +553,25 @@ does not conclude `EA18` is untested against the note.
 
 ---
 
-## 11. The two builds disagree on the type of `sum(CASE ... THEN <int> ... END)`, so a `WHERE` on it is dropped
+## 11. `samyama` 0.6.1 typed `sum(CASE ... THEN <int> ... END)` as float, so a `WHERE` on it was dropped
 
-> Not filed upstream. Tracked with note 10 under #56 — a second embedded/HTTP
-> divergence, different shape. Verified 2026-08-31.
+> **RESOLVED by #56 — same cause as note 10: version skew, not a build
+> difference. 1.7.1 is the floor.** Measured 2026-08-31; re-measured as
+> resolved 2026-09-08.
+>
+> **This is the one to remember.** Note 10 *raised*; note 11 returned confident
+> wrong rows and nothing errored. `tests/test_engine_version.py` re-runs the
+> reproduction below on every test run for exactly that reason — a silent bug
+> needs a check that does not depend on someone noticing.
 
-**Severity: correctness. Silently returns rows a WHERE should have removed.**
+**Severity when live: correctness. Silently returned rows a WHERE should have
+removed.** Re-measured on embedded `samyama` 1.7.1 (2026-09-23), running the
+statement below: the aggregate comes back as an `int` (`2`, `0`), and both
+`WHERE hits > 0` and `WHERE hits > 0.0` return `[['A', 2]]` -- so the float
+literal is no longer a way to lose the row. The "1.7.0 server
+returned no rows for `> 0.0`" half of the table below is the original 2026-08-31
+measurement and has **not** been re-run; the server has not been re-probed by
+anything in this repo.
 
 Four nodes, two groups, one of which should be filtered out:
 
@@ -514,10 +609,11 @@ aggregate with `toFloat()` before comparing is right on both builds, because it
 removes the type disagreement rather than guessing which side of it the literal
 should sit on.
 
-It is not adopted here. Rewriting `EA04` changes the catalog, and #56 has not
-decided which build is authoritative — but the decision there is now "adopt
-`toFloat()`, or reconcile the builds", rather than "there is no way to write
-this".
+It was not adopted, and #56 took the second of its two options — *reconcile the
+builds* rather than *adopt `toFloat()`*. That is the better outcome: `toFloat()`
+would have left `EA04` carrying a coercion whose only purpose was to paper over
+a version gap, and the catalog would read as though the engine still could not
+type an aggregate.
 
 **What it costs.** `EA04` uses `WHERE fp32_misses > 0 AND int8_hits > 0`, so on
 the server it filters and on the embedded build it does not. The unfiltered
@@ -544,14 +640,14 @@ applied or not, the same two rows come back. The divergence is invisible to any
 query whose groups all pass — which is why it surfaces on the generated graph
 and not on the fixture.
 
-**A workaround is known and deliberately not adopted.** `toFloat()` on the
-aggregate, above, is correct on both builds -- so unlike note 10 this is not
-"there is no way to write this". It is not applied because rewriting `EA04`
-changes the catalog, and #56 has not decided which build is authoritative;
-adopting it now would settle that question by the back door. The distinction
-matters: *fix deferred* and *no fix known* are different states, and someone
-reading #56 should not re-derive `toFloat()` from scratch. See the mark on
-`tests/test_correctness.py::test_ea04_quantization_unlock_is_not_a_cartesian_product`.
+**A workaround was known and deliberately not adopted.** `toFloat()` on the
+aggregate, above, is correct on both builds -- so unlike note 10 this was never
+"there is no way to write this". Holding it back kept `EA04` unmodified until
+#56 resolved, and #56 resolved by upgrading the engine, so the coercion was
+never needed. The distinction was the useful part: *fix deferred* and *no fix
+known* are different states, and recording which one this was is what let #56
+weigh "rewrite the query" against "reconcile the builds" instead of assuming the
+query had to change.
 
 ---
 
@@ -583,7 +679,8 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 > embedded, which is what `pyproject.toml` resolved when they were written;
 > notes 12, 13 and 13b are the 1.7.1 vintage. (The "Versions these describe"
 > paragraph at the top of this file is the same split, stated once.) This
-> note was measured against **1.7.1** embedded, the floor #104 landed. So the
+> note was measured against **1.7.1** embedded -- the floor written in #105,
+> reaching `main` inside #104. So the
 > comparison below is 1.7.0 server against 1.7.1 embedded, and
 > the conclusion "the server is the one that is wrong" is really "the server at
 > 1.7.0 does not do what the embedded build at 1.7.1 does". Whether 1.7.0
@@ -628,7 +725,8 @@ robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
 that the 1.7.0 server executes. The options are an engine that does it
 (embedded 1.7.1 does), or not asking the question over HTTP.
 
-**`EA17` therefore needs the `samyama>=1.7.1` floor that #104 landed** -- for
+**`EA17` therefore needs the `samyama>=1.7.1` floor** (#105, reaching `main`
+inside #104) -- for
 this note, and because its per-leg second `WITH` introduces new aliases, which
 is note 10's shape and 0.6.1 rejects. The floor no longer admits a build on
 which `EA17` fails outright.
