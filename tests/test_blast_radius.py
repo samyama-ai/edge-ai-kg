@@ -77,7 +77,7 @@ import re
 import pytest
 
 from benchmarks.queries import BY_ID, EA17_SUBJECT
-from etl.helpers import create_edges, create_nodes
+from etl.helpers import create_edges, create_nodes, cypher_literal
 
 GRAPH = "default"
 SEED = 4242
@@ -317,23 +317,39 @@ def retargeted_ea17(sensor_id: str) -> str:
     *bare* replace while this performed the quoted one, so the test and the
     code were checking different things.
     """
+    # Escaped, not interpolated. Building the literal with an f-string meant
+    # an id carrying a quote ended it early: `'x") OR true //'` produced
+    # `WHERE s.id = "x") OR true //"`, which closes the predicate and comments
+    # out the rest of the line. Harmless while every caller is a test, and
+    # not harmless the moment one of these helpers is promoted beside the
+    # catalog -- which is exactly what happened to `EA21`'s (#118).
+    #
+    # A non-`str` is refused rather than stringified: a caller reaching for
+    # `EA21`'s signature would pass a list, `str(["a"])` would become
+    # `"['a']"`, and the retarget would ask about a sensor that cannot exist
+    # while looking like it worked.
+    if not isinstance(sensor_id, str):
+        raise TypeError(
+            f"a sensor id must be a string, not {type(sensor_id).__name__}: "
+            f"`EA17` retargets one sensor, unlike `EA21` which takes a set.")
+
     original = BY_ID["EA17"]["cypher"]
-    # Count, not membership. `f'"{sensor_id}"' in cypher` is trivially true
-    # when `sensor_id` *is* `EA17_SUBJECT` -- which is the first sensor in the
+    subject, wanted = cypher_literal(EA17_SUBJECT), cypher_literal(sensor_id)
+    # Count, not membership. `wanted in cypher` is trivially true when
+    # `sensor_id` *is* `EA17_SUBJECT` -- which is the first sensor in the
     # fleet and the one most callers pass -- so the "catalog subject moved"
     # check never fired for the commonest case.
-    occurrences = original.count(f'"{EA17_SUBJECT}"')
+    occurrences = original.count(subject)
     assert occurrences == EA17_SUBJECT_OCCURRENCES, (
         f"`EA17` names `{EA17_SUBJECT}` {occurrences} times, not "
         f"{EA17_SUBJECT_OCCURRENCES}. Either a leg was added or removed -- in "
         f"which case update EA17_SUBJECT_OCCURRENCES here -- or the catalog's "
         f"subject moved and this retarget no longer rewrites every leg.")
-    cypher = original.replace(f'"{EA17_SUBJECT}"', f'"{sensor_id}"')
-    assert cypher.count(f'"{sensor_id}"') == occurrences, (
-        f"retargeting to {sensor_id} rewrote "
-        f"{cypher.count(f'{chr(34)}{sensor_id}{chr(34)}')} of {occurrences} "
-        f"occurrences; a partial rewrite makes one leg answer about a "
-        f"different sensor than the rest")
+    cypher = original.replace(subject, wanted)
+    assert cypher.count(wanted) == occurrences, (
+        f"retargeting to {sensor_id} rewrote {cypher.count(wanted)} of "
+        f"{occurrences} occurrences; a partial rewrite makes one leg answer "
+        f"about a different sensor than the rest")
     return cypher
 
 
@@ -495,3 +511,36 @@ def test_ea17_never_compares_an_id_with_a_bare_inequality():
         "no `<>` in EA17 at all -- this test would pass vacuously, so it "
         "checks the comparison it guards is still there"
     )
+
+
+def test_a_quoted_sensor_id_cannot_break_out_of_the_retarget(engine_factory):
+    """An id carrying a quote is data, not Cypher (#118).
+
+    `retargeted_ea17` built its literal with an f-string, so
+    `'x") OR true //'` produced `WHERE s.id = "x") OR true //"`: the predicate
+    closes early and the rest of the line is commented out. Every caller here
+    is a test, so nothing was exposed -- but `EA21`'s equivalent helper was
+    promoted into `benchmarks/queries.py`, where an MCP tool calls it with a
+    live alert set, and the same shape became a real injection. This is the
+    same one-line fix applied before that happens again.
+
+    The fixture holds one sensor the payload does not name, so an escape is
+    visible as rows coming back at all.
+    """
+    client = engine_factory()
+    create_nodes(client, GRAPH, "Sensor",
+                 [{"id": EA17_SUBJECT, "modality": "ecg"}])
+    create_nodes(client, GRAPH, "SignalStage",
+                 [{"id": "stage:only", "kind": "filter"}])
+    create_edges(client, GRAPH, [
+        ("Sensor", EA17_SUBJECT, "FEEDS", "SignalStage", "stage:only", None)])
+
+    cypher = retargeted_ea17('x") OR true //')
+    assert '"x) OR true //"' in cypher, (
+        f"expected `cypher_literal` to strip the quote; the first leg reads "
+        f"{[ln for ln in cypher.splitlines() if 's.id =' in ln][:1]}")
+    assert [list(row) for row in client.query(cypher, GRAPH).records] == [], (
+        "a quoted id escaped the literal and matched a sensor it does not name")
+
+    with pytest.raises(TypeError, match="must be a string"):
+        retargeted_ea17([EA17_SUBJECT])
