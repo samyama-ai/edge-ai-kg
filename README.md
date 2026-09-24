@@ -134,6 +134,28 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19` |
 
+**The embedded build still answers three of them differently** on the same
+data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
+6 and 10. That is a divergence beyond
+[engine notes 10 and 11](docs/engine-notes.md),
+and **it is the one thing the 1.7.1 upgrade did not fix**: re-measured on
+2026-09-08 against `samyama` 1.7.1, the embedded split is unchanged at
+`EA05, EA08, EA13, EA14, EA15, EA16` returning rows and the other ten empty,
+none erroring. The table above is the server's answer, which is the one a
+`--url` user sees.
+
+So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
+divergence remains open behind them. It is tracked in **#114**, which carries
+the measurement and what would close it. It is not written up as an engine
+note because it has **no minimal reproduction yet** — only the whole real
+layer and a different row count — and a note without one would imply a shape
+someone could avoid.
+
+`EA01` and `EA02` are empty rather than erroring here, on both builds — and were
+before the upgrade too. Note 10 made them raise on the old embedded build, but
+only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
+yields nothing, so the failing clause was never reached.
+
 `EA18` and `EA19` are the two entries here **not** from the server run, which
 predates both. Their place in the table is **measured embedded**, against the
 real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
@@ -143,14 +165,6 @@ measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
 `EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
 build. The distinction between measured and expected is kept rather than
 smoothed over, because on this page it has mattered before.
-
-Re-measured 2026-09-09, server 1.7.0 against embedded 1.7.1 over the same real
-layer: the partition above is identical on both, for the seventeen queries that
-existed then — `EA18` and `EA19` are covered by the embedded check only. `EA10`
-and `EA12` are empty on *both*: they lost their rows to an upstream ONNX
-Runtime refresh, not to a build difference. Reading that as a divergence is
-what comparing a fresh embedded run against a recorded server figure produces,
-and it is the trap this paragraph exists to mark.
 
 **"Identical" is a claim about this table, not about the two builds.** On the
 **full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
@@ -163,13 +177,13 @@ equal-ranked rows comes back, except `EA10`, which differs in the sixteenth
 significant digit of a float. Those are not different answers, but they are not
 "no disagreements" either, and comparing lengths would have hidden all seven.
 
-**This does not contradict the engine-notes section below.** That section
-describes `samyama` 0.6.1, where `EA01`, `EA02` and `EA04` were wrong against
-the engine `pytest` used and carried `xfail`s. The comparison above was run at
-1.7.1, where notes 10 and 11 do not reproduce and those marks are gone (#104) —
-which is #56's finding, that
-the "embedded versus server" disagreement was a version skew (0.6.1 against a
-1.7.0 server) rather than a difference between the two builds.
+**The engine-notes section below describes an older build, not a contradiction
+of this one.** Notes 10 and 11 were measured on `samyama` 0.6.1, where `EA01`,
+`EA02` and `EA04` were wrong under `pytest` and carried `xfail`s. The
+comparison above was run at 1.7.1, where neither note reproduces and the marks
+are gone — #56's finding being that the "embedded versus server" disagreement
+was version skew (0.6.1 against a 1.7.0 server) rather than a difference
+between the two builds.
 
 `pyproject.toml` declares `samyama>=1.7.1` since #104, so the build these
 pages describe is the build you get.
@@ -198,9 +212,6 @@ longest chain at scale 1.0 is 13 hops — which is written down on `EA07` in
 
 (On the real layer, which this section is about, `EA07` is simply empty like
 most of the catalog — there are no `Sensor` nodes for it to start from.)
-
-`EA01` and `EA02` are empty here rather than erroring, on both builds, because
-the real layer has no `USES_OPERATOR` edges for their opening `MATCH` to bind.
 
 **The hero question is one of the empty ones.** It walks
 `Model -[:USES_OPERATOR]-> Operator`, and the real layer has no `USES_OPERATOR`
@@ -232,12 +243,24 @@ python -m etl.download_data     # fetch 3 public sources + generate the fleet
 python -m demo.demo             # narrated walkthrough, in-process, no server
 ```
 
-### On Linux, install these first
+### On Linux, usually nothing extra
 
-`samyama` publishes a macOS wheel and an sdist, so on Linux `pip` builds the
-Rust extension from source. maturin fetches its own Rust toolchain, but the
-system still has to supply venv support, a C compiler and clang's builtin
-headers — a stock Ubuntu 24.04 image has none of the three:
+Since the floor moved to `samyama>=1.7.1` (#56), a plain
+`pip install -e ".[dev]"` takes
+`samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl`: no Rust toolchain, no
+compiler, no sudo. On 0.6.x it did build from source, because that release
+shipped only a macOS wheel and an sdist.
+
+**If pip resolves the sdist anyway** — a non-x86_64 host, or glibc older than
+2.38 — the from-source path is below. Check which you got first:
+
+```bash
+python -c "import importlib.metadata as m; print(m.distribution('samyama').read_text('WHEEL'))"
+```
+
+maturin fetches its own Rust toolchain, but the system still has to supply
+venv support, a C compiler and clang's builtin headers, and a stock Ubuntu
+24.04 image has none of the three:
 
 ```bash
 sudo apt install -y python3-venv build-essential python3-dev
@@ -439,10 +462,19 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
 - the same for the type `sum(CASE ...)` returns, which silently dropped a
   `WHERE` on it ([note 11](docs/engine-notes.md));
 - the 1.7.0 **server** does not traverse a variable-length relationship,
-  bounded or not — it returns only the zero-length match, and rejects `size(r)`
-  on one — where the embedded 1.7.1 build walks it
-  ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only, and
-  why it needs the `samyama>=1.7.1` floor #104 landed.
+  bounded or not — it matches only the zero-length case, silently — and it
+  *rejects* `size(r)` over one, where the embedded 1.7.1 build walks it
+  ([note 12](docs/engine-notes.md)). `EA17` asks for `size(r)`, so it **raises**
+  on the server and is embedded-only; `EA07` walks a bounded `*0..3` without
+  `size(r)`, and note 12 measured both builds returning byte-identical rows for
+  it — true of this graph and this `LIMIT`, not enforced. `EA17` needs the
+  `samyama>=1.7.1` floor (written in #105, reaching `main` inside #104);
+- an `OPTIONAL MATCH` whose `WHERE` mentions a `WITH`-introduced alias drops
+  the unmatched rows, turning it into an inner join
+  ([note 13](docs/engine-notes.md)), and an expression mixing a grouping key
+  with an aggregate in one projection returns `NULL`
+  ([note 13b](docs/engine-notes.md)) — both measured on embedded 1.7.1 while
+  writing `EA18`.
 
 Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
@@ -452,12 +484,41 @@ embedded-only rather than reshaped.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised
-sweeps. Those marks were written against `samyama` 0.6.1. **#105 raised the floor to
-1.7.1 and removed them, reaching `main` with #104**, and the three queries now
-pass unmarked under `pytest` and under `run_benchmark`.
+sweeps, and they span two modules -- `tests/test_correctness.py` and
+`tests/test_empty_answers.py`. Those marks were written against `samyama`
+0.6.1. **#105 raised the floor to 1.7.1 and removed them** (reaching `main`
+inside #104), and the three queries now pass unmarked under `pytest` and under
+`run_benchmark`.
 
-Each is documented with a minimal reproduction and the workaround used in
-[`docs/engine-notes.md`](docs/engine-notes.md). Because of these,
+**Both are resolved (#56).** There was nothing to file: the cause was version
+skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
+unpinned and resolved **0.6.1**, while everything else was measured against the
+1.7.0 server — a different release line, not a patch apart. The floor is now
+`samyama>=1.7.1` and neither note reproduces.
+
+The marks they excused came off in `d37836c`, and they were four test
+functions reporting six xfails, because two of the four are parametrised
+sweeps carrying a mark for `EA01` and one for `EA02`:
+`test_ea04_quantization_unlock_is_not_a_cartesian_product`,
+`test_every_catalog_query_runs_and_returns_rows`,
+`test_order_by_is_actually_applied` and
+`tests/test_empty_answers.py::test_ea01_zero_row_case`. All four pass
+unmarked now. Notes 10 and 11 are kept in the notes file as history.
+
+**Notes 10 and 11 have no workaround, and need none** — they are resolved, and
+the floor is what resolved them. Each of notes 1-9 is documented with a minimal
+reproduction *and* the workaround the catalog uses, in
+[`docs/engine-notes.md`](docs/engine-notes.md) — and those reproductions are
+runnable, not prose: `python -m benchmarks.engine_notes_probe --scale 300`
+re-runs them against whatever engine is installed. On embedded `samyama` 1.7.1
+**none of notes 1-6, 8 and 9 reproduces**. **Note 7 is not among them** — the
+probe has none, because "the `--graph` argument is ignored" is a property of
+the OSS HTTP path and there is no tenant boundary to ignore on an embedded
+build. It stands un-re-measured, which matters: a reader taking "none of them"
+at face value could conclude the tenant argument is honoured now. It is not.
+The workarounds stay regardless, because the
+notes were measured against the 1.7.0 *server* and the probe runs embedded;
+#56 is the standing lesson about assuming two builds agree. Because of these,
 [`tests/test_correctness.py`](tests/test_correctness.py) validates query
 **results** against ground truth computed in Python — a query that runs and
 returns plausible rows is not evidence that it is right.
