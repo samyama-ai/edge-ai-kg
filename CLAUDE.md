@@ -26,13 +26,22 @@ python -m etl.download_data      # REQUIRED first — builds ./data (gitignored)
 `tests/test_correctness.py` call `load_cached()` and skip or fail without it.
 Add `--force` to re-fetch upstreams, `--seed` / `--scale` to change the fleet.
 
-### Installing `samyama` on Linux
+### Installing `samyama` on Linux — no longer a special case
 
-`samyama` publishes only a **macOS x86_64 wheel** plus an sdist, so Linux builds
-the Rust extension from source. maturin auto-downloads a Rust toolchain, but the
-host must supply a C compiler and clang's builtin headers. On a bare Ubuntu box
-the build fails twice — first on a missing linker, then on `zstd-sys` bindgen not
-finding `stddef.h`. Fix:
+**1.7.1 publishes `samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl`**, so a
+plain `pip install -e ".[dev]"` takes the wheel: no Rust toolchain, no compiler,
+no sudo. That is new — the floor moved from 0.6.x in #56, and 0.6.1 shipped only
+a macOS wheel plus an sdist.
+
+The from-source path below still applies if pip resolves the sdist — a
+non-x86_64 host, or glibc older than 2.38. Check which you got with
+`python -c "import importlib.metadata as m; print(m.distribution('samyama').read_text('WHEEL'))"`
+before assuming you need any of it: `Tag: ...manylinux...` is the published
+wheel, while a locally built one says `linux_x86_64`. (`pip show` reports the
+version, not how it was installed.) maturin
+auto-downloads a Rust toolchain, but the host must supply a C compiler and
+clang's builtin headers; on a bare Ubuntu box the build fails twice, first on a
+missing linker, then on `zstd-sys` bindgen not finding `stddef.h`:
 
 ```bash
 sudo apt install -y build-essential python3-dev
@@ -43,6 +52,13 @@ pip install -e ".[dev]"                        # ~3 min of cargo build
 
 (Installing `clang`/`libclang-common-*-dev` is the cleaner fix if you have sudo;
 `BINDGEN_EXTRA_CLANG_ARGS` is the workaround when you only have gcc.)
+
+**Raising the floor in `pyproject.toml` does not upgrade an installed
+`samyama`.** The editable install is this repo; `samyama` is an ordinary
+dependency, and pip only re-resolves it when you ask. If
+`tests/test_engine_version.py` fails saying the running engine is older than
+the declared floor, the declaration is right and the installed engine is
+stale — re-run `pip install -e ".[dev]"`.
 
 ## Commands
 
@@ -144,8 +160,11 @@ plausible, wrong output.
 9 against the installed engine, and on **embedded** 1.7.1 none of them
 reproduces. That does not retire a rule: the notes were measured on the 1.7.0
 **HTTP server**, a different binary that has not been re-probed, and note 7
-(no tenant boundary on that server) has no probe at all. The rules below stay
-binding until the server is measured too.
+(no tenant boundary on that server) has no probe at all -- it is a property of
+the HTTP path rather than a Cypher shape, so embedded has nothing to isolate.
+The rules below stay binding until the server is measured too, and no
+workaround should be dropped without re-measuring there; assuming two builds
+agree is what #56 cost.
 
 **Notes 10 and 11 are resolved, and were never what they said they were.** They
 read as disagreements between the embedded build and the HTTP server -- a
@@ -162,13 +181,21 @@ server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 The two notes stay in `docs/engine-notes.md` as history, because the wrong
 conclusion is the useful part: two builds were assumed to differ for three
 weeks when the difference was a version.
-`docs/engine-notes.md` carries a banner saying the same; rewriting the notes
-themselves is #94.
+`docs/engine-notes.md`'s notes 10 and 11 say this in their own text now,
+instead of being contradicted by a banner forwarding to a PR. The page keeps
+its banner at the top, which records the 1.7.1 re-measurement and its two
+dates. **Write Cypher to notes 1-9.**
 
-`tests/test_engine_version.py` keeps the floor honest -- it asserts the
-declared dependency, the running engine, **and** re-runs note 11's own
-reproduction, because note 11 does not raise. On a downgraded build it makes
-`EA04` return confident extra rows rather than fail.
+If you are ever on an older engine, note 11 is the dangerous one: it does not
+raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
+`tests/test_engine_version.py` checks the floor and re-runs that reproduction,
+so a downgrade fails loudly.
+
+**One embedded/server divergence does survive**, and it is not notes 10 and 11:
+on the real layer the embedded build answers `EA08`, `EA10` and `EA12`
+differently from the server (README, "What the real layer alone can answer").
+Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
+why it is not an engine note — nothing here tells you a shape to avoid.
 
 The rules that follow from notes 1-9:
 

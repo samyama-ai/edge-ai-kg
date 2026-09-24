@@ -5,12 +5,20 @@ identical or nearly so (#48). A defect record is only useful if someone can
 re-run it against a bumped engine and see whether it still holds, so both
 measurements behind that page live here rather than in prose.
 
-    python -m benchmarks.vector_probe --repro        # the two-call panic
-    python -m benchmarks.vector_probe --metrics      # every metric, same panic
-    python -m benchmarks.vector_probe --collisions   # the embedding collisions
+**That is what happened** -- #56 raised the floor to `samyama` 1.7.1, and on the
+build measured there the panic did not reproduce. That result is recorded in
+`docs/vector-search.md`, deliberately not here: this module reports what it
+observes on the engine you are running and names the 0.6.1 behaviour only as the
+contrast. A docstring asserting today's answer would be the same overclaim the
+output was just fixed to avoid, one file away from the code that avoids it.
 
-`--repro` and `--metrics` need nothing but the engine. `--collisions` needs
-`data/`.
+    python -m benchmarks.vector_probe --repro        # the two-call duplicate add (panicked on 0.6.1)
+    python -m benchmarks.vector_probe --metrics      # the same, once per metric
+    python -m benchmarks.vector_probe --collisions   # the embedding collisions
+    python -m benchmarks.vector_probe --holdout      # the decisive dedupe-and-search run
+
+`--repro` and `--metrics` need nothing but the engine. `--collisions` and
+`--holdout` both need `data/` -- they build a fleet from the ONNX catalogue.
 
 **The panic is a Rust `PanicException`**, which is not an `Exception` subclass,
 so every guard here catches `BaseException`. A plain `except Exception` lets it
@@ -74,12 +82,19 @@ def run_repro(metric: str = "cosine") -> dict:
     The exception *type* is returned rather than asserted, so a reader sees
     `PanicException` instead of taking it on trust -- and so an ordinary
     `ValueError` is visibly not a panic.
+
+    `phase` says which of the three steps raised -- `index`, `add` or
+    `search`. The adds and the search used to share one `try`, so a search
+    that failed was reported as "the duplicate add failed": the same
+    conflation this function's first `try` already avoids for the index, one
+    step further down.
     """
     from samyama import SamyamaClient
     client = SamyamaClient.embedded()
     ids = two_nodes(client)
     v = normalised_random(8, seed=11)
-    out = {"metric": metric, "index_accepted": None, "outcome": None, "detail": ""}
+    out = {"metric": metric, "index_accepted": None, "phase": None,
+           "outcome": None, "detail": ""}
     try:
         client.create_vector_index("T", "emb", dimensions=8, metric=metric)
         out["index_accepted"] = True
@@ -87,19 +102,31 @@ def run_repro(metric: str = "cosine") -> dict:
         raise
     except BaseException as exc:           # noqa: BLE001 - PanicException is not Exception
         out["index_accepted"] = False
+        out["phase"] = "index"
         out["outcome"] = type(exc).__name__
         out["detail"] = (str(exc).splitlines() or [""])[0]
         return out
     try:
         client.add_vector("T", "emb", ids[0], v)
         client.add_vector("T", "emb", ids[1], v)
-        client.vector_search("T", "emb", v, k=2)
-        out["outcome"] = "ok"
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:           # noqa: BLE001
+        out["phase"] = "add"
         out["outcome"] = type(exc).__name__
         out["detail"] = (str(exc).splitlines() or [""])[0]
+        return out
+    try:
+        client.vector_search("T", "emb", v, k=2)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:           # noqa: BLE001
+        out["phase"] = "search"
+        out["outcome"] = type(exc).__name__
+        out["detail"] = (str(exc).splitlines() or [""])[0]
+        return out
+    out["phase"] = "ok"
+    out["outcome"] = "ok"
     return out
 
 
@@ -118,13 +145,62 @@ def main(repro, metrics, collisions, holdout, seed, scale):
     if repro:
         r = run_repro()
         click.echo(f"index accepted: {r['index_accepted']}")
-        click.echo(f"same normalised vector added twice -> {r['outcome']}: {r['detail']}")
-        click.echo("on samyama 0.6.1 this was: PanicException "
-                   "(assertion failed: c.dist_to_ref <= 0.)")
-        if r["outcome"] == "ok":
-            click.echo("It did not happen here, so this run is evidence the "
-                       "vector index works\non the installed build -- not "
-                       "evidence of the 0.6.1 defect.")
+        # The header names the phase `run_repro` reached, not "added twice".
+        # It said "added twice" whatever happened, so an index-creation or
+        # search failure was reported under the add's name -- the conflation
+        # `phase` exists to end, restated one line above the branch that ends
+        # it.
+        reached = {"index": "creating the index",
+                   "add": "adding the same normalised vector twice",
+                   "search": "searching after the duplicate add",
+                   "ok": "index, duplicate add and search"}[r["phase"]]
+        click.echo(f"{reached} -> {r['outcome']}: {r['detail']}")
+        # Conditional on the outcome, and on whether the index was accepted
+        # at all. Printing "fixed as of 1.7.1" unconditionally would declare
+        # the panic gone on a run that had just reproduced it -- the probe
+        # asserting a version claim over its own measurement, which is the one
+        # thing it exists not to do.
+        if r["index_accepted"] is not True:
+            # First, because `run_repro` reports an index-creation panic as
+            # `PanicException` too. Reading the outcome before this one called
+            # a failed `create_vector_index` the duplicate-add reproduction --
+            # a different finding wearing its name.
+            click.echo(f"the index itself was rejected ({r['outcome']}), so "
+                       f"this run says nothing about the duplicate-add panic.")
+        elif r["outcome"] == "ok":
+            # What this run shows, not what any version does. The module's own
+            # docstring refuses to make version claims, and "fixed as of 1.7.1"
+            # is one -- it would also be asserted on a run of some other build
+            # entirely. `docs/vector-search.md` records the 0.6.1 measurement;
+            # this line records only that this build did not reproduce it.
+            click.echo("no panic on this build. docs/vector-search.md records "
+                       "0.6.1 raising PanicException (assertion failed: "
+                       "c.dist_to_ref <= 0.) here; see #56.")
+        elif r["outcome"] == "PanicException" and r["phase"] == "add":
+            click.echo("this is the 0.6.1 failure mode -- a PanicException on "
+                       "the duplicate add, which is the reproduction "
+                       "docs/vector-search.md records. Check `pip show "
+                       "samyama` before reading further.")
+        elif r["outcome"] == "PanicException":
+            # A panic, but not *this* reproduction. The page records the
+            # duplicate add panicking; a search-phase panic is the hold-out's
+            # finding (`--holdout`), and an index-phase one is neither. Naming
+            # any panic "the 0.6.1 failure mode" is how two findings become
+            # one.
+            click.echo(f"a PanicException in the {r['phase']} phase. That is "
+                       f"not the duplicate-add reproduction "
+                       f"docs/vector-search.md records; it is a panic "
+                       f"somewhere else in the same run, and worth reporting "
+                       f"as its own finding.")
+        else:
+            # Named for what it is, and for which phase raised. Calling any
+            # exception "the 0.6.1 failure mode" is the mislabelling this
+            # probe exists to avoid: a connection error and an HNSW assertion
+            # are different findings, and so are an add and a search.
+            click.echo(f"the {r['phase']} phase failed with {r['outcome']}, "
+                       f"which is not the 0.6.1 panic (that is a "
+                       f"PanicException). A different fault, and this run says "
+                       f"nothing about the one docs/vector-search.md records.")
 
     if metrics:
         # Each metric in its own process. The page records that recoverability
@@ -251,10 +327,11 @@ def main(repro, metrics, collisions, holdout, seed, scale):
                 break
         click.echo(f"vector_search: {searched} of {len(held)} unseen operators queried"
                    + (f", then {search_failed}" if search_failed else ", none failed"))
-        click.echo(holdout_tail(add_failed, search_failed))
+        click.echo(holdout_tail(add_failed, search_failed, added, searched))
 
 
-def holdout_tail(add_failed: str | None, search_failed: str | None) -> str:
+def holdout_tail(add_failed: str | None, search_failed: str | None,
+                 added: int, searched: int) -> str:
     """The conclusion, read off the run rather than written into the module.
 
     This tail used to be a constant ending "and the search still panics". On
@@ -262,25 +339,63 @@ def holdout_tail(add_failed: str | None, search_failed: str | None) -> str:
     then, four lines later, asserted the opposite, with the false half in the
     prose a reader quotes. A hardcoded conclusion is not a measurement; it is
     the previous measurement, surviving the thing it described.
+
+    The add phase is checked before the search, and a panic is distinguished
+    from any other failure. An add that panics `break`s with fewer vectors
+    indexed, so the searches that follow may well survive -- branching on the
+    search alone would report "the 0.6.1 blocker gone" about a run whose add
+    phase panicked. And the blocker is specifically a `PanicException` from the
+    HNSW index: calling any other exception by its name would be the same
+    mislabelling in the other direction.
+
+    `added` and `searched` are read *after* the failure branches, not before.
+    A panic on the very first add leaves `added == 0`, and a vacuous-run guard
+    placed first would answer "nothing to conclude, check the fleet was
+    generated" -- burying the exact reproduction this command exists to
+    produce. They are required arguments rather than defaulted, so a caller
+    cannot skip the check by omission.
     """
-    if search_failed:
-        return (
-            "\nThis is the measurement the argument rests on: exact duplicates "
-            "removed, every\nadd accepted, and the search still fails "
-            f"({search_failed}) -- so vectors that are\nmerely *close* trip the "
-            "same assertion, and deduping is not a workaround.\n")
     if add_failed:
         return (
-            "\nThe search was never reached: `add_vector` failed first "
-            f"({add_failed}).\nThat is a different defect from the one "
-            "docs/vector-search.md describes, which\nsurvived every add and "
-            "failed on search. Re-read the page before citing this run.\n")
+            f"\n`add_vector` failed ({add_failed}), so the index is incomplete "
+            "and the search\nphase above ran against fewer vectors than the "
+            "experiment calls for. Whatever\nthe search reported, this run does "
+            "not measure what the hold-out is for.\n\nNote that this is *not* "
+            "the 0.6.1 run docs/vector-search.md records: there\nevery add was "
+            "accepted and the search panicked. An add failing here is a\n"
+            "different finding, whatever it raised, and needs reporting as "
+            "one.\n")
+    if search_failed and "PanicException" in search_failed:
+        return (
+            "\nThis is the measurement the argument rests on: exact duplicates "
+            "removed, every\nadd accepted, and the search still panics -- so "
+            "vectors that are merely *close*\ntrip the same assertion, and "
+            "deduping is not a workaround.\n")
+    if search_failed:
+        return (
+            f"\n`vector_search` failed, but not with a panic -- {search_failed}."
+            "\n\nThe 0.6.1 blocker this experiment is about is a "
+            "`PanicException` from the HNSW\nindex. Anything else is a different "
+            "fault. Read the exception before concluding\nthe blocker is "
+            "present.\n")
+    if not added or not searched:
+        # After the failure branches: nothing failed *and* nothing ran, which
+        # is a fleet or hold-out problem rather than a result about the engine.
+        return (
+            f"\nNothing to conclude: {added} vectors were added and {searched} "
+            f"hold-out searches ran,\nand neither raised. The experiment needs "
+            f"both to be non-zero before its result\nmeans anything -- check "
+            f"the fleet was generated and that `data/` holds operators.\n")
     return (
-        "\nNothing failed on this build. Every add was accepted and every "
-        "hold-out search\nanswered -- so the defect docs/vector-search.md "
-        "records (a panic on vectors that\nare merely *close*) does not "
-        "reproduce here, and that page is describing an\nolder engine. Check "
-        "the installed version before citing either.\n")
+        f"\nAll {searched} hold-out searches ran without panicking. "
+        f"docs/vector-search.md\nrecords that run panicking partway through on "
+        f"0.6.1 -- see the page for where.\nSo on this build that reproduction "
+        f"does not reproduce: a statement about the\nbuild you just ran, not "
+        f"about any version number.\n\nThe hold-out is `min(40, len(rows))`, "
+        f"so {searched} is this fleet's share rather\nthan a fixed 40. Note "
+        f"what it does not show: the engine *accepts* the workload,\nand "
+        f"nothing here says whether the nearest neighbour returned is the "
+        f"useful one.\nJudging the answers is #48.\n")
 
 
 if __name__ == "__main__":
