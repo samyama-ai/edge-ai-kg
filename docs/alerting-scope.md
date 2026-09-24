@@ -60,10 +60,11 @@ already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
 `#35` is **not** delivered on `main`. `EA17` is written and reviewed in #96,
-which is open at the time of writing; until it merges the catalog is
-`EA01`-`EA16` plus `EA20` and this row is a decision to take the work, not a claim that it
-is done. `tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
-pins that distinction rather than trusting this sentence: it fails if `EA17`
+which is open at the time of writing, so this row is a decision to take the
+work rather than a claim that it is done. The catalog today is `EA01`-`EA16`
+plus `EA20`, the site query this page's own reversal added.
+`tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
+pins the distinction rather than trusting this sentence: it fails if `EA17`
 joins `benchmarks/queries.py` while this paragraph still says it has not, and
 fails the other way if the paragraph goes but `EA17` is still absent.
 
@@ -142,10 +143,13 @@ asks for explicitly.
 
 ## What this decision does not claim
 
-- **Not that location is unimportant.** It is the first thing an operations team
-  asks. It is answered somewhere else.
-- **Not that the declined three are wrong forever.** Each names its join point
-  and its blocker above, so revisiting is a decision rather than a rediscovery.
+- **Not that location is unimportant.** It is the first thing an operations
+  team asks, which is why the decline against it did not hold: #34 was
+  revisited and taken, and [`location-scope.md`](location-scope.md) is that
+  argument. This page keeps the original reasoning above, marked superseded.
+- **Not that the two still declined are wrong forever.** #38 and #39 each name
+  their join point and their blocker above, so revisiting is a decision rather
+  than a rediscovery -- which is exactly how #34 was revisited.
 - **Not measured: whether anyone wants the five.** This records what the graph
   *can* answer and what it would have to invent. Demand is not evidence this
   repo holds.

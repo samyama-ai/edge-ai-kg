@@ -394,28 +394,42 @@ def test_at_least_one_document_states_the_catalog_size():
 # Deliberately narrow. `DATASET_CARD.md` also says "3 edge types carry 87% of
 # edges", which is a share and not a total; a looser `(\d+) edge types` would
 # match it and demand it equal 23.
+# Each pattern captures exactly one group: the **total**. An earlier version
+# wrote `(\d+) of the (?:\d+) edge types`, which captured the subset -- on
+# "names 4 of the 23 edge types" it took 4 and would have demanded the schema
+# hold four edge types. One group per pattern, and the group is the total.
 LABEL_TOTAL_PATTERNS = (
     r"(\d+) node labels",
     r"\| labels with nodes \| \d+ of (\d+) \|",
+    r"shows \d+ of the (\d+)\s+node labels",
 )
 EDGE_TYPE_TOTAL_PATTERNS = (
     r"· (\d+) edge types",
     r"labels, (\d+) edge types",
-    r"(\d+) of the (?:\d+) edge types|names \d+ of the (\d+) edge types",
+    r"names \d+ of the (\d+) edge types",
     r"\| edge types present \| \d+ of (\d+) \|",
-    r"across (\d+) types",
+    # Anchored to the loader's own sentence. Bare `across (\d+) types` matched
+    # any prose that happened to say "across N types" and demanded it equal the
+    # schema's total.
+    r"intended edges across (\d+) types",
 )
 SCHEMA_TOTAL_DOCS = ("README.md", "DATASET_CARD.md", "docs/schema.md")
 
 
 def schema_total_claims(patterns) -> list[tuple[str, int, str]]:
+    """Every published total, with the doc and the phrase that stated it.
+
+    Whitespace is flattened first: these phrases wrap across lines in prose
+    -- `README.md`'s diagram caption says "12 of the 17\nnode labels" -- and a
+    pattern matched against the raw text simply misses them, which is the
+    silent half of this whole class of drift.
+    """
     found = []
     for doc in SCHEMA_TOTAL_DOCS:
-        text = (ROOT / doc).read_text(encoding="utf-8")
+        text = re.sub(r"\s+", " ", (ROOT / doc).read_text(encoding="utf-8"))
         for pattern in patterns:
-            found.extend(
-                (doc, int(next(g for g in m.groups() if g)), m.group(0))
-                for m in re.finditer(pattern, text) if any(m.groups()))
+            found.extend((doc, int(m.group(1)), m.group(0))
+                         for m in re.finditer(pattern, text))
     return found
 
 
@@ -443,12 +457,19 @@ def test_every_document_states_the_schema_totals_correctly():
                     for doc, phrase, _got, want in wrong))
 
 
-def test_the_schema_totals_are_actually_published_somewhere():
-    """The check above passes vacuously if every phrasing is reworded away."""
-    labels = schema_total_claims(LABEL_TOTAL_PATTERNS)
-    edges = schema_total_claims(EDGE_TYPE_TOTAL_PATTERNS)
-    assert len(labels) >= 2 and len(edges) >= 3, (
-        f"found {len(labels)} label totals and {len(edges)} edge-type totals "
-        f"in {list(SCHEMA_TOTAL_DOCS)}. Either the docs stopped publishing "
-        f"them, or the phrasing changed and these patterns need the new "
-        f"spelling -- otherwise the check above is testing nothing.")
+def test_every_schema_total_pattern_still_matches_something():
+    """Per pattern, not per family -- a floor on the total hides a dead one.
+
+    `len(edges) >= 3` stayed satisfied while any one phrasing was reworded
+    away, so a pattern could stop matching and the document it guarded would
+    drift unchecked behind the other four. Each is asserted on its own.
+    """
+    for label, patterns in (("label", LABEL_TOTAL_PATTERNS),
+                            ("edge-type", EDGE_TYPE_TOTAL_PATTERNS)):
+        for pattern in patterns:
+            assert schema_total_claims((pattern,)), (
+                f"the {label} pattern {pattern!r} matches nothing in "
+                f"{list(SCHEMA_TOTAL_DOCS)}. Either that phrasing was reworded "
+                f"-- update the pattern -- or the document stopped publishing "
+                f"the total, in which case drop the pattern deliberately "
+                f"rather than leaving a dead one that guards nothing.")

@@ -125,9 +125,17 @@ affected site and nothing else. The contrast case, a site holding **none** of
 them, needs the shipped graph: it is
 `test_ea20_shows_both_affected_and_untouched_sites_at_full_scale`, which is
 **skipped unless `pytest --full-scale` is given**. Measured on that run: of 12
-sites, 6 hold none of `board:00003` and 6 hold some but not all. So "site-wide
+sites, 6 held none of `board:00003` and 6 held some but not all. So "site-wide
 or one device" is demonstrated at `--scale 1.0` and only half-demonstrated by
 a default run.
+
+**That 6/6 split moves with the upstream ONNX catalogue, not only with the
+seed.** The catalogue decides how many kernels each accelerator registers,
+which decides which boards a variant fits, which decides where deployments
+land; on a 205-operator catalogue the split is 6 and 6, and on the current
+379-operator one it is 5 untouched of 12. The test asserts only that **both
+kinds exist**, never the ratio, because a number that moves on someone else's
+release schedule is not a claim this repo can keep.
 
 ## What this still does not claim
 

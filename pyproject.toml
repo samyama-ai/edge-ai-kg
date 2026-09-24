@@ -84,6 +84,14 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # fixture cannot see the difference.
 "tests/test_embedded_engine_fixture.py" = ["S603"]
 
+# S603/S607: `tests/test_site_spine.py` runs `git show origin/main:etl/generate.py`
+# to compare this branch's fleet against the generator before `Site` existed.
+# The argument list is literal, the only variable is a ref this file names, and
+# `git` is resolved from PATH because a test that hardcoded /usr/bin/git would
+# skip on half the machines it runs on. It is the alternative to pinning
+# absolute cost-model figures, which rot when the upstream catalogue moves.
+"tests/test_site_spine.py" = ["S603", "S607"]
+
 # BLE001/PERF203: the catalog sweep catches per-query so it reports every
 # failure rather than stopping at the first -- the same reason
 # `benchmarks/run_benchmark.py` is exempt, and the engine raises untyped errors

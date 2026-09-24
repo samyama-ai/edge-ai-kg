@@ -141,6 +141,17 @@ def main(url, graph, seed, scale, limit, regenerate, reset, layers, verify):
             click.echo(f"[1/4] no cached fleet; generating (seed={seed}, scale={scale}) ...")
             fleet = gen.generate(seed=seed, scale=scale)
             gen.write(fleet)
+        except gen.StaleFleetCache as exc:
+            # Regenerated, not refused. `data/` is gitignored, so this is the
+            # existing-checkout case: `git pull` brought a label the cache
+            # predates, and the alternative is a load that succeeds while every
+            # query over that label returns zero rows -- which reads as "the
+            # answer is none". The reason is printed because silently doing
+            # three minutes of work is its own surprise.
+            click.echo(f"[1/4] cached fleet is stale: {exc}")
+            click.echo(f"      regenerating (seed={seed}, scale={scale}) ...")
+            fleet = gen.generate(seed=seed, scale=scale)
+            gen.write(fleet)
 
     if layers == "synthetic":
         click.echo("      layers: synthetic only")

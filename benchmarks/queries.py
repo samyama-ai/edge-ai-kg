@@ -345,15 +345,28 @@ ORDER BY kernels DESC
         # of the Cypher rather than restating it, so moving it here moves the
         # ground truth with it.
         #
-        # `LIMIT 12` covers the shipped graph and **truncates above it**. Sites
-        # scale linearly with the fleet: 2 at `--scale 0.15`, 4 at 0.3, 12 at
-        # 1.0 -- then 60 at 5.0 and 120 at 10.0, both scales `docs/volume.md`
-        # uses. Past the limit the tail is an arbitrary pick among equal
-        # `on_recalled_board` values, which is how `EA02` and `EA11` came to be
-        # withdrawn from the Neo4j comparison as unstable. The boundary is
-        # measured in both directions by
-        # `test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops`
-        # -- raise the limit and that test asks for this note to move with it.
+        # **No `LIMIT`, deliberately.** Every other catalog entry caps its
+        # rows because it asks a top-N question; this one asks "where is the
+        # recalled board", and a recall answer that omits a site is wrong
+        # rather than abbreviated. With `LIMIT 12` it did omit sites, and not
+        # marginally: measured at `--scale 5.0`, 60 sites, 38 of them running
+        # the recalled board, and **26 of those 38 fell past the cut**. The
+        # 12th `on_recalled_board` value is 2 and nine sites share it, so
+        # *which* of them survived could differ between engines -- the same tie
+        # instability that had `EA02` and `EA11` withdrawn from the Neo4j
+        # comparison. A second `ORDER BY` key cannot break the tie either
+        # (engine note 3b: only the first key is honoured).
+        #
+        # The cost is row count at large scales -- 60 rows at `--scale 5.0`,
+        # 120 at 10.0, both scales `docs/volume.md` uses -- and that is the
+        # right trade for a question whose value is completeness. At the
+        # shipped 12 sites the output is unchanged.
+        #
+        # The untouched sites are part of the answer, which is why this is not
+        # filtered to `on_recalled_board > 0` either: "leave that site alone"
+        # and "replace one unit here" are the two halves of "site-wide or one
+        # device", and `docs/location-scope.md` rests on both being readable
+        # off the same rows.
         "cypher": """
 MATCH (s:Site)<-[:DEPLOYED_AT]-(d:Deployment)-[:ON_BOARD]->(b:Board)
 WITH s.campus AS campus, s.name AS site, s.kind AS kind,
@@ -361,7 +374,6 @@ WITH s.campus AS campus, s.name AS site, s.kind AS kind,
      sum(CASE WHEN b.id = "board:00003" THEN 1 ELSE 0 END) AS on_recalled_board
 RETURN campus, site, kind, on_recalled_board, deployments_here
 ORDER BY on_recalled_board DESC
-LIMIT 12
 """,
     },
 ]

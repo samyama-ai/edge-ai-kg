@@ -220,29 +220,78 @@ def test_a_tiny_scale_still_has_two_places_to_compare():
             f"before the floor is reached, or the floor buys nothing")
 
 
+def _generator_from(ref: str):
+    """`etl/generate.py` as of `ref`, importable beside the current one.
+
+    Skips rather than fails when git or the ref is unavailable: the point is
+    to compare this branch against the code before `Site` existed, and a
+    shallow clone or a detached export simply cannot do that.
+    """
+    import importlib.util
+    import subprocess
+    import sys
+
+    try:
+        source = subprocess.run(
+            ["git", "show", f"{ref}:etl/generate.py"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        pytest.skip(f"cannot read etl/generate.py at {ref}: {exc}")
+
+    path = ROOT / ".pytest_cache" / f"generate_at_{ref.replace('/', '_')}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    name = f"generate_at_{ref.replace('/', '_')}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: the module defines dataclasses, and
+    # `@dataclass` resolves `cls.__module__` through `sys.modules`.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_placing_sites_did_not_move_any_deployment_metric(operators):
     """The `Site` draw must not consume from the generator's shared stream.
 
-    A `rng.choice(sites)` in the deployment loop shifts every later draw, so
-    a location silently changes the cost model: at seed 20260814 that spelling
-    gives `deploy:00001` latency 78.036 / power 3591.96 against the 87.684 /
-    3990.6 below. `etl/generate.py`'s contract is that a seed reproduces the
-    graph byte-for-byte, and `docs/data-provenance.md`'s figures rest on it.
+    A `rng.choice(sites)` in the deployment loop shifts every later draw, so a
+    location silently changes the cost model. `etl/generate.py`'s contract is
+    that a seed reproduces the graph byte-for-byte, and
+    `docs/data-provenance.md`'s figures rest on it.
 
-    The values below are that contract, recorded from `main` before `Site`
-    existed. If this fails, either a draw was added to the shared stream --
-    which is a bug -- or the cost model changed on purpose, in which case these
-    move together with the published figures.
+    **Compared against the generator before `Site` existed, not against pinned
+    numbers.** This test used to assert `deploy:00000` reads 309.291 / 769.61,
+    recorded from `main`. Those values are a function of the upstream ONNX
+    catalogue, which is not pinned: the catalogue moved to 379 operators, the
+    figures became 59.141 / 6.58, and the test failed on a fresh checkout while
+    every cached checkout stayed green -- a pin that rots on someone else's
+    release schedule, hidden by our own stale `data/`.
+
+    Both runs here are given the *same* operator list, so the catalogue cancels
+    out and what is left is the question actually worth asking: does adding
+    `Site` move any deployment metric? Measured over all 1,440, not two.
     """
-    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
-    first = {row["id"]: row for row in full.nodes["Deployment"][:2]}
-    assert (first["deploy:00000"]["latency_ms"],
-            first["deploy:00000"]["power_mw"]) == (309.291, 769.61)
-    assert (first["deploy:00001"]["latency_ms"],
-            first["deploy:00001"]["power_mw"]) == (87.684, 3990.6), (
-        "deployment metrics moved for an unchanged seed. If a new field draws "
-        "from the shared `rng`, give it its own `random.Random` as the site "
-        "placement has.")
+    before = _generator_from("origin/main")
+    old = {row["id"]: (row["latency_ms"], row["power_mw"])
+           for row in before.generate(seed=before.DEFAULT_SEED, scale=1.0,
+                                      operators=operators).nodes["Deployment"]}
+    new = {row["id"]: (row["latency_ms"], row["power_mw"])
+           for row in gen.generate(seed=gen.DEFAULT_SEED, scale=1.0,
+                                   operators=operators).nodes["Deployment"]}
+
+    assert len(old) > 1000, (
+        f"the pre-Site generator produced {len(old)} deployments; this "
+        f"comparison needs the full fleet to be worth anything")
+    assert set(old) == set(new), (
+        f"the deployment set itself changed: "
+        f"{sorted(set(new) ^ set(old))[:3]} differ between the two generators")
+    moved = {did: (old[did], new[did]) for did in old if old[did] != new[did]}
+    assert not moved, (
+        f"{len(moved)} of {len(old)} deployment metrics moved when `Site` was "
+        f"added, e.g. {list(moved.items())[:2]}. Site placement is drawing "
+        f"from the shared `rng`, so every draw after it shifts: give the new "
+        f"field its own `random.Random`, as `site_rng` has."
+    )
 
 
 def test_sites_are_deterministic_from_the_seed(operators):
@@ -274,46 +323,56 @@ def test_the_real_layer_gets_no_sites(operators):
 
 
 # Every fleet scale the repo documents (`README.md`, `docs/volume.md`,
-# `CLAUDE.md`), and whether `EA20`'s `LIMIT` covers it. Measured, not assumed:
-# sites scale linearly with the fleet, so the limit that fits the shipped graph
-# stops fitting above it.
+# `CLAUDE.md`), and the sites each one generates. Measured, not assumed --
+# and catalogue-independent: site count follows `--scale`, not the operator
+# list, so unlike the cost-model figures these do not rot when upstream
+# publishes. Checked by generating with a halved catalogue: 12 sites either
+# way.
 DOCUMENTED_SCALES = {0.15: 2, 0.3: 4, 1.0: 12, 5.0: 60, 10.0: 120}
 
 
-def test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops(
-        operators):
-    """`LIMIT 12` covers the shipped graph, and truncates above it -- both pinned.
+def test_ea20_has_no_limit_so_no_affected_site_can_fall_off(operators):
+    """A recall answer that omits a site is wrong, not abbreviated.
 
-    `EA20` orders by `on_recalled_board`, where ties are common: most sites
-    hold none of the recalled board at all. Truncating a tie is how `EA02` and
-    `EA11` came to be withdrawn from the Neo4j comparison as unstable, so the
-    limit is measured against the site count rather than assumed generous.
+    `EA20` carried `LIMIT 12`, which covered the shipped 12 sites and cut
+    everything above. At `--scale 5.0` there are 60 sites and the 12th
+    `on_recalled_board` value is shared by 9 of them, so sites *running the
+    recalled board* fell past the cut -- and which ones fell could differ
+    between engines, the same tie instability that had `EA02` and `EA11`
+    withdrawn from the Neo4j comparison. A second `ORDER BY` key cannot break
+    that tie (engine note 3b: only the first key is honoured).
 
-    The earlier version of this test checked `--scale 1.0` alone while its name
-    claimed "shipped scales", which hid the boundary. Measured across every
-    scale the docs use: 2 sites at 0.15, 4 at 0.3, 12 at 1.0 -- all inside the
-    limit -- then **60 at 5.0 and 120 at 10.0, which the limit cuts**. That is
-    a real bound on the query rather than a bug in the fixture, and
-    `benchmarks/queries.py` says so where the limit is written; this test fails
-    if either half of that claim stops being true.
+    So the limit is gone rather than raised: a number large enough today is
+    the same defect waiting for a bigger fleet. The untouched sites stay in
+    the result too -- filtering to `on_recalled_board > 0` would drop the
+    "leave that site alone" half of the question `docs/location-scope.md`
+    argues this query answers.
+
+    What this pins: the query has no `LIMIT`, the reason is written where the
+    query is, and the site counts the reason quotes are still true.
     """
-    limit = int(BY_ID["EA20"]["cypher"].rsplit("LIMIT", 1)[1])
+    cypher = BY_ID["EA20"]["cypher"]
+    assert "LIMIT" not in cypher.upper(), (
+        f"EA20 has a LIMIT again:\n{cypher}\nAt --scale 5.0 the 12th "
+        f"`on_recalled_board` value is shared by 9 sites, so a limit drops "
+        f"affected sites and which ones is engine-dependent. If a cap is "
+        f"genuinely needed, it has to come with a tiebreaker the engine "
+        f"honours -- engine note 3b says a second ORDER BY key is not one.")
 
-    # The note is read, not assumed. This test told the reader that
-    # `benchmarks/queries.py` documents the boundary while the entry carried
-    # no comment at all -- a test asserting a claim the code does not make,
-    # which is worse than either alone because the cross-reference looks
-    # checked. Source text rather than the dict: a `#` comment is not data.
+    # The reason is read, not assumed. An earlier version of this test told
+    # the reader that `benchmarks/queries.py` documents the boundary while the
+    # entry carried no comment at all -- a test asserting a claim the code does
+    # not make. Source text, because a `#` comment is not data.
     catalog_source = (ROOT / "benchmarks" / "queries.py").read_text(encoding="utf-8")
     start = catalog_source.index('"id": "EA20"')
     entry = catalog_source[start:catalog_source.index("\n    },", start)]
-    for expected in ("truncates above it", str(max(DOCUMENTED_SCALES)),
+    for expected in ("No `LIMIT`", str(max(DOCUMENTED_SCALES)),
                      str(DOCUMENTED_SCALES[max(DOCUMENTED_SCALES)])):
         assert expected in entry, (
             f"`benchmarks/queries.py`'s EA20 entry does not mention "
-            f"{expected!r}. This test points a reader there for the "
-            f"truncation boundary, so the note has to exist, and has to move "
-            f"when the limit or the site density does.")
+            f"{expected!r}. This test points a reader there for why the query "
+            f"is unbounded, so the note has to exist and has to move when the "
+            f"site density does.")
 
     # The cached operators this module already has -- `operators=None` made the
     # generator re-read them from disk, a second source for the same data
@@ -324,18 +383,8 @@ def test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops(
         count = len(built.nodes["Site"])
         assert count == expected, (
             f"--scale {scale} now generates {count} sites, not {expected}. "
-            f"Site density changed, so re-measure this table and the "
-            f"truncation note in `benchmarks/queries.py` with it.")
-        if scale <= 1.0:
-            assert count <= limit, (
-                f"--scale {scale} generates {count} sites and EA20 keeps "
-                f"{limit}; the rows past the limit would be an arbitrary "
-                f"choice among equal `on_recalled_board` values")
-        else:
-            assert count > limit, (
-                f"--scale {scale} now fits inside EA20's LIMIT {limit}. If the "
-                f"limit was raised, say so in `benchmarks/queries.py` and move "
-                f"this boundary rather than leaving the comment stale.")
+            f"Site density changed, so re-measure this table and the note in "
+            f"`benchmarks/queries.py` with it.")
 
 
 # --------------------------------------------------------------------------
@@ -440,11 +489,16 @@ def test_ea20_shows_both_affected_and_untouched_sites_at_full_scale(
     #108 and had no caller; this is one, which is also the answer to "why is it
     registered if nothing reads it".
 
-    Measured on that graph: of 12 sites, **6 hold none of `board:00003` and 6
-    hold some but not all** -- so "replace one unit here" and "leave that site
-    alone" are both readable off the same column. The numbers are not asserted
-    exactly, because they move with the seed; what is asserted is that both
-    kinds exist.
+    Measured on that graph: of 12 sites, **6 held none of `board:00003` and 6
+    held some but not all** -- so "replace one unit here" and "leave that site
+    alone" are both readable off the same column.
+
+    The ratio is deliberately not asserted. It moves with the upstream ONNX
+    catalogue as well as with the seed -- the catalogue decides kernel
+    coverage, which decides board fit, which decides placement -- and the same
+    seed gives 6 untouched on a 205-operator catalogue against 5 on the
+    379-operator one. What is asserted is that **both kinds exist**, which is
+    the distinction the question turns on and the only part that is ours.
     """
     if not request.config.getoption("--full-scale"):
         pytest.skip("needs --full-scale: builds the shipped fleet at scale 1.0")

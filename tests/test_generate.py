@@ -123,3 +123,65 @@ def test_node_property_values_are_scalars(fleet):
                 assert isinstance(value, (str, int, float, bool)) or value is None, (
                     f"{label}.{key} is {type(value).__name__}, not a scalar"
                 )
+
+
+def test_generated_labels_matches_what_the_generator_emits(tmp_path):
+    """`GENERATED_LABELS` is what `load()` refuses a cache for; keep it honest.
+
+    A hand-maintained list beside the code it describes drifts the moment
+    someone adds a label and forgets it -- which is the same failure it exists
+    to catch, one level up. Generated at the smallest useful scale: the label
+    *set* does not depend on scale, only the row counts do.
+    """
+    from etl import generate as gen
+    from etl import onnx_catalog as oc
+
+    try:
+        ops = oc.load_cached()
+    except FileNotFoundError:
+        pytest.skip("run `python -m etl.download_data` first")
+
+    emitted = set(gen.generate(seed=gen.DEFAULT_SEED, scale=0.1, operators=ops).nodes)
+    assert emitted == set(gen.GENERATED_LABELS), (
+        f"the generator emits {sorted(emitted - set(gen.GENERATED_LABELS))} that "
+        f"GENERATED_LABELS omits, and lists "
+        f"{sorted(set(gen.GENERATED_LABELS) - emitted)} it does not emit. "
+        f"`etl.generate.load()` refuses a cached fleet missing any of these, "
+        f"so a stale entry here either rejects every cache or lets a stale one "
+        f"through.")
+
+
+def test_a_fleet_cache_written_before_a_label_existed_is_refused(tmp_path):
+    """The stale-cache case, on a throwaway file rather than the shared `data/`.
+
+    `data/` is gitignored, so a fresh clone is always current. An existing
+    checkout is where this bites: `git pull` brings a new label, `fleet.json`
+    keeps the old shape, and the catalog query over that label returns zero
+    rows -- indistinguishable from "the answer is none". `--verify` cannot
+    catch it either, because it compares the load against this same cache.
+    """
+    import json
+
+    from etl import generate as gen
+
+    complete = {label: [{"id": f"{label.lower()}:00000"}]
+                for label in gen.GENERATED_LABELS}
+    path = tmp_path / "fleet.json"
+
+    def write(nodes):
+        path.write_text(json.dumps(
+            {"seed": gen.DEFAULT_SEED, "scale": 1.0, "node_count": len(nodes),
+             "edge_count": 0, "nodes": nodes, "edges": []}), encoding="utf-8")
+
+    write(complete)
+    assert set(gen.load(path).nodes) == set(gen.GENERATED_LABELS), (
+        "a complete cache must load; otherwise this guard rejects everything")
+
+    stale = {k: v for k, v in complete.items() if k != "Site"}
+    write(stale)
+    with pytest.raises(gen.StaleFleetCache, match="Site"):
+        gen.load(path)
+
+    # A cache from a *newer* checkout is not this function's business.
+    write({**complete, "Warehouse": [{"id": "warehouse:00000"}]})
+    gen.load(path)

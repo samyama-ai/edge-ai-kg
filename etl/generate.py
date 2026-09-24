@@ -30,6 +30,28 @@ from etl.onnx_catalog import Operator, load_cached
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLEET_PATH = DATA_DIR / "fleet" / "fleet.json"
+
+
+# What `generate()` puts in the fleet, and therefore what a current
+# `fleet.json` must contain. Not `etl.loader.NODE_LABELS`: that set also holds
+# `BenchmarkTask`, which only `etl/real_layer.py` builds, so checking against
+# it would reject every cache ever written.
+#
+# `tests/test_generate.py` compares this against a freshly generated fleet, so
+# it cannot drift from the generator it describes.
+GENERATED_LABELS = ("Accelerator", "Board", "Certification", "ClinicalTask",
+                    "Dataset", "Deployment", "Kernel", "Model", "ModelVariant",
+                    "Operator", "Runtime", "Sensor", "SignalStage", "Site",
+                    "SoC", "Vendor")
+
+
+class StaleFleetCache(RuntimeError):
+    """`data/fleet/fleet.json` predates a label `etl.loader` now expects.
+
+    Its own type rather than a bare `RuntimeError`: a caller that wants to
+    regenerate instead of failing -- a future `--refresh-stale` -- needs to
+    tell this apart from any other read failure.
+    """
 DEFAULT_SEED = 20260814
 
 # Deployment latency is the cost model's output times a spread, rounded.
@@ -609,12 +631,34 @@ def write(fleet: Fleet, path: Path = FLEET_PATH) -> Path:
 
 
 def load(path: Path = FLEET_PATH) -> Fleet:
+    """The cached fleet, refused if it predates a label the loader now expects.
+
+    `data/` is gitignored, so a fresh clone regenerates and is always current.
+    An *existing* checkout is the problem: `git pull` brings a new label --
+    `Site` was the first -- while `fleet.json` keeps the shape it was written
+    with, and nothing notices. The catalog query over the new label then
+    returns zero rows, which reads exactly like "the answer is none" rather
+    than "your cache is old"; `--verify` does not catch it either, because it
+    compares the load against this same cache.
+
+    A missing label is therefore an error with the command to fix it, not a
+    warning. Extra labels are ignored: a cache written by a *newer* checkout
+    is not this function's business.
+    """
     if not path.exists():
         raise FileNotFoundError(f"{path} not found -- run `python -m etl.download_data` first.")
     payload = json.loads(path.read_text(encoding="utf-8"))
     fleet = Fleet(seed=payload["seed"], scale=payload["scale"])
     fleet.nodes = payload["nodes"]
     fleet.edges = [tuple(e) for e in payload["edges"]]
+
+    missing = [label for label in GENERATED_LABELS if label not in fleet.nodes]
+    if missing:
+        raise StaleFleetCache(
+            f"{path} was written before {', '.join(missing)} existed, so every "
+            f"query over {'it' if len(missing) == 1 else 'them'} would return "
+            f"zero rows and look like a real answer. Re-run "
+            f"`python -m etl.download_data` to rebuild it.")
     return fleet
 
 
