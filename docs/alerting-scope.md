@@ -31,7 +31,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
-| #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #110) |
+| #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #113) |
 | #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
@@ -68,21 +68,22 @@ separate PR; two queries sharing an id would silently overwrite one of them in
 
 That is not a promise this page makes about itself:
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
-reads every "delivered as `EAnn`" out of the verdict table above and fails if
-the catalog does not hold it, fails if the stated range is not the catalog's
-last id, and fails if one of the three is in the catalog while the table still
-reads as work not yet done.
+reads every "delivered as `EAnn`" **anywhere on this page** — the verdict table
+is where they happen to be written, but the check is not scoped to it — and
+fails if the catalog does not hold one, fails if the stated `EA01`-`EAnn` range
+is not the catalog's actual last id, and fails if an issue is still described
+as pending while its query exists.
 
-It is the one catalog query the **1.7.0 server** cannot run: that build does
+`EA17` is the one catalog query the **1.7.0 server** cannot run: that build does
 not traverse variable-length relationships and rejects `size(r)` on one
 (engine note 12). Note 12 is careful about what that does and does not show —
 1.7.0 *embedded* was never measured, so this may be a fix that landed between
 1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
 it runs on embedded 1.7.1 and fails on the 1.7.0 server.
-`tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
-keeps this paragraph honest in both directions: it fails if the page claims
-`#35` is pending while `EA17` is in the catalog, and if `EA17` is reverted while
-the page still says it is delivered.
+`tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog` —
+the same check as above — keeps this honest in both directions: it fails if the
+page calls `#35` pending while `EA17` is in the catalog, and if `EA17` is
+reverted while the page still says it is delivered.
 
 ## Why the three are declined
 

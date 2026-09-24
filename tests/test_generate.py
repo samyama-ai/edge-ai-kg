@@ -16,6 +16,25 @@ def fleet():
     return gen.generate(seed=1234, scale=0.25, operators=ops)
 
 
+@pytest.fixture(scope="module")
+def both_layers():
+    """The generated fleet plus the real layer, for invariants that span both.
+
+    Separate from `fleet` rather than replacing it: every other test here is
+    about what the *generator* guarantees, and folding public-source rows into
+    that would make a failure ambiguous between the two.
+    """
+    from etl import real_layer
+
+    try:
+        ops = oc.load_cached()
+    except FileNotFoundError:
+        pytest.skip("run `python -m etl.download_data` first")
+    fleet = gen.generate(seed=1234, scale=1.0, operators=ops)
+    real_layer.build_real(fleet, ops)
+    return fleet
+
+
 def test_deterministic_for_a_given_seed(fleet):
     ops = oc.load_cached()
     again = gen.generate(seed=1234, scale=0.25, operators=ops)
@@ -127,7 +146,7 @@ def test_node_property_values_are_scalars(fleet):
                 )
 
 
-def test_a_deployment_uses_exactly_one_accelerator(fleet):
+def test_no_deployment_uses_more_than_one_accelerator(both_layers):
     """`EA18` reads this as an invariant, so it is checked rather than assumed.
 
     `EA18` counts, per (deployment, operator), the kernels that implement the
@@ -138,20 +157,41 @@ def test_a_deployment_uses_exactly_one_accelerator(fleet):
     stops looking like a fallback -- the query would under-report exactly the
     thing it exists to find.
 
-    It cannot happen today: the generator writes one `_accel` per deployment
-    (`etl/generate.py`), and the real layer one per MLPerf row. Measured at
-    `--scale 1.0` across both layers, 1,451 deployments, maximum one each.
-    That is a property of the generator rather than of the query, so if a
-    future fleet gives a deployment two accelerators, this fails here and
-    names `EA18` -- rather than `EA18` quietly returning a smaller number.
+    **Not "exactly one":** measured over both layers at `--scale 1.0`, 1,513
+    deployments hold 1,451 `USES_ACCELERATOR` edges, one each. The other 62
+    are real-layer MLPerf Tiny rows carrying no accelerator at all, and
+    `EA18`'s opening `MATCH` simply does not bind them -- they are absent from
+    its result rather than under-reported, which is a different thing and a
+    harmless one. Both halves are asserted below, because the dangerous
+    direction is two and the surprising direction is none.
+
+    Over both layers deliberately: the zero-accelerator rows live in the real
+    one, so a generated-only fleet cannot see them and a docstring claiming
+    both layers would be describing a run this test never made.
     """
+    deployments = {row["id"] for row in both_layers.nodes.get("Deployment", ())}
     per_deployment = collections.Counter(
-        src for _sl, src, rel, _tl, _tgt, _p in fleet.edges
+        src for _sl, src, rel, _tl, _tgt, _p in both_layers.edges
         if rel == "USES_ACCELERATOR")
+    # Before `max()`, which raises ValueError on an empty counter -- so a
+    # sweep that found no edges at all used to abort here as an error rather
+    # than fail as the assertion written for it, and the assertion placed
+    # after `max()` could never run.
+    assert per_deployment, "no USES_ACCELERATOR edges at all; EA18 cannot mean anything"
+
     worst = max(per_deployment.values())
     assert worst == 1, (
         f"a deployment has {worst} USES_ACCELERATOR edges. EA18 counts kernels "
         f"on 'the' accelerator and reads zero as a CPU fallback, so a second "
         f"one hides fallback rather than reporting it. Fix EA18 before "
         f"relaxing this.")
-    assert per_deployment, "no USES_ACCELERATOR edges at all; EA18 cannot mean anything"
+
+    without = deployments - set(per_deployment)
+    provenance = {row["id"]: row.get("provenance")
+                  for row in both_layers.nodes["Deployment"]}
+    generated_without = sorted(d for d in without if provenance.get(d) != "real")
+    assert not generated_without, (
+        f"{len(generated_without)} generated deployments have no accelerator "
+        f"({generated_without[:3]}). EA18 cannot see them at all, so a fleet "
+        f"that stopped attaching accelerators would shrink EA18's scope "
+        f"silently rather than change its answer.")

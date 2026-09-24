@@ -6,8 +6,10 @@
 > not reproduce on *embedded* 1.7.1 either -- `python -m
 > benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
 > 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
-> Note 7 has no probe. The text below is the original record; #109 rewrites it
-> (it replaces #94, which was closed unmerged).
+> Note 7 has no probe. Notes 1-11 below are the original record, edited only
+> where a later measurement contradicted them; notes 12, 13 and 13b were
+> written against embedded 1.7.1 and are new. #109 rewrites notes 10 and 11
+> themselves (it replaces #94, which was closed unmerged).
 
 Behaviour observed while building this KG.
 **Notes 1-9 are filed upstream** — see the tracking issue
@@ -112,11 +114,14 @@ is *detectable*: `tests/test_correctness.py` asserts that ratio, and
 `test_ea04_shape_is_not_a_cartesian_product` pins the behaviour on a
 purpose-built 4-deployment fixture.
 
-**One query re-binds in trailing position deliberately, and is measured.**
-`EA17` (#35) is five `OPTIONAL MATCH` legs that each re-bind a variable the
-opening `MATCH` already bound. That is this shape, and there is no other way to
-express "reachable from some *other* sensor" -- it is note 5's anti-join, which
-needs the re-bind. So it is not taken on trust:
+**Two queries re-bind in trailing position deliberately, and both are
+measured.** `EA17` (#35) is five `OPTIONAL MATCH` legs that each re-bind a
+variable the opening `MATCH` already bound. That is this shape, and there is no
+other way to express "reachable from some *other* sensor" -- it is note 5's
+anti-join, which needs the re-bind. `EA18` (#37) re-binds `a` in trailing
+position for a different reason, which note 13 gives: carrying the alias into
+an `OPTIONAL MATCH`'s `WHERE` turns it into an inner join. Neither is taken on
+trust:
 `test_ea17_matches_ground_truth_at_full_scale` compares every sensor, both
 counts and the depth, against a Python breadth-first search at `--scale 1.0`,
 where this note's failure appears if it appears. 0 disagreements.
@@ -553,10 +558,11 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 > silent half is the dangerous one; the loud half is why `EA17` is
 > embedded-only.
 >
-> **Version labels, because this file carries two vintages.** Notes 1-11
-> describe `samyama` **0.6.1** embedded against the **1.7.0** server, which is
-> what `pyproject.toml` resolved when they were written; notes 12, 13 and 13b
-> are the 1.7.1 vintage. This
+> **Version labels, because this file carries two vintages.** Notes 1-9 are
+> the **1.7.0 server**; notes 10 and 11 compare it against `samyama` **0.6.1**
+> embedded, which is what `pyproject.toml` resolved when they were written;
+> notes 12, 13 and 13b are the 1.7.1 vintage. (The "Versions these describe"
+> paragraph at the top of this file is the same split, stated once.) This
 > note was measured against **1.7.1** embedded, the floor #104 landed. So the
 > comparison below is 1.7.0 server against 1.7.1 embedded, and
 > the conclusion "the server is the one that is wrong" is really "the server at
