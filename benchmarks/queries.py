@@ -32,6 +32,34 @@ EA17_SUBJECT = "sensor:00000"
 # about a different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
+
+def retargeted_ea21(alert_ids) -> str:
+    """`EA21` asking about `alert_ids` instead of the catalog's set.
+
+    Here rather than in `tests/`, because the catalog is what production reads
+    and a caller with a live alert set is the point of the query -- an MCP
+    tool would call this, not a test helper.
+
+    The set appears twice in the query, once per `IN` list, and both have to
+    move together: a rewrite that caught one would rank one population against
+    another and the ranking would read as a finding. Both are replaced, and
+    the count is asserted rather than assumed.
+    """
+    original = BY_ID["EA21"]["cypher"]
+    catalog_set = _alert_list(EA21_ALERTS)
+    occurrences = original.count(catalog_set)
+    if occurrences != 2:
+        raise ValueError(
+            f"`EA21` names its alert set {occurrences} times, not 2. Either "
+            f"the query changed shape or the set moved; this retarget rewrites "
+            f"every occurrence and cannot do that blind.")
+    return original.replace(catalog_set, _alert_list(alert_ids))
+
+
+def _alert_list(alert_ids) -> str:
+    """The Cypher list literal for an alert set, spelled one way everywhere."""
+    return "[" + ", ".join(f'"{a}"' for a in alert_ids) + "]"
+
 QUERIES: list[dict] = [
     {
         "id": "EA01",
@@ -655,6 +683,17 @@ LIMIT 20
             "thresholds and history, not dependencies -- and which in SQL is "
             "a recursive CTE over an edge table. Here it is one reachability "
             "pattern. "
+            "**The failure model is the one `EA17` uses**, and the ranking "
+            "only means anything under it: a *sensor* degrades, and what it "
+            "feeds is degraded with it. So if `s` fails, every stage "
+            "downstream of where `s` joins carries its bad data -- including "
+            "the stages where another alerting sensor's own data joins, whose "
+            "pipeline output is then bad too. `s` reaching `o` means \"o's "
+            "alert is explained by s's failure\", which is why the count "
+            "orders them. The inverse model -- a *stage* fails and sensors "
+            "alert -- gives the opposite order, and this query does not "
+            "answer it; there the useful answer is the stages common to every "
+            "alerting sensor, an intersection rather than a per-sensor count. "
             "**It gives a partial order, not a guaranteed single root.** "
             "`NEXT_STAGE` is the union of every sensor's chain over one "
             "shared pool of stages, so it contains cycles: measured on the "
@@ -695,8 +734,13 @@ LIMIT 20
         # a ranking in which every row is upstream of the row beneath it.
         #
         # `reaches` exists to make that visible rather than leave it implied:
-        # if `b` is in `a`'s list and `a` is in `b`'s, the two are in a cycle
-        # and neither is upstream of the other.
+        # if `b` is in `a`'s list and `a` is in `b`'s, neither is upstream of
+        # the other. Two shapes produce that, and the output cannot tell them
+        # apart: a genuine cycle, and two sensors feeding the *same* entry
+        # stage (the `*0..` zero-length walk makes each reach the other).
+        # Both mean the same thing to a caller -- no order between these two
+        # -- which is why one column serves both;
+        # `test_a_shared_entry_stage_reads_as_mutual_too` pins the second.
         # `tests/test_root_cause.py::test_two_alerts_in_a_cycle_each_reach_the_other`
         # pins it on a two-stage cycle built for the purpose.
         #
@@ -722,7 +766,7 @@ WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
 RETURN alert, downstream_alerts, reaches
 ORDER BY downstream_alerts DESC
 LIMIT 20
-""".replace("{alerts}", "[" + ", ".join(f'"{a}"' for a in EA21_ALERTS) + "]"),
+""".replace("{alerts}", _alert_list(EA21_ALERTS)),
     },
 ]
 

@@ -64,7 +64,11 @@ That is the alerting theme and the hero question meeting in one row.
 the queries arrive together. The catalog is `EA01`-`EA21`, with one gap:
 **`EA20` is not in it.** That id is claimed by #115's `Site` query, which is a
 separate PR; two queries sharing an id would silently overwrite one of them in
-`BY_ID`, so the gap is deliberate.
+`BY_ID`, so the gap is deliberate. If #115 is closed without merging — its own
+body says it should be, if the decision to decline #34 stands — then `EA20` is
+free again, and the next query to be added takes it rather than leaving a hole
+here. Either way this sentence is what tells a reader the gap is not an
+accident.
 
 That is not a promise this page makes about itself:
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`

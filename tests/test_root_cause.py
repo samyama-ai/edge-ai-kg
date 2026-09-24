@@ -1,5 +1,28 @@
 """`EA21`: twenty alerts, one fault -- which of them is upstream (#36)?
 
+**The failure model, stated, because the expected numbers follow from it and
+not from the query.** It is `EA17`'s: a *sensor* degrades and what it feeds is
+degraded with it. An alert here is raised on a sensor's pipeline output, not
+on the sensor hardware. So for the `known_root` chain -- `root` feeds
+`stage:a`, `stage:a -> stage:b -> stage:c`, `mid` feeds `stage:b`, `leaf`
+feeds `stage:c`:
+
+- `root` fails: `stage:a`, `b` and `c` all carry its bad data. `mid` joins at
+  `b` and `leaf` at `c`, so both of their outputs are bad too -- **2 alerts
+  explained**.
+- `mid` fails: `b` and `c` are degraded. `leaf` joins at `c` -- **1**.
+- `leaf` fails: only `c`. Nobody else joins downstream of it -- **0**.
+
+That is where 2, 1, 0 comes from. It is the same rule `EA17` computes as a
+blast radius, asked once per alerting sensor and counted.
+
+**The inverse model gives the opposite order**, and this module does not test
+it because the query does not answer it: if a *stage* fails and sensors alert,
+then the sensor with the longest downstream reach is the most exposed rather
+than the most causal, and the useful answer is the stages common to every
+alerting sensor -- an intersection, not a per-sensor count. Worth knowing
+before quoting the ranking at a fault whose origin is a stage.
+
 Two fixtures, because one of them alone proves nothing.
 
 **A known root.** A chain where `root` feeds the head of a pipeline that
@@ -23,7 +46,7 @@ import collections
 
 import pytest
 
-from benchmarks.queries import BY_ID, EA21_ALERTS
+from benchmarks.queries import EA21_ALERTS, retargeted_ea21
 from etl.helpers import create_edges, create_nodes
 from tests.test_blast_radius import (
     SCALE,
@@ -40,26 +63,6 @@ from tests.test_blast_radius import (
 )
 
 GRAPH = "default"
-
-
-def retargeted_ea21(alert_ids) -> str:
-    """`EA21` asking about `alert_ids` instead of the catalog's set.
-
-    The catalog's three ids appear twice in the query -- once per `IN` list --
-    and both have to move together: a rewrite that caught one would rank one
-    population against another, and the ranking would look like a finding.
-    Both occurrences are replaced, and the count is asserted rather than
-    assumed.
-    """
-    original = BY_ID["EA21"]["cypher"]
-    catalog_set = "[" + ", ".join(f'"{a}"' for a in EA21_ALERTS) + "]"
-    occurrences = original.count(catalog_set)
-    assert occurrences == 2, (
-        f"`EA21` names its alert set {occurrences} times, not 2. Either the "
-        f"query changed shape or the set moved; this retarget rewrites every "
-        f"occurrence and cannot do that blind.")
-    wanted = "[" + ", ".join(f'"{a}"' for a in alert_ids) + "]"
-    return original.replace(catalog_set, wanted)
 
 
 def rank(client, alert_ids) -> list[tuple[str, int]]:
@@ -117,7 +120,12 @@ def independent_alerts(engine_factory):
 
 
 def test_the_root_ranks_first_and_the_leaf_last(known_root):
-    """The ordering a human acts on, against a fixture whose answer is known.
+    """The ordering a human acts on, against a fixture whose answer is derived.
+
+    2, 1, 0 is not chosen: it falls out of the failure model in this module's
+    docstring, applied to this chain. `root` failing degrades `a`, `b` and `c`
+    and so explains `mid` and `leaf`; `mid` failing degrades `b` and `c` and
+    explains `leaf`; `leaf` failing degrades `c` and explains nobody.
 
     This is also where an unenforced join would show. `OPTIONAL MATCH`
     re-binds `s`, and note 1 is about a *trailing* bound variable, so the join
@@ -185,12 +193,11 @@ def test_two_alerts_in_a_cycle_each_reach_the_other(cyclic_alerts):
     assert ranked == {"sensor:x": 1, "sensor:y": 1, "sensor:out": 0}, ranked
 
     seen = reached(cyclic_alerts, ids)
-    assert seen["sensor:x"] == ["sensor:y"], seen
-    assert seen["sensor:y"] == ["sensor:x"], seen
-    assert seen["sensor:out"] == [], seen
-    assert "sensor:y" in seen["sensor:x"] and "sensor:x" in seen["sensor:y"], (
-        f"the mutual pair is invisible in the result: {seen}. Without it the "
-        f"output claims an order over two alerts that have none.")
+    assert seen == {"sensor:x": ["sensor:y"], "sensor:y": ["sensor:x"],
+                    "sensor:out": []}, (
+        f"the mutual pair must be visible in the result, and it is {seen}. "
+        f"Without each naming the other, the output claims an order over two "
+        f"alerts that have none.")
 
 
 def test_an_unknown_alert_id_is_reported_as_absent_not_as_a_zero(known_root):
@@ -323,3 +330,75 @@ def test_ea21_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
             f"{a} and {b} reach each other in the fleet, and the query's "
             f"`reaches` column does not say so: {seen}. The counts alone "
             f"would present one of them as upstream of the other.")
+
+
+def test_a_shared_entry_stage_reads_as_mutual_too(engine_factory):
+    """Two sensors on the same entry stage look exactly like a cycle, by design.
+
+    `*0..` includes the zero-length walk, so each reaches the other's entry
+    stage without traversing an edge. The `reaches` column therefore shows a
+    mutual pair here as well, and a caller cannot tell this from
+    `test_two_alerts_in_a_cycle_each_reach_the_other`.
+
+    That is deliberate rather than a gap: both shapes mean the same thing to
+    whoever is paging -- there is no order between these two alerts. This test
+    exists so the ambiguity is measured and documented instead of discovered
+    by someone who reads a mutual pair as proof of a cycle.
+    """
+    client = engine_factory()
+    build_chain(client,
+                {"sensor:p": "stage:shared", "sensor:q": "stage:shared",
+                 "sensor:far": "stage:far"},
+                [("stage:shared", "stage:tail")])
+
+    ids = ["sensor:p", "sensor:q", "sensor:far"]
+    assert dict(rank(client, ids)) == {"sensor:p": 1, "sensor:q": 1,
+                                       "sensor:far": 0}
+    seen = reached(client, ids)
+    assert seen["sensor:p"] == ["sensor:q"] and seen["sensor:q"] == ["sensor:p"], (
+        f"a shared entry stage should read as mutual, like a cycle: {seen}")
+
+
+def test_ea21_matches_ground_truth_at_full_scale(request, engine_factory,
+                                                 operators):  # noqa: F811
+    """The same comparison at `--scale 1.0`, and the claims the docs make there.
+
+    Three things need a full-size graph rather than this module's `0.3`:
+
+    - `CLAUDE.md` says at least one engine bug appears only at real
+      cardinalities, and the `OPTIONAL MATCH` re-bind of `s` has so far been
+      measured on three- and four-node fixtures and at scale 0.3;
+    - the `reaches` column is `collect` over a join, so an unenforced one
+      would show as inflated lists here first;
+    - `why_graph`, the query comment and the README all make specific claims
+      about `--scale 1.0` -- that `sensor:00003` and `sensor:00007` reach each
+      other, and that `sensor:00000` reaches both while neither reaches it.
+      Those were hand-measured. This is what pins them.
+
+    Opt-in via `--full-scale`: the load costs about three minutes. Skipped
+    from the body rather than a fixture, because `conftest.py` converts only
+    setup-phase skips under `--no-skips`, and "you did not ask for the slow
+    check" is not a broken environment.
+    """
+    if not request.config.getoption("--full-scale"):
+        pytest.skip("needs --full-scale (about three minutes to build the graph)")
+
+    client, fleet = build_and_load(engine_factory, operators, seed=SEED,
+                                   scale=1.0)
+
+    rows = client.query(retargeted_ea21(EA21_ALERTS), GRAPH).records
+    got = sorted(((row[0], row[1], sorted(row[2])) for row in rows),
+                 key=lambda row: (-row[1], row[0]))
+    want = truth_for(fleet, list(EA21_ALERTS))
+    assert got == want, (
+        f"at --scale 1.0 EA21 gives {got} and the Fleet gives {want}; this is "
+        f"the cardinality at which an unenforced join would first show")
+
+    seen = {alert: set(others) for alert, _n, others in got}
+    assert seen["sensor:00003"] == {"sensor:00007"}, seen
+    assert seen["sensor:00007"] == {"sensor:00003"}, seen
+    assert seen["sensor:00000"] == {"sensor:00003", "sensor:00007"}, seen
+    assert "sensor:00000" not in seen["sensor:00003"], (
+        f"the docs call sensor:00000 a genuine root at --scale 1.0, meaning "
+        f"nothing reaches it: {seen}")
+    assert "sensor:00000" not in seen["sensor:00007"], seen

@@ -383,8 +383,9 @@ queries at 0.6.1 and is not comparable — the engine moved and so did the
 catalog. `EA18` and `EA19` postdate that run. Timed separately on 2026-09-21,
 embedded 1.7.1 at `--scale 1.0`, median of five after one warm-up: `EA18` 37.5
 ms (36.9 ms when first recorded), above the median and well under `EA17`, and
-`EA19` 0.1 ms. `EA21` was timed the same way on 2026-09-24: 0.1 ms. These figures are hand-recorded and **not pinned by a test**,
-unlike the node and edge counts on this page, which
+`EA19` 0.1 ms. `EA21` was timed the same way on 2026-09-24: 0.1 ms. These
+figures are hand-recorded and **not pinned by a test**, unlike the node and
+edge counts on this page, which
 `tests/test_published_counts.py` checks: they are machine-dependent, so the
 command is the thing to trust, not the numbers. Expect them to drift.)
 
