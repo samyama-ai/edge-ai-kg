@@ -204,8 +204,12 @@ the zero-length case, silently, and it *rejects* `size(r)` over such a
 relationship outright. `EA17` asks for `size(r)`, so on the server it **raises**
 -- which is why it is embedded-only rather than reshaped. **`EA21` is
 embedded-only for the other half of the same note**: it walks `NEXT_STAGE*0..`
-and never calls `size(r)`, so the server does not raise -- it matches only the
-zero-length case and returns a ranking of zeros, silently. That is the
+and never calls `size(r)`, so the server has nothing to reject. What it would
+return instead is **inferred from note 12, not measured** -- nobody has run
+`EA21` against a 1.7.0 server -- and the inference is that the walk matches
+only the zero-length case, making `x` the alerting sensor's own entry stage,
+so the count reads "other alerts feeding that same stage" rather than "other
+alerts downstream": wrong numbers that look like an answer. That is the
 dangerous half, and it is why the set is derived from the Cypher rather than
 from which queries happen to error. `EA07` walks a
 bounded `*0..3` without `size(r)`, so it runs; note 12 measured both builds

@@ -258,9 +258,12 @@ instead: the 1.7.0 server rejects `size(r)` over a variable-length
 relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19` and
 `EA21` post-date this run and were not part of it; the catalog is larger now,
 and this paragraph reports what was verified then. `EA21` would not have
-raised the way `EA17` did — it walks a variable-length relationship without
-`size(r)`, so on that server it returns wrong rows silently rather than an
-error, and like `EA17` it is answerable only on the embedded build.
+raised the way `EA17` did — it walks an **unbounded** `*0..` without
+`size(r)`, and it is the unbounded walk that makes a query embedded-only, not
+variable length as such (`EA07` is bounded and runs on both). What it would
+return there is **inferred from engine note 12 and untested**: the zero-length
+match alone, so wrong rows rather than an error. Like `EA17` it should be
+treated as answerable only on the embedded build.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
 below a fresh build's 25,150 / 76,303: it was exported from an earlier build and

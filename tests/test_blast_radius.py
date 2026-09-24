@@ -335,6 +335,14 @@ def retargeted_ea17(sensor_id: str) -> str:
 
     original = BY_ID["EA17"]["cypher"]
     subject, wanted = cypher_literal(EA17_SUBJECT), cypher_literal(sensor_id)
+    # Refused, not normalised. `cypher_literal` strips the characters that
+    # would end the literal early, so `sensor:x"` renders as `"sensor:x"` --
+    # a different sensor, answered silently. `benchmarks/queries.py` takes the
+    # same line for `EA21`'s alert set.
+    if wanted != f'"{sensor_id}"':
+        raise ValueError(
+            f"sensor id {sensor_id!r} cannot be asked about safely: escaping "
+            f"it gives {wanted}, which names a different sensor.")
     # Count, not membership. `wanted in cypher` is trivially true when
     # `sensor_id` *is* `EA17_SUBJECT` -- which is the first sensor in the
     # fleet and the one most callers pass -- so the "catalog subject moved"
@@ -513,19 +521,25 @@ def test_ea17_never_compares_an_id_with_a_bare_inequality():
     )
 
 
-def test_a_quoted_sensor_id_cannot_break_out_of_the_retarget(engine_factory):
-    """An id carrying a quote is data, not Cypher (#118).
+def test_a_quoted_sensor_id_is_refused_rather_than_normalised(engine_factory):
+    """An id carrying a quote is refused, not silently turned into another (#118).
 
     `retargeted_ea17` built its literal with an f-string, so
     `'x") OR true //'` produced `WHERE s.id = "x") OR true //"`: the predicate
-    closes early and the rest of the line is commented out. Every caller here
-    is a test, so nothing was exposed -- but `EA21`'s equivalent helper was
+    closes early and the rest of the line is commented out. Every caller is a
+    test today, so nothing was exposed -- but `EA21`'s equivalent helper was
     promoted into `benchmarks/queries.py`, where an MCP tool calls it with a
-    live alert set, and the same shape became a real injection. This is the
-    same one-line fix applied before that happens again.
+    live alert set, and there the same shape is a real injection.
 
-    The fixture holds one sensor the payload does not name, so an escape is
-    visible as rows coming back at all.
+    Escaping alone would fix the injection and introduce a quieter bug:
+    `cypher_literal` strips the quote, so `sensor:x"` and `sensor:x` become
+    the same literal and a caller asking about one is answered about the
+    other. For a query a human pages on, answering about a different sensor is
+    worse than an error, so ids that change under escaping are refused.
+
+    The positive control is the point of the fixture: the same graph, asked
+    about the id it really holds, must return rows. Without it an empty result
+    from a broken fixture would look exactly like an injection that failed.
     """
     client = engine_factory()
     create_nodes(client, GRAPH, "Sensor",
@@ -535,12 +549,23 @@ def test_a_quoted_sensor_id_cannot_break_out_of_the_retarget(engine_factory):
     create_edges(client, GRAPH, [
         ("Sensor", EA17_SUBJECT, "FEEDS", "SignalStage", "stage:only", None)])
 
-    cypher = retargeted_ea17('x") OR true //')
-    assert '"x) OR true //"' in cypher, (
-        f"expected `cypher_literal` to strip the quote; the first leg reads "
-        f"{[ln for ln in cypher.splitlines() if 's.id =' in ln][:1]}")
-    assert [list(row) for row in client.query(cypher, GRAPH).records] == [], (
-        "a quoted id escaped the literal and matched a sensor it does not name")
+    # Positive control first: this fixture can answer at all.
+    control = client.query(retargeted_ea17(EA17_SUBJECT), GRAPH).records
+    assert control, (
+        "the fixture returned nothing for its own sensor, so an empty result "
+        "below would prove nothing about the payload")
 
+    with pytest.raises(ValueError, match="names a different sensor"):
+        retargeted_ea17('x") OR true //')
+
+
+def test_a_sensor_id_that_is_not_a_string_is_refused(engine_factory):
+    """A list, as a caller reaching for `EA21`'s signature would pass.
+
+    Its own test rather than a tail on the injection one: a different mistake
+    with a different failure. `str(["sensor:00000"])` would render as
+    `"['sensor:00000']"` and ask about a sensor that cannot exist, looking
+    like it worked.
+    """
     with pytest.raises(TypeError, match="must be a string"):
         retargeted_ea17([EA17_SUBJECT])

@@ -677,8 +677,10 @@ query had to change.
 > alerts anywhere downstream". Not zeros, necessarily: wrong numbers that look
 > like an answer, which is why it is embedded-only rather than
 > server-with-a-caveat. `tests/test_correctness.py`'s `EMBEDDED_ONLY` is
-> derived from the Cypher and is what keeps this sentence and the two pages
-> that repeat it honest.
+> derived from the Cypher, so it catches a *new* query with an unbounded walk
+> that no page mentions. It does not check any of the prose here -- what the
+> server actually returns for `EA21` is unmeasured, and no test can settle
+> that without a 1.7.0 server to run it against.
 >
 > **Version labels, because this file carries two vintages.** Notes 1-9 are
 > the **1.7.0 server**; notes 10 and 11 compare it against `samyama` **0.6.1**

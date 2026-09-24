@@ -288,9 +288,10 @@ def test_ea21_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
     arbitrary one.
 
     The two guards below are what stop this passing on an empty comparison.
-    `truth_for` drops ids the fleet does not hold, and this fixture's seed and
-    scale (`4242`, `0.3`) are the blast-radius module's -- not the ones the
-    catalog's alert set was chosen against. A fleet without those sensors, or
+    `truth_for` drops ids the fleet does not hold, and this fixture's `SEED`
+    and `SCALE` are imported from the blast-radius module -- not the ones the
+    catalog's alert set was chosen against, and not values to restate here,
+    since the assertions below print whatever they are. A fleet without those sensors, or
     one where none of them reaches another, would leave `[] == []` or all
     zeros on both sides, and the test would pass while measuring nothing.
     """
@@ -319,7 +320,7 @@ def test_ea21_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
     # The cycles are in the shipped data, not only in the hand-built fixture,
     # so the mutual pairs are asserted here rather than described. At this
     # fixture's seed and scale every pair is mutual -- all three alerts reach
-    # each other, so the counts tie at 2 and no row is upstream of another. At
+    # each other, so the counts tie at 2 and no row is upstream of another.
     # At `--scale 1.0` it has been both -- one pair under a root at 205
     # operators, and all three mutual at 379 -- because the chain sampling
     # moves with the upstream catalogue. Either way the claim being tested is
@@ -370,7 +371,7 @@ def test_ea21_matches_ground_truth_at_full_scale(request, engine_factory,
                                                  operators):  # noqa: F811
     """The same comparison at `--scale 1.0`, and the claims the docs make there.
 
-    Three things need a full-size graph rather than this module's `0.3`:
+    Two things need a full-size graph rather than this module's `0.3`:
 
     - `CLAUDE.md` says at least one engine bug appears only at real
       cardinalities, and the `OPTIONAL MATCH` re-bind of `s` has so far been
@@ -452,29 +453,31 @@ def test_a_single_alert_reaches_nobody(known_root):
     assert reached(known_root, ["sensor:root"]) == {"sensor:root": []}
 
 
-def test_a_quoted_alert_id_cannot_break_out_of_the_list(known_root):
-    """An id carrying a quote is data, not Cypher.
+def test_a_quoted_alert_id_is_refused_rather_than_normalised(known_root):
+    """An id carrying a quote is refused, not silently turned into another.
 
     `retargeted_ea21`'s docstring says an MCP tool will call it with a live
-    alert set, which makes the ids external input. Before `_alert_list` ran
-    them through `cypher_literal`, `['sensor:x"] OR true //']` produced
+    alert set, which makes the ids external input. Before `_alert_list`
+    escaped them, `['sensor:x"] OR true //']` produced
     `IN ["sensor:x"] OR true //"]` -- the list closed early, a true predicate
     was disjoined onto the `WHERE`, and the rest of the line was commented
-    out, so the query answered about **every sensor in the graph** instead of
-    the three named.
+    out, so the query answered about **every sensor in the graph**.
 
-    The fixture has three sensors and the payload names none of them, so a
-    successful escape is visible as rows coming back at all.
+    Escaping alone would close that and open something quieter: with the
+    quote stripped, `sensor:x"` and `sensor:x` are the same literal, so an
+    alert set naming one would be answered about the other. Ranking the wrong
+    sensor is worse than refusing to rank, so such ids raise.
+
+    The positive control matters as much as the payload: the same fixture,
+    asked about ids it holds, must return rows -- otherwise an empty answer
+    would prove nothing.
     """
-    payload = ['sensor:x"] OR true //']
-    assert rank(known_root, payload) == [], (
-        "a quoted id escaped the list literal and matched sensors it does not "
-        "name")
+    assert rank(known_root, ["sensor:root", "sensor:mid"]), (
+        "the fixture answered nothing for ids it holds, so a refusal below "
+        "would prove nothing")
 
-    cypher = retargeted_ea21(payload)
-    assert 'IN ["sensor:x] OR true //"]' in cypher, (
-        f"expected the quote to be stripped by `cypher_literal`; the `WHERE` "
-        f"reads {[ln for ln in cypher.splitlines() if ln.startswith('WHERE s.id')]}")
+    with pytest.raises(ValueError, match="names a different sensor"):
+        retargeted_ea21(['sensor:x"] OR true //'])
 
 
 def test_a_bare_string_is_refused_rather_than_iterated(known_root):

@@ -81,7 +81,31 @@ def _alert_list(alert_ids) -> str:
             f"a bare string iterates by character and would ask about "
             f"{len(alert_ids)} one-letter ids, returning nothing and raising "
             f"nothing.")
-    return "[" + ", ".join(cypher_literal(str(a)) for a in alert_ids) + "]"
+    return "[" + ", ".join(_alert_literal(a) for a in alert_ids) + "]"
+
+
+def _alert_literal(alert_id) -> str:
+    """One id as a Cypher literal, refused if escaping would change it.
+
+    `cypher_literal` strips the characters that would end a literal early,
+    which makes injection impossible but introduces a quieter problem:
+    `sensor:x"` and `sensor:x` both render as `"sensor:x"`, so a caller asking
+    about one would be answered about the other. Silently substituting a
+    *different sensor* into an alerting query is worse than refusing, and the
+    ids this repo generates (`sensor:00000`) never contain those characters --
+    so an id that changes under escaping is a sign something is wrong upstream
+    rather than an id to normalise.
+    """
+    text = str(alert_id)
+    literal = cypher_literal(text)
+    if literal != f'"{text}"':
+        raise ValueError(
+            f"alert id {alert_id!r} cannot be asked about safely: escaping it "
+            f"gives {literal}, which names a different sensor. Quotes, "
+            f"backslashes and newlines are stripped to keep the literal from "
+            f"ending early, so an id containing them would silently become "
+            f"another id.")
+    return literal
 
 QUERIES: list[dict] = [
     {

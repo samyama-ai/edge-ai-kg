@@ -164,9 +164,11 @@ measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
 `Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
 `EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
 build. `EA21` opens on a `Sensor` too, and carries a second reason it cannot
-be read off the server run: it walks `NEXT_STAGE*0..`, the variable-length
-shape the 1.7.0 server rejects outright for `EA17` (engine note 12), and
-nothing here has run it there. The distinction between measured and expected
+be read off the server run: it walks an unbounded `NEXT_STAGE*0..`, which the
+1.7.0 server does not traverse (engine note 12). It would not *raise* the way
+`EA17` does -- `EA17` asks for `size(r)` and `EA21` does not -- so by
+inference, untested here, it would answer from the zero-length match alone and
+report wrong numbers rather than nothing. The distinction between measured and expected
 is kept rather than smoothed over, because on this page it has mattered
 before.
 
@@ -381,15 +383,16 @@ median 5.8 ms, slowest `EA17` at 95 ms — are from the sweep of the **17**
 queries that existed when it was run; `EA18`, `EA19` and `EA21` post-date it
 and are not in that median.
 
-**Over HTTP it is one fewer — 18 — and that is an inference, not a sweep.**
-`EA17` raises on the 1.7.0 server, which *is* measured (engine note 12), so it
-returns no rows there. `EA21` is the subtler case and has never been run
-against a server at all: it walks the same unbounded shape but never calls
-`size(r)`, so by note 12 it would not raise — it would match only the
-zero-length case and return **wrong rows that look like an answer**. It counts
-toward the 18 and should not be trusted there, which is why both it and `EA17`
-are embedded-only. No full-graph HTTP sweep has been run since `EA18`, `EA19`
-and `EA21` were added.
+**Over HTTP the honest number is 17 measured-equivalent, and 18 only if you
+count a query whose rows would be wrong.** `EA17` raises on the 1.7.0 server,
+which *is* measured (engine note 12), so it returns nothing there: that is the
+one subtraction anybody has checked. `EA21` has never been run against a
+server at all — it walks the same unbounded shape but never calls `size(r)`,
+so by note 12 it would not raise; it would answer from the zero-length match
+alone and return **wrong rows that look like an answer**. Counting it as one
+of the 18 is counting an inference, which is why it and `EA17` are both
+embedded-only. No full-graph HTTP sweep has been run since `EA18`, `EA19` and
+`EA21` were added, so none of this is a sweep result.
 
 Both counts above describe the **full** graph. The only recorded HTTP run is
 over the **real layer**, in the section above, which is where the "6 of the
