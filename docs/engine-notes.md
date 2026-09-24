@@ -37,7 +37,10 @@ today -- note 11 has a known workaround that is deliberately deferred to #56,
 note 10 has none established. Between them they are why three tests in
 `tests/test_correctness.py` **were** marked `xfail` until #105 raised the floor
 to `samyama>=1.7.1` and removed every one of them; the table is the record of
-what they excused, not of the suite today:
+what they excused, not of the suite today. It covers this module only -- the
+sixth xfailed outcome was `tests/test_empty_answers.py::test_ea01_zero_row_case`,
+which is why `README.md` counts four functions and six outcomes where this
+table counts three and five:
 
 | Test | Excused | Note |
 |---|---|---|
@@ -579,7 +582,8 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 > embedded, which is what `pyproject.toml` resolved when they were written;
 > notes 12, 13 and 13b are the 1.7.1 vintage. (The "Versions these describe"
 > paragraph at the top of this file is the same split, stated once.) This
-> note was measured against **1.7.1** embedded, the floor #104 landed. So the
+> note was measured against **1.7.1** embedded -- the floor written in #105,
+> reaching `main` inside #104. So the
 > comparison below is 1.7.0 server against 1.7.1 embedded, and
 > the conclusion "the server is the one that is wrong" is really "the server at
 > 1.7.0 does not do what the embedded build at 1.7.1 does". Whether 1.7.0
@@ -624,7 +628,8 @@ robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
 that the 1.7.0 server executes. The options are an engine that does it
 (embedded 1.7.1 does), or not asking the question over HTTP.
 
-**`EA17` therefore needs the `samyama>=1.7.1` floor that #104 landed** -- for
+**`EA17` therefore needs the `samyama>=1.7.1` floor** (#105, reaching `main`
+inside #104) -- for
 this note, and because its per-leg second `WITH` introduces new aliases, which
 is note 10's shape and 0.6.1 rejects. The floor no longer admits a build on
 which `EA17` fails outright.

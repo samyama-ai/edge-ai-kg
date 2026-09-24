@@ -169,11 +169,16 @@ declared dependency, the running engine, **and** re-runs note 11's own
 reproduction, because note 11 does not raise. On a downgraded build it makes
 `EA04` return confident extra rows rather than fail.
 
-**Notes 12, 13 and 13b belong with 1-9, not with the carve-out above** -- all
-three return wrong rows rather than erroring. Note 12: the 1.7.0 server does
-not *traverse* a variable-length relationship the embedded 1.7.1 build walks,
-and it does not error, it returns fewer rows -- which is why `EA17` is
-embedded-only rather than reshaped. That set is derived rather than asserted:
+**Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
+13 and 13b return wrong rows rather than erroring; note 12 does both, and which
+half you get depends on the query. The 1.7.0 server does not *traverse* a
+variable-length relationship the embedded 1.7.1 build walks: it matches only
+the zero-length case, silently, and it *rejects* `size(r)` over such a
+relationship outright. `EA17` asks for `size(r)`, so on the server it **raises**
+-- which is why it is embedded-only rather than reshaped. `EA07` walks a
+bounded `*0..3` without `size(r)`, so it runs; note 12 measured both builds
+returning byte-identical rows for it, which its `ORDER BY ... LIMIT 10` makes
+true on this graph and nothing enforces. That set is derived rather than asserted:
 `tests/test_correctness.py::test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk`
 fails if a new query carries an unbounded `*0..`, because this sentence,
 `README.md` and note 12 all name `EA17` as the only one. Notes 13 and 13b were measured on embedded

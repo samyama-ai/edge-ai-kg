@@ -23,6 +23,7 @@ stale the moment the takeable half moved.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -128,7 +129,7 @@ def test_the_decision_document_exists():
 
 
 def test_the_delivery_claims_match_the_catalog():
-    """Every `delivered as \u2018EAnn\u2019` on the page, checked against `BY_ID`.
+    """Every ``delivered as `EAnn` `` on the page, checked against `BY_ID`.
 
     The previous version keyed on one exact phrase -- "not** delivered on
     `main`" -- so any other wording of "pending" walked past it, and the page
@@ -143,8 +144,6 @@ def test_the_delivery_claims_match_the_catalog():
       the word "pending" -- any other wording fails identically, because what
       is compared is the set of claimed ids against the catalog.
     """
-    import re
-
     from benchmarks.queries import BY_ID
 
     text = DOC.read_text(encoding="utf-8")
@@ -163,16 +162,33 @@ def test_the_delivery_claims_match_the_catalog():
     assert stated, (
         "the page no longer states the catalog range as `EA01`-`EAnn`; that "
         "sentence is what this test pins, so update both together.")
-    last = max(BY_ID)
+    # By number, not lexicographically: `max()` over strings ranks "EA9"
+    # above "EA10", and the catalog will pass EA99 eventually.
+    last = max(BY_ID, key=lambda qid: int(qid[2:]))
     assert stated.group(1) == last, (
         f"the page says the catalog is `EA01`-`{stated.group(1)}`; the catalog "
         f"ends at `{last}`. A reader trusts that range to know what exists.")
 
-    pending = [qid for qid in ("EA17", "EA18", "EA19")
-               if qid in BY_ID and qid not in claimed]
-    assert not pending, (
-        f"{pending} are in the catalog but the page does not say they were "
-        f"delivered. The verdict table still reads as work not yet done.")
+    # Derived from the verdict table rather than a hardcoded triple, and
+    # scoped to it: the prose names `EA01` and `EA07` as examples, which are
+    # not this page's to deliver. A table row is `| #nn | ... | verdict |`, so
+    # a row marked **take** that names a query must also say it was delivered
+    # -- the drift being a shipped query whose row still reads as work not yet
+    # done. Listing the ids here by hand would mean editing this test every
+    # time the alerting theme grows.
+    rows = [line for line in text.splitlines() if line.startswith("| #")]
+    assert rows, (
+        "no verdict table rows found; the table is what this test reads, so "
+        "if its shape changed, update this test with it.")
+    in_table = {qid for row in rows for qid in re.findall(r"`(EA\d\d)`", row)}
+    assert in_table, (
+        "the verdict table names no catalog query at all; if the delivery "
+        "claims moved out of it, this test is pinning nothing.")
+    unclaimed = sorted(qid for qid in in_table if qid in BY_ID and qid not in claimed)
+    assert not unclaimed, (
+        f"{unclaimed} are named in the verdict table and exist in the catalog, "
+        f"but carry no `delivered as` claim. Either add the claim, or say why "
+        f"the query exists while the verdict reads otherwise.")
 
 
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):

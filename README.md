@@ -163,13 +163,13 @@ equal-ranked rows comes back, except `EA10`, which differs in the sixteenth
 significant digit of a float. Those are not different answers, but they are not
 "no disagreements" either, and comparing lengths would have hidden all seven.
 
-**This does not contradict the engine-notes section below.** That section
-describes `samyama` 0.6.1, where `EA01`, `EA02` and `EA04` were wrong against
-the engine `pytest` used and carried `xfail`s. The comparison above was run at
-1.7.1, where notes 10 and 11 do not reproduce and those marks are gone (#104) —
-which is #56's finding, that
-the "embedded versus server" disagreement was a version skew (0.6.1 against a
-1.7.0 server) rather than a difference between the two builds.
+**The engine-notes section below describes an older build, not a contradiction
+of this one.** Notes 10 and 11 were measured on `samyama` 0.6.1, where `EA01`,
+`EA02` and `EA04` were wrong under `pytest` and carried `xfail`s. The
+comparison above was run at 1.7.1, where neither note reproduces and the marks
+are gone — #56's finding being that the "embedded versus server" disagreement
+was version skew (0.6.1 against a 1.7.0 server) rather than a difference
+between the two builds.
 
 `pyproject.toml` declares `samyama>=1.7.1` since #104, so the build these
 pages describe is the build you get.
@@ -439,10 +439,19 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
 - the same for the type `sum(CASE ...)` returns, which silently dropped a
   `WHERE` on it ([note 11](docs/engine-notes.md));
 - the 1.7.0 **server** does not traverse a variable-length relationship,
-  bounded or not — it returns only the zero-length match, and rejects `size(r)`
-  on one — where the embedded 1.7.1 build walks it
-  ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only, and
-  why it needs the `samyama>=1.7.1` floor #104 landed.
+  bounded or not — it matches only the zero-length case, silently — and it
+  *rejects* `size(r)` over one, where the embedded 1.7.1 build walks it
+  ([note 12](docs/engine-notes.md)). `EA17` asks for `size(r)`, so it **raises**
+  on the server and is embedded-only; `EA07` walks a bounded `*0..3` without
+  `size(r)`, and note 12 measured both builds returning byte-identical rows for
+  it — true of this graph and this `LIMIT`, not enforced. `EA17` needs the
+  `samyama>=1.7.1` floor (written in #105, reaching `main` inside #104);
+- an `OPTIONAL MATCH` whose `WHERE` mentions a `WITH`-introduced alias drops
+  the unmatched rows, turning it into an inner join
+  ([note 13](docs/engine-notes.md)), and an expression mixing a grouping key
+  with an aggregate in one projection returns `NULL`
+  ([note 13b](docs/engine-notes.md)) — both measured on embedded 1.7.1 while
+  writing `EA18`.
 
 Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
@@ -452,9 +461,11 @@ embedded-only rather than reshaped.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised
-sweeps. Those marks were written against `samyama` 0.6.1. **#105 raised the floor to
-1.7.1 and removed them, reaching `main` with #104**, and the three queries now
-pass unmarked under `pytest` and under `run_benchmark`.
+sweeps, and they span two modules -- `tests/test_correctness.py` and
+`tests/test_empty_answers.py`. Those marks were written against `samyama`
+0.6.1. **#105 raised the floor to 1.7.1 and removed them** (reaching `main`
+inside #104), and the three queries now pass unmarked under `pytest` and under
+`run_benchmark`.
 
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,
