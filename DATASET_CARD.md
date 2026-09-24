@@ -255,9 +255,12 @@ and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 **16 of the 17 catalog queries that existed on that date** were verified to
 return rows against the imported snapshot. The seventeenth, `EA17`, raised
 instead: the 1.7.0 server rejects `size(r)` over a variable-length
-relationship ([engine note 12](docs/engine-notes.md)). `EA18` and `EA19`
-post-date this run and were not part of it; the catalog is larger now, and
-this paragraph reports what was verified then.
+relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19` and
+`EA21` post-date this run and were not part of it; the catalog is larger now,
+and this paragraph reports what was verified then. `EA21` would not have
+raised the way `EA17` did — it walks a variable-length relationship without
+`size(r)`, so on that server it returns wrong rows silently rather than an
+error, and like `EA17` it is answerable only on the embedded build.
 
 Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
 below a fresh build's 25,150 / 76,303: it was exported from an earlier build and

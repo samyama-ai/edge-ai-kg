@@ -376,23 +376,27 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 20 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. On the
 **embedded** build, **19 of the 20 return rows** against the **full** graph at
-`--scale 1.0` — `EA21` was run there and answers in 0.1 ms, median of five
-after one warm-up (its first, cold call is 23 ms). The timings —
+`--scale 1.0`, `EA21` among them. The timings —
 median 5.8 ms, slowest `EA17` at 95 ms — are from the sweep of the **17**
 queries that existed when it was run; `EA18`, `EA19` and `EA21` post-date it
 and are not in that median.
 
-**Over HTTP, that is two fewer — 17 — and it is an inference, not a sweep.**
-`EA17` raises on the 1.7.0 server, which *is* measured (engine note 12);
-`EA21` walks the same variable-length shape and has not been run there at all.
-The count is those subtracted from the embedded result. No full-graph HTTP
-sweep has been run since `EA18`, `EA19` and `EA21` were added.
+**Over HTTP it is one fewer — 18 — and that is an inference, not a sweep.**
+`EA17` raises on the 1.7.0 server, which *is* measured (engine note 12), so it
+returns no rows there. `EA21` is the subtler case and has never been run
+against a server at all: it walks the same unbounded shape but never calls
+`size(r)`, so by note 12 it would not raise — it would match only the
+zero-length case and return **wrong rows that look like an answer**. It counts
+toward the 18 and should not be trusted there, which is why both it and `EA17`
+are embedded-only. No full-graph HTTP sweep has been run since `EA18`, `EA19`
+and `EA21` were added.
 
 Both counts above describe the **full** graph. The only recorded HTTP run is
 over the **real layer**, in the section above, which is where the "6 of the
 20" figure comes from — two different graphs, not two readings of one.
 
-The other one is `EA18`, which asks which deployments miss a clinical task's
+The one query of the twenty returning nothing on the embedded build is
+`EA18`, which asks which deployments miss a clinical task's
 latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs
 are inside budget, the worst at 54.5% of it — that is a property of the data
 rather than of the engine, so it holds wherever the query runs. The empty result
