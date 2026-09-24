@@ -405,7 +405,7 @@ engine that walks variable-length paths**, which the 1.7.0 server does not
 | **EA14** | **REAL:** MLPerf Tiny v1.2 throughput leaders per benchmark task |
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
-| **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12)**:** this sensor stops — what stops with it, and what stops *only* because of it? |
+| **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
 | **EA18** | **EMPTY ON THIS FLEET:** which deployments miss a clinical task's latency budget, and which operators have no kernel on their accelerator? |
 | **EA19** | **COMPLIANCE:** this sensor fails — which certifications does that touch, through the tasks that require it? |
 
@@ -434,18 +434,20 @@ the newer embedded engine has, so it reads as a version gap rather than a
 defect. Grouping the three under "not behaviours of the server" was wrong about
 note 12.
 
-- the embedded build and the HTTP server disagree about a second `WITH` that
-  introduces a new alias ([note 10](docs/engine-notes.md));
-- and about the type `sum(CASE ...)` returns, which silently drops a `WHERE` on
-  it ([note 11](docs/engine-notes.md));
+- `samyama` 0.6.1 did not register a second `WITH` that introduces a new
+  alias, where the 1.7.0 server did ([note 10](docs/engine-notes.md)) — version
+  skew rather than a difference between the two builds, which is what #56
+  settled, and it does not reproduce on the `>=1.7.1` floor;
+- the same for the type `sum(CASE ...)` returns, which silently dropped a
+  `WHERE` on it ([note 11](docs/engine-notes.md));
 - the 1.7.0 **server** does not traverse a variable-length relationship,
   bounded or not — it returns only the zero-length match, and rejects `size(r)`
   on one — where the embedded 1.7.1 build walks it
   ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only, and
   why it needs the `samyama>=1.7.1` floor #104 landed.
 
-Notes 10 and 11 are not worked around in the catalog — note 11 has a known
-workaround deferred to #56, note 10 has none established. Note 12 has no
+Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
+raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
 workaround either, and one is not possible: there is no way to write "walk a
 chain of unknown length" that the 1.7.0 server executes, so `EA17` is
 embedded-only rather than reshaped.

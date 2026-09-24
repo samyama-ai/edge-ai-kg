@@ -107,7 +107,7 @@ them.
 | `EA17` | **95 ms** | **431 ms** | **×4.5 — superlinear** |
 | `EA11` | 33 ms | 98 ms | ×2.9 — superlinear |
 | `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
-| catalog total (all 17, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear |
+| catalog total (the 17 queries that existed then, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear |
 
 The graph doubles between those columns — 76,303 edges at 1.0 against 152,717
 at 2.0, and 25,150 nodes against 48,907 — so ×2 is the linear line. Everything
@@ -119,8 +119,11 @@ withdrawn: it read `EA17` 105/480 ms and a 340 ms catalog total, and had
 did not call `apply_schema`, the same omission that invalidated the first Neo4j
 comparison in #47. Both tables above are indexed.
 
-`EA17` is the slowest query in the catalog at both sizes and the only one whose
-cost grows faster than `EA11`. The shape explains it: **four of its five legs**
+`EA17` is the slowest of the queries in this table at both sizes, and the only
+one whose cost grows faster than `EA11`. `EA18` and `EA19` were added after
+this sweep and are not in it; both are cheap on the shipped fleet (`EA18`
+returns no rows at all, `EA19` six), but neither has been run at 2.0, so
+"slowest in the catalog" is a claim this page cannot make about them. The shape explains it: **four of its five legs**
 carry an unbounded `*0..` in the main pattern *and* another inside an
 `OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
 has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
@@ -134,7 +137,8 @@ here inspects a plan. The engine exposes no `EXPLAIN`, so confirming it would
 mean instrumenting the engine rather than the query.
 
 **Not run above 2.0.** Both figures are well inside a demo's patience;
-extrapolating ×4.5 puts `EA17` past a second somewhere around 3.0 and into
+extrapolating `EA17`'s own ×4.5 from its measured 431 ms at 2.0 puts it past a
+second somewhere around 3.0 and into
 `EA11`-at-10.0 territory soon after. Anyone loading a larger fleet should time
 it before putting it in front of someone.
 

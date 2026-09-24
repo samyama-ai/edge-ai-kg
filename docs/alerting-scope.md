@@ -33,8 +33,8 @@ rather than the reason it was chosen. Measured on the shipped graph:
 |---|---|---|---|
 | #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #110) |
 | #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
-| #37 | silent degradation against a latency budget | no | **take** |
-| #40 | which certifications a failure implicates | no | **take** |
+| #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
+| #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** |
 | #34 | where the sensor physically is | `Site` | **decline** |
 | #39 | who owns the affected asset | `Team` | **decline** |
@@ -59,10 +59,19 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35` is delivered by #96, whose work reaches `main` with **#110** — in the
-same merge as this paragraph, so the two arrive together. Wherever this page
-is read, `EA17` is in the catalog beside it, and the catalog is
-`EA01`-`EA17`.
+`#35`, `#37`, `#40` and `#36` are delivered — as `EA17`, `EA18`, `EA19` and
+`EA21` — and reach `main` in the same merge as this paragraph, so the page and
+the queries arrive together. The catalog is `EA01`-`EA21`, with one gap:
+**`EA20` is not in it.** That id is claimed by #115's `Site` query, which is a
+separate PR; two queries sharing an id would silently overwrite one of them in
+`BY_ID`, so the gap is deliberate.
+
+That is not a promise this page makes about itself:
+`tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
+reads every "delivered as `EAnn`" out of the verdict table above and fails if
+the catalog does not hold it, fails if the stated range is not the catalog's
+last id, and fails if one of the three is in the catalog while the table still
+reads as work not yet done.
 
 It is the one catalog query the **1.7.0 server** cannot run: that build does
 not traverse variable-length relationships and rejects `size(r)` on one

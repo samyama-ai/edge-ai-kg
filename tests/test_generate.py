@@ -1,4 +1,6 @@
 """Invariants of the synthetic fleet. These are what the query tests lean on."""
+import collections
+
 import pytest
 
 from etl import generate as gen
@@ -123,3 +125,33 @@ def test_node_property_values_are_scalars(fleet):
                 assert isinstance(value, (str, int, float, bool)) or value is None, (
                     f"{label}.{key} is {type(value).__name__}, not a scalar"
                 )
+
+
+def test_a_deployment_uses_exactly_one_accelerator(fleet):
+    """`EA18` reads this as an invariant, so it is checked rather than assumed.
+
+    `EA18` counts, per (deployment, operator), the kernels that implement the
+    operator *and* run on the deployment's accelerator, and calls the operator
+    a fallback when that count is zero. With two accelerators on one
+    deployment, `a` binds to either, kernels on **either** are counted
+    together, and an operator covered on one accelerator but not the other
+    stops looking like a fallback -- the query would under-report exactly the
+    thing it exists to find.
+
+    It cannot happen today: the generator writes one `_accel` per deployment
+    (`etl/generate.py`), and the real layer one per MLPerf row. Measured at
+    `--scale 1.0` across both layers, 1,451 deployments, maximum one each.
+    That is a property of the generator rather than of the query, so if a
+    future fleet gives a deployment two accelerators, this fails here and
+    names `EA18` -- rather than `EA18` quietly returning a smaller number.
+    """
+    per_deployment = collections.Counter(
+        src for _sl, src, rel, _tl, _tgt, _p in fleet.edges
+        if rel == "USES_ACCELERATOR")
+    worst = max(per_deployment.values())
+    assert worst == 1, (
+        f"a deployment has {worst} USES_ACCELERATOR edges. EA18 counts kernels "
+        f"on 'the' accelerator and reads zero as a CPU fallback, so a second "
+        f"one hides fallback rather than reporting it. Fix EA18 before "
+        f"relaxing this.")
+    assert per_deployment, "no USES_ACCELERATOR edges at all; EA18 cannot mean anything"

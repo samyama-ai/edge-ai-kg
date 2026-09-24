@@ -1,4 +1,4 @@
-"""Question-driven walkthrough: the 17 catalog questions, asked and answered.
+"""Question-driven walkthrough: every catalog question, asked and answered.
 
     python -m demo.questions                          # embedded, self-contained
     python -m demo.questions --url http://127.0.0.1:8080

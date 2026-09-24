@@ -351,10 +351,18 @@ EMPTY_IS_A_VALID_ANSWER = {
                       "::test_ea04_shape_is_not_a_cartesian_product"),
     },
     "EA18": {
+        # The figures are not restated here: the test named below recomputes
+        # the pair count and the worst ratio from the fleet, so a number
+        # copied into this string could disagree with the thing that measures
+        # it and nothing would notice.
         "why": ("no deployment in the generated fleet misses a clinical task's "
-                "latency budget -- 1,440 pairs, worst at 54.5% of budget"),
+                "latency budget -- the pairs exist and every one is inside it"),
+        # The test that pins *this fleet's* zero and its cause, not the one
+        # that proves the query fires on a graph with a breach. Both matter,
+        # and only this one is evidence that an empty `EA18` here means "no
+        # breach" rather than "matched nothing".
         "proved_by": ("tests/test_latency_budget.py"
-                      "::test_it_fires_on_a_graph_where_a_deployment_is_over_budget"),
+                      "::test_the_shipped_fleet_has_no_breach_and_that_is_why_ea18_is_empty"),
     },
 }
 
@@ -363,7 +371,7 @@ EMPTY_IS_A_VALID_ANSWER = {
 def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
     """Parametrised rather than one sweep, so a single query can be excused.
 
-    Marking the whole sweep would excuse the other sixteen too: EA07 could stop
+    Marking the whole sweep would excuse the other eighteen too: EA07 could stop
     returning rows and the run would still be green.
     """
     client, _ = loaded
@@ -382,8 +390,11 @@ def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
         # a query that has started erroring or matching nothing exactly like
         # the honest zero -- which is the failure this module's own docstring
         # says an allowlist must not hide. Each entry names the test that
-        # proves its zero, and that test must be present and passing for the
-        # skip to be legitimate.
+        # proves its zero. **What is checked here is that the test exists** --
+        # the module and the `def` -- not that it passes: a test run cannot run
+        # itself. The suite is what makes the named test pass or fail, so a
+        # rotted proof surfaces there rather than here, and the check below
+        # only refuses an excuse that points at nothing.
         # `module::function`, and both halves are checked. Naming only the
         # module let `EA04` point at *this* file -- the one doing the asserting
         # -- so its existence check could never fail and the entry carried no
@@ -496,7 +507,7 @@ def test_order_by_is_actually_applied(loaded, qid):
     project through WITH and sort on a single key -- assert it really sorts.
 
     Parametrised for the same reason as the sweep above: excusing the whole test
-    for a single query would excuse the other sixteen queries' sort order too.
+    for a single query would excuse the other eighteen queries' sort order too.
     That is what kept EA01 and EA02's note-10 marks from hiding anything, and it
     is why the parametrisation stays now that the marks are gone.
     """

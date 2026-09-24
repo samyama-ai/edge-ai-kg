@@ -127,35 +127,51 @@ def test_the_decision_document_exists():
     )
 
 
-def test_the_pending_claim_about_ea17_matches_the_catalog():
-    """The doc says `#35` is delivered as `EA17`, and this is what pins it.
+def test_the_delivery_claims_match_the_catalog():
+    """Every `delivered as \u2018EAnn\u2019` on the page, checked against `BY_ID`.
 
-    Without this the sentence is unenforced -- and the page asserts
-    enforcement, which is worse than silence. It fails in both directions: if
-    the page claims `#35` is pending while `EA17` is in the catalog, and if
-    `EA17` is reverted while the page still says it is delivered.
+    The previous version keyed on one exact phrase -- "not** delivered on
+    `main`" -- so any other wording of "pending" walked past it, and the page
+    could claim a delivery the catalog did not have. This derives both
+    directions from the catalog instead:
 
-    Keyed on the catalog rather than on any PR's state, because the catalog is
-    what the sentence actually claims and is the thing this repo can see.
+    - every id the page says is delivered must be in `BY_ID`;
+    - the range the page states ("the catalog is `EA01`-`EAnn`") must be the
+      catalog's actual last id;
+    - and a page still calling an issue pending while its query exists fails,
+      whatever words it uses, because the delivered ids are read from the
+      verdict table rather than from a sentence.
     """
+    import re
+
     from benchmarks.queries import BY_ID
 
     text = DOC.read_text(encoding="utf-8")
-    claims_pending = "not** delivered on `main`" in text
-    delivered = "EA17" in BY_ID
 
-    if delivered and claims_pending:
-        raise AssertionError(
-            "`EA17` is in the catalog, so #96 has landed, but "
-            "docs/alerting-scope.md still says `#35` is not delivered and the "
-            "catalog is EA01-EA16. Update the sentence and the verdict table."
-        )
-    if not delivered and not claims_pending:
-        raise AssertionError(
-            "`EA17` is not in the catalog, but docs/alerting-scope.md no longer "
-            "says `#35` is pending. Either the sentence was removed too early "
-            "or the query was reverted."
-        )
+    claimed = set(re.findall(r"delivered as `(EA\d\d)`", text))
+    assert claimed, (
+        "no `delivered as `EAnn`` claim on the page at all. The verdict table "
+        "is what this test reads; if its shape changed, update this test.")
+    missing = sorted(qid for qid in claimed if qid not in BY_ID)
+    assert not missing, (
+        f"docs/alerting-scope.md says {missing} are delivered, and the catalog "
+        f"does not hold them. Either the queries were reverted or the page is "
+        f"claiming work that has not landed.")
+
+    stated = re.search(r"the catalog is\s+`EA01`-`(EA\d\d)`", text, re.IGNORECASE)
+    assert stated, (
+        "the page no longer states the catalog range as `EA01`-`EAnn`; that "
+        "sentence is what this test pins, so update both together.")
+    last = max(BY_ID)
+    assert stated.group(1) == last, (
+        f"the page says the catalog is `EA01`-`{stated.group(1)}`; the catalog "
+        f"ends at `{last}`. A reader trusts that range to know what exists.")
+
+    pending = [qid for qid in ("EA17", "EA18", "EA19")
+               if qid in BY_ID and qid not in claimed]
+    assert not pending, (
+        f"{pending} are in the catalog but the page does not say they were "
+        f"delivered. The verdict table still reads as work not yet done.")
 
 
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):

@@ -488,24 +488,40 @@ RETURN kind, affected, only_via_me, nearest
         # -- 309.291 > 200 is true on 1.7.1, as are the `toFloat()` and literal
         # spellings.
         #
-        # `sum(CASE ...)` is engine note 11's shape, which returns a different
-        # type on each build. Nothing here filters on `fallback_ops`, it is only
+        # `sum(CASE ...)` is engine note 11's shape. That note read as two
+        # builds disagreeing and turned out to be version skew -- 0.6.1 against
+        # a 1.7.0 server (#56) -- so on the `>=1.7.1` floor it does not
+        # reproduce at all. Nothing here filters on `fallback_ops`, it is only
         # ordered by, so the note's silently-dropped `WHERE` cannot apply. Do
         # not add `WHERE fallback_ops > 0` without reading that note.
         #
         # The second and third `WITH`s introduce new aliases -- engine note
-        # 10's shape, which raised on embedded 0.6.1. It does not on 1.7.1:
+        # 10's shape. Like note 11 that was version skew rather than a build
+        # difference: it raised on `samyama` 0.6.1 and does not on 1.7.1:
         # `tests/test_latency_budget.py` runs this embedded and passes. So
         # `EA18` is deliberately **not** in `NOTE_10_QUERIES`: the mark would
         # XPASS on every run and excuse nothing, and on 0.6.1 this query was
-        # never run at all. It depends on the 1.7.1 floor (#105), as `EA17`
-        # does; the note records this under "EA18 (#37)".
+        # never run at all. It depends on the `samyama>=1.7.1` floor that #104
+        # landed, the same one `EA17` names -- #105 was the PR that wrote the
+        # pin, and it reached `main` inside #104, so one number for one floor;
+        # the note records this under "EA18 (#37)".
         #
         # `over_by_ms` is computed in its own `WITH`, not beside the
         # aggregates. Engine note 13b: an expression mixing a grouping key with
         # an aggregate in the same projection returns NULL, silently -- so
         # `d.latency_ms - min(budget_ms)` alongside them gave a null column and
         # an ORDER BY on nothing.
+        #
+        # **One accelerator per deployment is load-bearing here.** `a` binds
+        # the deployment's accelerator, and an operator is called a fallback
+        # when no kernel implements it *and* runs on that accelerator. Two
+        # accelerators on one deployment would pool their kernels, and an
+        # operator covered on one but not the other would stop counting as a
+        # fallback -- the query under-reporting the very thing it looks for.
+        # Measured rather than assumed: one `USES_ACCELERATOR` edge per
+        # deployment across both layers at `--scale 1.0`, 1,451 deployments,
+        # and `tests/test_generate.py::test_a_deployment_uses_exactly_one_accelerator`
+        # fails (naming `EA18`) if a future fleet relaxes that.
         #
         # A deployment whose model solves several breached tasks does not get
         # an inflated `fallback_ops`, but not because the duplicate task paths
@@ -568,7 +584,7 @@ LIMIT 20
     {
         "id": "EA19",
         "title": "COMPLIANCE: this sensor fails -- which certifications does that touch?",
-        "question": ("Sensor `sensor:00000` fails. Which certifications are "
+        "question": (f"Sensor `{EA17_SUBJECT}` fails. Which certifications are "
                      "implicated, through the clinical tasks that require it?"),
         "why_graph": (
             "The difference between an ops ticket and a reportable event. "
@@ -608,19 +624,23 @@ LIMIT 20
         # the set. `tests/test_certification_alerts.py` compares sorted rows and
         # pins the six, so a catalog that outgrows the limit fails there first.
         #
-        # The subject is hardcoded, like `EA17`'s. Neither has a parameterised
-        # tool in `mcp_server/server.py`, and that is a gap rather than an
-        # oversight to hide: the MCP surface covers none of the alerting
-        # queries yet, and exposing them is #49's scope.
+        # The subject is `EA17_SUBJECT`, the same constant `EA17` uses and
+        # interpolated the same way -- these two queries are asked about the
+        # same failing sensor in the same breath ("what stops" then "what does
+        # that implicate"), so two literals that could drift apart would make
+        # the pair answer about different sensors while reading as one story.
+        # Neither has a parameterised tool in `mcp_server/server.py`, and that
+        # is a gap rather than an oversight to hide: the MCP surface covers
+        # none of the alerting queries yet, and exposing them is #49's scope.
         "cypher": """
 MATCH (s:Sensor)<-[:REQUIRES_SENSOR]-(t:ClinicalTask)-[:GOVERNED_BY]->(cert:Certification)
-WHERE s.id = "sensor:00000"
+WHERE s.id = {subject}
 WITH cert.name AS certification, cert.body AS body, cert.class AS cert_class,
      count(DISTINCT t.id) AS tasks_affected
 RETURN certification, body, cert_class, tasks_affected
 ORDER BY tasks_affected DESC
 LIMIT 20
-""",
+""".replace("{subject}", f'"{EA17_SUBJECT}"'),
     },
     {
         "id": "EA21",
