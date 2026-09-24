@@ -25,12 +25,24 @@ import pytest
 
 from benchmarks.queries import BY_ID, EA21_ALERTS
 from etl.helpers import create_edges, create_nodes
-from tests.test_blast_radius import SCALE, SEED, build_and_load
+from tests.test_blast_radius import (
+    SCALE,
+    SEED,
+    build_and_load,
+    # The fixture itself, not a copy of it. A copy is what this module had,
+    # and its `except` had widened to `Exception` -- so a broken
+    # `onnx_catalog` parser or a corrupt cache would have reported "data/ is
+    # not built" and skipped, where the original narrows to
+    # `FileNotFoundError` precisely so `--no-skips` can tell a missing-data
+    # skip from a real failure (`tests/test_environment_skips.py`). Imported,
+    # there is one definition and it cannot drift again.
+    operators,  # noqa: F401 -- used as a fixture by `loaded_fleet`
+)
 
 GRAPH = "default"
 
 
-def retargeted_ea20(alert_ids) -> str:
+def retargeted_ea21(alert_ids) -> str:
     """`EA21` asking about `alert_ids` instead of the catalog's set.
 
     The catalog's three ids appear twice in the query -- once per `IN` list --
@@ -51,7 +63,7 @@ def retargeted_ea20(alert_ids) -> str:
 
 
 def rank(client, alert_ids) -> list[tuple[str, int]]:
-    rows = client.query(retargeted_ea20(alert_ids), GRAPH).records
+    rows = client.query(retargeted_ea21(alert_ids), GRAPH).records
     return [(row[0], row[1]) for row in rows]
 
 
@@ -91,16 +103,6 @@ def independent_alerts(engine_factory):
                 {f"sensor:i{i}": f"stage:i{i}" for i in range(4)},
                 [(f"stage:i{i}", f"stage:i{i}x") for i in range(4)])
     return client
-
-
-@pytest.fixture(scope="module")
-def operators():
-    """The cached ONNX catalogue, skipping in **setup** when it is absent."""
-    from etl import onnx_catalog as oc
-    try:
-        return oc.load_cached()
-    except Exception as exc:                      # no data means skip, not fail
-        pytest.skip(f"data/ is not built: {exc}")
 
 
 def test_the_root_ranks_first_and_the_leaf_last(known_root):
@@ -194,18 +196,44 @@ def truth_for(fleet, alert_ids) -> list[tuple[str, int]]:
 
 
 @pytest.fixture(scope="module")
-def loaded_fleet(engine_factory, operators):
+def loaded_fleet(engine_factory, operators):  # noqa: F811 -- the imported fixture
     """The generated fleet, loaded once -- the same builder the blast-radius
     tests use, so both read the identical graph rather than two graphs that
     happen to share a seed."""
     return build_and_load(engine_factory, operators, seed=SEED, scale=SCALE)
 
 
-def test_ea20_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
-    """The catalog's own alert set, against truth computed from the `Fleet`."""
+def test_ea21_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
+    """The catalog's own alert set, against truth computed from the `Fleet`.
+
+    **Counts, not order.** Both sides are sorted before comparing, so what
+    this checks is the number each alert reaches. The `ORDER BY` is covered by
+    `known_root`, where the expected sequence is known in advance; on a
+    generated fleet the counts tie, and asserting their order would pin an
+    arbitrary one.
+
+    The two guards below are what stop this passing on an empty comparison.
+    `truth_for` drops ids the fleet does not hold, and this fixture's seed and
+    scale (`4242`, `0.3`) are the blast-radius module's -- not the ones the
+    catalog's alert set was chosen against. A fleet without those sensors, or
+    one where none of them reaches another, would leave `[] == []` or all
+    zeros on both sides, and the test would pass while measuring nothing.
+    """
     client, fleet = loaded_fleet
     got = sorted(rank(client, EA21_ALERTS), key=lambda row: (-row[1], row[0]))
     want = truth_for(fleet, list(EA21_ALERTS))
+
+    assert len(want) == len(EA21_ALERTS), (
+        f"the fixture fleet (seed {SEED}, scale {SCALE}) holds only "
+        f"{[a for a, _ in want]} of {list(EA21_ALERTS)}; `truth_for` drops "
+        f"what it does not know, so this comparison would be narrower than it "
+        f"reads. Pick alert ids that exist at this scale.")
+    assert any(count for _, count in want), (
+        f"no alert in {list(EA21_ALERTS)} reaches another at seed {SEED} "
+        f"scale {SCALE}: the truth is {want}, so an all-zero answer would "
+        f"match an engine that had computed nothing. Pick a set with a "
+        f"dependency in it.")
+
     assert got == want, (
         f"EA21 ranked {got}; the fleet's own edges give {want}. One of the two "
         f"is reading the graph differently from the other.")

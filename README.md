@@ -356,9 +356,14 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 the question it answers and why it's awkward without a graph. On the
 **embedded** build, **19 of the 20 return rows** against the **full** graph at
 `--scale 1.0` — `EA21` answers in 23 ms, and the 5.8 ms median and 95 ms
-`EA17` are from the sweep taken before it. Over HTTP the count is 17 of the 19
-measured there; `EA17` raises on the 1.7.0 server (engine note 12) and `EA21`
-uses the same variable-length walk but has not been run there.
+`EA17` are from the sweep taken before it. Over HTTP, on that same full graph,
+the count is 17 of the 19 measured there; `EA17` raises on the 1.7.0 server
+(engine note 12) and `EA21` uses the same variable-length walk but has not
+been run there.
+
+These are the **full** graph's numbers. The "6 of the 20" figure earlier on
+this page is the **real layer only**, where the clinical spine is absent — two
+different graphs, not two readings of one.
 
 The other one is `EA18`, which asks which deployments miss a clinical task's
 latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs

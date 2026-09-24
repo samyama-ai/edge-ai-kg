@@ -28,7 +28,7 @@ EA17_SUBJECT = "sensor:00000"
 # interpolated, for the same reason as `EA17_SUBJECT` -- the query names it
 # twice, and a set rewritten in one place and not the other would rank one
 # population against a different one, which reads as a finding rather than an
-# edit. `retargeted_ea20` in `tests/test_root_cause.py` is how a caller asks
+# edit. `retargeted_ea21` in `tests/test_root_cause.py` is how a caller asks
 # about a different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
