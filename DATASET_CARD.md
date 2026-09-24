@@ -281,10 +281,36 @@ the questions are real.
 python -m etl.download_data --seed 20260814 --scale 1.0
 ```
 
-`--seed` fully determines the **synthetic** layer: same seed and scale reproduce
-the same nodes, edges and ids byte-for-byte. `--scale` multiplies fleet size
-(`1.0` ≈ 24.1K synthetic nodes). The generator guarantees that every
-`ClinicalTask` has at least one `Model` at any scale.
+`--seed` and `--scale` determine the **synthetic** layer *given the same ONNX
+operator catalogue* — and that qualification is load-bearing, because the
+catalogue is fetched from upstream rather than pinned. `etl/generate.py` builds
+`Kernel` rows from it, and the draw shifts the shared random stream, so a
+catalogue refresh reshapes the fleet at an unchanged seed.
+
+Measured on two catalogues differing by a single operator, at seed `20260814`:
+
+At `--scale 0.3` the 205-operator catalogue gives 6,150 nodes and 18,176 edges.
+At `--scale 0.3` a catalogue one operator smaller gives 8,028 nodes and 23,787 edges.
+
+That is a 31% move at an unchanged seed: `Kernel` went 5,559 → 7,438, and
+`deploy:00000.latency_ms` went 31.431 → 27.649.
+
+(Those are deliberately *not* the shipped graph's counts: they come from a
+reduced scale and a catalogue altered to demonstrate the dependency. The
+headline figures for the real build are above.)
+
+Node **ids** are stable — `Deployment`, `Board`, `Sensor` and `Model` mint the
+same ids either way — so what moves is counts and property *values*:
+`latency_ms` differed on all 144 deployments. Re-run with the same catalogue
+and the fleet is identical, which is the half of the promise that does hold.
+
+`--scale` multiplies fleet size (`1.0` ≈ 24.1K synthetic nodes). The generator
+guarantees that every `ClinicalTask` has at least one `Model` at any scale.
+
+Which catalogue a build used is recorded in
+[`docs/build-manifest.json`](docs/build-manifest.json) under
+`inputs.onnx_catalogue`, so a figure can be traced to the input it came from;
+`python -m etl.manifest --check` reports an upstream move as its own case.
 
 The **real** layer is not scaled or seeded — it is whatever the upstream
 sources say. It is therefore reproducible only up to the upstream state at
@@ -410,9 +436,12 @@ repository has no automated refresh for either:
 - **mlcommons/tiny_results_v1.2** is a frozen, already-published benchmark round;
   it will not change, though MLCommons periodically publishes new rounds (later
   numbered TinyML results) that this repo does not track.
-- The **synthetic** fleet layer has no upstream to refresh against at all -- it
-  is regenerated deterministically from `--seed`/`--scale`, not refreshed from a
-  live source.
+- The **synthetic** fleet layer is regenerated from `--seed`/`--scale` rather
+  than refreshed from a live source -- but it is not independent of upstream:
+  it is built from the ONNX operator catalogue, so a refresh of that catalogue
+  moves the generated counts and property values (see "Generation" above).
+  `inputs.onnx_catalogue` in `docs/build-manifest.json` records which one a
+  build used.
 
 Rebuilding the real layer requires manually re-running
 `python -m etl.download_data`; there is no scheduled job that does this.

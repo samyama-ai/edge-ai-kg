@@ -43,7 +43,38 @@ def fresh(recorded):
         pytest.skip("run `python -m etl.download_data` first")
 
 
-def test_the_generated_layer_matches_the_manifest(fresh, recorded):
+@pytest.fixture(scope="module")
+def comparable(fresh, recorded):
+    """`fresh`, but only when it was built from the recorded catalogue.
+
+    The skip lives **in a fixture** rather than in the test body, and that is
+    the whole point of this fixture existing. `conftest.py` converts only
+    *setup-phase* skips under `--no-skips`, so a call-phase skip stays a skip
+    in CI -- measured, not assumed: a body skip survives `--no-skips` as
+    `1 skipped` while a fixture skip becomes an error. The comparison below is
+    the one that pins five documents' published figures, so a checkout whose
+    `data/` had drifted would have shown `1 skipped`, gone green, and asserted
+    nothing about the manifest at all.
+
+    Still a skip rather than a failure locally, which is the judgement the
+    earlier version made and it was right: a red test on a developer's machine
+    whose only fault is a fresher `data/` reads as the repo's fault. `--no-skips`
+    is what separates the two audiences -- a person sees a skip and a reason,
+    CI sees a failure.
+    """
+    mine = (recorded.get("inputs") or {}).get("onnx_catalogue")
+    theirs = (fresh.get("inputs") or {}).get("onnx_catalogue")
+    if mine != theirs:
+        pytest.skip(
+            f"the ONNX operator catalogue moved since the manifest was written "
+            f"({mine} -> {theirs}), so the generated layer is not comparable. "
+            f"Run `python -m etl.manifest --check` for the full report, and "
+            f"--write only if the published figures should follow upstream."
+        )
+    return fresh
+
+
+def test_the_generated_layer_matches_the_manifest(comparable, recorded):
     """Deterministic from the seed *given the same operator catalogue*.
 
     That qualification is the whole of it, and the first version of this test
@@ -55,20 +86,14 @@ def test_the_generated_layer_matches_the_manifest(fresh, recorded):
     input this is not testing what its name says, and a red test on a checkout
     whose only fault is a fresher `data/` reads as the repo's fault. The CLI
     reports the upstream move loudly, which is where a person should see it.
+    That skip is raised by the `comparable` fixture, in setup, so `--no-skips`
+    turns it into a CI failure -- otherwise a drifted catalogue would skip this
+    comparison and leave the suite green.
 
     Fails with the same per-key diff the CLI prints, so a genuine generator
     change names the published figures that need updating.
     """
-    mine_in = (recorded.get("inputs") or {}).get("onnx_catalogue")
-    theirs_in = (fresh.get("inputs") or {}).get("onnx_catalogue")
-    if mine_in != theirs_in:
-        pytest.skip(
-            f"the ONNX operator catalogue moved since the manifest was written "
-            f"({mine_in} -> {theirs_in}), so the generated layer is not "
-            f"comparable. Run `python -m etl.manifest --check` for the full "
-            f"report, and --write only if the published figures should follow "
-            f"upstream."
-        )
+    fresh = comparable
     # `both_layers_total` is excluded as well as `added_by_real_layer`: it is
     # generated + real, so pinning it pins the upstream half by the back door.
     # Verified rather than assumed -- simulating an upstream-only move (four
@@ -235,3 +260,40 @@ def test_the_fingerprint_is_stable_across_operator_ordering():
                             category="convolution")
     assert (manifest.catalogue_fingerprint([a, b])["fingerprint"]
             == manifest.catalogue_fingerprint([b, a])["fingerprint"])
+
+
+def test_the_drift_skip_is_raised_in_setup_so_no_skips_can_convert_it():
+    """The catalogue-drift skip must stay in a fixture, not move into the body.
+
+    `conftest.py` converts only *setup-phase* skips under `--no-skips`. Measured
+    rather than reasoned about: with a drifted manifest, a body skip survives
+    `--no-skips` as `1 skipped` and the suite goes green, while the same skip
+    raised from a fixture becomes an error. So the comparison that pins five
+    documents' published figures was skipped silently on any checkout whose
+    `data/` had moved -- which is how a stale catalogue produced green suites
+    while proving nothing.
+
+    Asserted structurally because the behavioural version costs a scale-1.0
+    rebuild in a subprocess for a property two lines of source already fix: the
+    test takes the gating fixture, and raises no skip of its own.
+    """
+    import inspect
+
+    source = inspect.getsource(test_the_generated_layer_matches_the_manifest)
+    assert "pytest.skip" not in source, (
+        "the catalogue-drift skip has moved back into the test body. "
+        "`--no-skips` converts setup-phase skips only, so a body skip leaves "
+        "CI green on a drifted catalogue -- raise it from the `comparable` "
+        "fixture instead."
+    )
+    assert "comparable" in inspect.signature(
+        test_the_generated_layer_matches_the_manifest).parameters, (
+        "the test no longer requests `comparable`, the fixture that gates it "
+        "on the recorded catalogue. Without it the comparison runs against a "
+        "catalogue the manifest was not written on, and fails for upstream's "
+        "reasons rather than the generator's."
+    )
+    assert "pytest.skip" in inspect.getsource(comparable), (
+        "`comparable` no longer skips, so a drifted catalogue would be "
+        "compared rather than reported."
+    )

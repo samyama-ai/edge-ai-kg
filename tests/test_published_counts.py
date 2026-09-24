@@ -159,6 +159,17 @@ PUBLISHED_ELSEWHERE: dict[tuple[str, int, str], str] = {
     ("README.md", 76_291, "edges"): "snapshot",
     ("DATASET_CARD.md", 25_145, "nodes"): "snapshot",
     ("DATASET_CARD.md", 76_291, "edges"): "snapshot",
+    # The catalogue-dependence measurement under "Generation". These are a
+    # *reduced* scale on a deliberately altered catalogue -- the point of the
+    # sentence is that they are not the shipped graph's counts -- so they must
+    # not be read as published figures. Written as prose rather than a table so
+    # every one of the four is visible to `figures_in`: the two-cell
+    # `TABLE_FIGURE` form reads only the first value of a row, which would have
+    # left 8,028 and 23,787 unchecked in a blind spot.
+    ("DATASET_CARD.md", 6_150, "nodes"): "scale 0.3",
+    ("DATASET_CARD.md", 18_176, "edges"): "scale 0.3",
+    ("DATASET_CARD.md", 8_028, "nodes"): "scale 0.3",
+    ("DATASET_CARD.md", 23_787, "edges"): "scale 0.3",
 }
 
 
