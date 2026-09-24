@@ -354,7 +354,8 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 20 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. On the
 **embedded** build, **19 of the 20 return rows** against the **full** graph at
-`--scale 1.0` — `EA21` was run there and answers in 23 ms. The timings —
+`--scale 1.0` — `EA21` was run there and answers in 0.1 ms, median of five
+after one warm-up (its first, cold call is 23 ms). The timings —
 median 5.8 ms, slowest `EA17` at 95 ms — are from the sweep of the **17**
 queries that existed when it was run; `EA18`, `EA19` and `EA21` post-date it
 and are not in that median.
@@ -382,7 +383,7 @@ queries at 0.6.1 and is not comparable — the engine moved and so did the
 catalog. `EA18` and `EA19` postdate that run. Timed separately on 2026-09-21,
 embedded 1.7.1 at `--scale 1.0`, median of five after one warm-up: `EA18` 37.5
 ms (36.9 ms when first recorded), above the median and well under `EA17`, and
-`EA19` 0.1 ms. These figures are hand-recorded and **not pinned by a test**,
+`EA19` 0.1 ms. `EA21` was timed the same way on 2026-09-24: 0.1 ms. These figures are hand-recorded and **not pinned by a test**,
 unlike the node and edge counts on this page, which
 `tests/test_published_counts.py` checks: they are machine-dependent, so the
 command is the thing to trust, not the numbers. Expect them to drift.)

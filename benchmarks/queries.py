@@ -644,18 +644,27 @@ LIMIT 20
     },
     {
         "id": "EA21",
-        "title": "ROOT CAUSE: twenty alerts, one fault -- which one is upstream?",
-        "question": ("These sensors are all alerting at once. Which of them is "
-                     "upstream of the others, and which are downstream "
-                     "symptoms of it?"),
+        "title": "ROOT CAUSE: twenty alerts, one fault -- which are upstream?",
+        "question": ("These sensors are all alerting at once. Which of them "
+                     "can reach the others through the pipeline, and which "
+                     "are downstream of something else that is alerting?"),
         "why_graph": (
             "The failure that makes alerting hated is twenty pages at 3am for "
-            "one fault. Ranking them needs a model of what feeds what: sensor "
-            "A is upstream of sensor B when B's pipeline is reachable from "
-            "A's. A time-series alerting system cannot do this at all -- it "
-            "holds thresholds and history, not dependencies -- and in SQL it "
-            "is a recursive CTE over an edge table. Here it is one "
-            "reachability pattern, and the ranking falls out of counting."),
+            "one fault. Ordering them needs a model of what feeds what, which "
+            "a time-series alerting system does not have -- it holds "
+            "thresholds and history, not dependencies -- and which in SQL is "
+            "a recursive CTE over an edge table. Here it is one reachability "
+            "pattern. "
+            "**It gives a partial order, not a guaranteed single root.** "
+            "`NEXT_STAGE` is the union of every sensor's chain over one "
+            "shared pool of stages, so it contains cycles: measured on the "
+            "shipped fleet at `--scale 1.0`, `sensor:00003` and "
+            "`sensor:00007` each reach the other, while `sensor:00000` "
+            "reaches both and neither reaches it. Two alerts in a cycle have "
+            "no upstream-of between them, and `reaches` is the column that "
+            "says so -- each id appearing in the other's list is the signal. "
+            "What the ranking buys is the top of the order, which is the row "
+            "a human acts on first."),
         # `OPTIONAL MATCH`, so an alert with nothing downstream still gets a
         # row. Not a detail: the case that proves this ranks by dependency
         # rather than by degree is the one where the alerts are independent
@@ -668,28 +677,49 @@ LIMIT 20
         # `tests/test_root_cause.py` a sensor whose chain touches nothing else
         # scores 0 on a fixture where an unenforced join would score 3.
         #
-        # `*0..` includes the zero-length walk, so two sensors feeding the
-        # *same* stage each count the other. Deliberate -- they are peers, and
-        # a symmetric +1 leaves their relative order unchanged -- but it means
-        # `downstream_alerts` is "alerts I can reach", not "alerts strictly
-        # beneath me". The known-root fixture pins the asymmetric case, which
-        # is the one a reader acts on.
+        # **This counts reachability, and the stage graph has cycles**, so
+        # `downstream_alerts` is "alerts I can reach", never "alerts strictly
+        # beneath me". Two ways that happens:
         #
-        # `o.id IS NOT NULL` guards note 8b: `<>` matches a null property, so
-        # without it a `Sensor` carrying no `id` would count as downstream of
-        # everything.
+        #   - `*0..` includes the zero-length walk, so two sensors feeding the
+        #     *same* stage each count the other;
+        #   - `etl/generate.py` samples each sensor's chain from one shared
+        #     pool of 16 stages, so the union really does contain cycles --
+        #     `tests/test_blast_radius_semantics.py` names one
+        #     (`stage:00012 -> 00009 -> 00010 -> 00012`).
         #
-        # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts that
-        # reach the same number of others, and their order among themselves
-        # carries no meaning. `LIMIT 20` is the page a human reads; the alert
-        # set is three ids, so it never truncates.
+        # Measured on the shipped fleet at `--scale 1.0`: `sensor:00003` and
+        # `sensor:00007` reach each other, and `sensor:00000` reaches both
+        # with neither reaching back. So the answer is a partial order with a
+        # real root at the top and a mutually-reachable pair below it -- not
+        # a ranking in which every row is upstream of the row beneath it.
+        #
+        # `reaches` exists to make that visible rather than leave it implied:
+        # if `b` is in `a`'s list and `a` is in `b`'s, the two are in a cycle
+        # and neither is upstream of the other.
+        # `tests/test_root_cause.py::test_two_alerts_in_a_cycle_each_reach_the_other`
+        # pins it on a two-stage cycle built for the purpose.
+        #
+        # No `IS NOT NULL` guard: `o.id IN {alerts}` already excludes a
+        # `Sensor` carrying no `id`, which is measured rather than reasoned
+        # about -- a fixture holding one gives the same three rows with the
+        # guard and without it, so the guard was inert and note 8b's `<>`
+        # behaviour never reached it.
+        #
+        # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts
+        # reaching the same number of others, and their order among
+        # themselves carries no meaning. `LIMIT 20` truncates to the top 20
+        # by design -- the catalog's set is three ids, but the 3am case this
+        # is written for is twenty or more, and the rows past the twentieth
+        # are the ones nobody pages on.
         "cypher": """
 MATCH (s:Sensor)
 WHERE s.id IN {alerts}
 OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
-WHERE o.id IN {alerts} AND o.id IS NOT NULL AND o.id <> s.id
-WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts
-RETURN alert, downstream_alerts
+WHERE o.id IN {alerts} AND o.id <> s.id
+WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
+     collect(DISTINCT o.id) AS reaches
+RETURN alert, downstream_alerts, reaches
 ORDER BY downstream_alerts DESC
 LIMIT 20
 """.replace("{alerts}", "[" + ", ".join(f'"{a}"' for a in EA21_ALERTS) + "]"),
