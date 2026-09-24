@@ -13,6 +13,8 @@ Engine notes:
 """
 from __future__ import annotations
 
+from etl.helpers import cypher_literal
+
 # `EA17`'s subject, in one place. The query names it ten times -- twice in each
 # of five legs -- and a retarget that rewrote only some of them would leave one
 # leg answering about a different sensor than the rest, which reads as a real
@@ -57,8 +59,29 @@ def retargeted_ea21(alert_ids) -> str:
 
 
 def _alert_list(alert_ids) -> str:
-    """The Cypher list literal for an alert set, spelled one way everywhere."""
-    return "[" + ", ".join(f'"{a}"' for a in alert_ids) + "]"
+    """The Cypher list literal for an alert set, escaped.
+
+    Every id goes through `etl.helpers.cypher_literal`, which strips the
+    quotes and backslashes that would end the literal early. Without it this
+    function built Cypher out of whatever it was handed, and the docstring
+    above promises an MCP tool will hand it a live alert set -- so the input
+    is external by design. Measured before the fix:
+    `['sensor:x"] OR true //']` produced `["sensor:x"] OR true //"]`, which
+    closes the list, disjoins a true predicate and comments out the rest of
+    the line; the query then returned every sensor in the graph.
+
+    A bare `str` is refused rather than accepted. Python iterates it by
+    character, so `"sensor:00000"` silently became a twelve-element list of
+    single letters that matched nothing -- an empty answer with no error,
+    which is the shape this catalog treats as a finding.
+    """
+    if isinstance(alert_ids, (str, bytes)):
+        raise TypeError(
+            f"alert ids must be a sequence of ids, not {type(alert_ids).__name__}: "
+            f"a bare string iterates by character and would ask about "
+            f"{len(alert_ids)} one-letter ids, returning nothing and raising "
+            f"nothing.")
+    return "[" + ", ".join(cypher_literal(str(a)) for a in alert_ids) + "]"
 
 QUERIES: list[dict] = [
     {
