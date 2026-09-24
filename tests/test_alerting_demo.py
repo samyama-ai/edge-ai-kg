@@ -25,6 +25,7 @@ import collections
 
 from benchmarks.queries import BY_ID, EA17_SUBJECT
 from demo.demo import TASKS_OVER_BUDGET, alert_sentence
+from etl.helpers import create_edges, create_nodes
 
 # `operators` is imported rather than copied: it is a fixture whose skip fires
 # in **setup** when `data/` is absent, and a second copy here could drift from
@@ -140,12 +141,32 @@ def test_the_beat_runs_and_its_sentence_matches_the_rows(
 
     assert radius, "EA17 returned nothing for the catalog subject"
     by_kind = {row[0]: row for row in radius}
-    assert f"{by_kind['SignalStage'][1]:,} signal stage" in text
-    assert f"{by_kind['Model'][1]:,} model" in text
-    assert f"{by_kind['ClinicalTask'][1]:,} clinical task" in text
+    for kind, noun in (("SignalStage", "signal stage"), ("Model", "model"),
+                       ("Deployment", "deployment"), ("Board", "board"),
+                       ("ClinicalTask", "clinical task")):
+        assert f"{by_kind[kind][1]:,} {noun}" in text, (
+            f"the alert does not quote EA17's {kind} count "
+            f"({by_kind[kind][1]:,}): {text}")
+
+    # `only_via_me`, which is the clause a reader acts on: "none of them
+    # exclusively" and "N have no other source" are different alerts.
+    exclusive = by_kind["ClinicalTask"][2]
+    if exclusive == 0:
+        assert "none of them exclusively" in text
+    else:
+        assert f"{exclusive:,} of those" in text and "no other source" in text
+
     for certification, *_rest in certs:
         assert certification in text, f"{certification} is missing from the alert"
-    if not budget:
+
+    # Both halves, so reading the wrong column fails whichever way the fleet
+    # happens to fall. `EA18` returns six breaches at --scale 0.5 and none at
+    # --scale 1.0, so which branch a run takes is not a given.
+    if budget:
+        tasks_over, deployments_over = budget[0]
+        assert f"{tasks_over:,} of them" in text
+        assert f"on {deployments_over:,} deployment" in text
+    else:
         assert "None of them is over its latency budget." in text
 
 
@@ -156,38 +177,55 @@ def test_tasks_over_budget_matches_ground_truth(
     The query is the beat's one piece of bespoke Cypher -- it is not in the
     catalog, so `tests/test_correctness.py` does not sweep it -- which makes
     this the only thing standing between the sentence and a plausible wrong
-    number. Computed here by walking the edges rather than by re-running a
-    variant of the same Cypher.
+    number. Walked over the edges here, not re-run as a variant of the same
+    Cypher, and over **the same path the query takes**: an earlier version of
+    both walked `REQUIRES_SENSOR -> SOLVES` only, so the truth agreed with a
+    query that counted deployments the sensor never feeds.
     """
     client, fleet = build_and_load(engine_factory, operators, seed=SEED, scale=SCALE)
 
-    requires, solves, variant_of, of_variant = (collections.defaultdict(set)
-                                                for _ in range(4))
+    requires, solves, feeds = (collections.defaultdict(set) for _ in range(3))
+    nexts, precedes, variant_of, of_variant = (collections.defaultdict(set)
+                                               for _ in range(4))
     for _sl, src, rel, _tl, tgt, _p in fleet.edges:
         if rel == "REQUIRES_SENSOR":
             requires[tgt].add(src)          # sensor -> tasks
         elif rel == "SOLVES":
-            solves[tgt].add(src)            # task -> models
+            solves[src].add(tgt)            # model -> tasks
+        elif rel == "FEEDS":
+            feeds[src].add(tgt)             # sensor -> entry stages
+        elif rel == "NEXT_STAGE":
+            nexts[src].add(tgt)
+        elif rel == "PRECEDES":
+            precedes[src].add(tgt)          # stage -> models
         elif rel == "VARIANT_OF":
             variant_of[tgt].add(src)        # model -> variants
         elif rel == "OF_VARIANT":
             of_variant[tgt].add(src)        # variant -> deployments
 
+    reached, queue = set(feeds[EA17_SUBJECT]), list(feeds[EA17_SUBJECT])
+    while queue:
+        for stage in nexts[queue.pop()]:
+            if stage not in reached:
+                reached.add(stage)
+                queue.append(stage)
+    downstream_models = {m for stage in reached for m in precedes[stage]}
+    its_tasks = requires[EA17_SUBJECT]
+
     budgets = {row["id"]: row["latency_budget_ms"]
                for row in fleet.nodes.get("ClinicalTask", ())}
     # `.get("latency_ms")`, not `[...]`: the real layer's MLPerf deployments
-    # carry `throughput_inf_s` and no latency at all -- 73 of 217 at this
-    # fixture's scale. A missing property cannot exceed a budget, and the
-    # Cypher agrees: `d.latency_ms > t.latency_budget_ms` is not true for a
-    # null. Indexing would raise here and hide that the two sides agree.
+    # carry `throughput_inf_s` and no latency at all. A missing property cannot
+    # exceed a budget, and the Cypher agrees -- `d.latency_ms > ...` is not
+    # true for a null. Indexing would raise here and hide that agreement.
     latency = {row["id"]: row.get("latency_ms")
                for row in fleet.nodes.get("Deployment", ())}
 
     over_tasks, over_deployments = set(), set()
-    for task in requires.get(EA17_SUBJECT, set()):
-        for model in solves.get(task, set()):
-            for variant in variant_of.get(model, set()):
-                for deployment in of_variant.get(variant, set()):
+    for model in downstream_models:
+        for task in solves[model] & its_tasks:
+            for variant in variant_of[model]:
+                for deployment in of_variant[variant]:
                     measured = latency.get(deployment)
                     if measured is not None and measured > budgets[task]:
                         over_tasks.add(task)
@@ -198,6 +236,57 @@ def test_tasks_over_budget_matches_ground_truth(
     assert got == want, (
         f"the scoped budget query returned {got}; the fleet's own edges give "
         f"{want}. One of the two is reading the graph differently.")
+
+
+def test_only_deployments_this_sensor_feeds_are_counted(engine_factory):
+    """The shape the query must not have, on a graph where it is visible.
+
+    `sensor:A` feeds `model:A`; `sensor:B` feeds `model:B`; both models solve
+    the one task, and that task requires `sensor:A`. Both deployments are over
+    budget. Only `deploy:A` is downstream of `sensor:A`, so only it belongs in
+    `sensor:A`'s alert -- but a query joining through `REQUIRES_SENSOR ->
+    SOLVES` alone counts both, and blames this sensor's fault for a breach on
+    hardware its signal never reaches.
+
+    This also measures the leading re-bind of `m` in the second pattern: an
+    unenforced join would pair every model with every deployment and count two
+    here as well.
+    """
+    client = engine_factory()
+    create_nodes(client, GRAPH, "Sensor",
+                 [{"id": "sensor:A", "modality": "ecg"},
+                  {"id": "sensor:B", "modality": "ecg"}])
+    create_nodes(client, GRAPH, "SignalStage",
+                 [{"id": "stage:A", "kind": "filter"},
+                  {"id": "stage:B", "kind": "filter"}])
+    create_nodes(client, GRAPH, "Model",
+                 [{"id": "model:A", "name": "A"}, {"id": "model:B", "name": "B"}])
+    create_nodes(client, GRAPH, "ModelVariant",
+                 [{"id": "var:A"}, {"id": "var:B"}])
+    create_nodes(client, GRAPH, "Deployment",
+                 [{"id": "deploy:A", "latency_ms": 900.0},
+                  {"id": "deploy:B", "latency_ms": 900.0}])
+    create_nodes(client, GRAPH, "ClinicalTask",
+                 [{"id": "task:T", "latency_budget_ms": 100}])
+    create_edges(client, GRAPH, [
+        ("Sensor", "sensor:A", "FEEDS", "SignalStage", "stage:A", None),
+        ("Sensor", "sensor:B", "FEEDS", "SignalStage", "stage:B", None),
+        ("SignalStage", "stage:A", "PRECEDES", "Model", "model:A", None),
+        ("SignalStage", "stage:B", "PRECEDES", "Model", "model:B", None),
+        ("Model", "model:A", "SOLVES", "ClinicalTask", "task:T", None),
+        ("Model", "model:B", "SOLVES", "ClinicalTask", "task:T", None),
+        ("ClinicalTask", "task:T", "REQUIRES_SENSOR", "Sensor", "sensor:A", None),
+        ("ModelVariant", "var:A", "VARIANT_OF", "Model", "model:A", None),
+        ("ModelVariant", "var:B", "VARIANT_OF", "Model", "model:B", None),
+        ("Deployment", "deploy:A", "OF_VARIANT", "ModelVariant", "var:A", None),
+        ("Deployment", "deploy:B", "OF_VARIANT", "ModelVariant", "var:B", None),
+    ])
+
+    retargeted = TASKS_OVER_BUDGET.replace(EA17_SUBJECT, "sensor:A")
+    assert _rows(client, retargeted) == [(1, 1)], (
+        "the scoped budget query should see one task and the one deployment "
+        "sensor:A actually feeds; two deployments means it is joining through "
+        "the task alone, or that the second pattern's join is not enforced")
 
 
 def test_the_pages_that_describe_the_beat_are_not_ahead_of_the_code():
