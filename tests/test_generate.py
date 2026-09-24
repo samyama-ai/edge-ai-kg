@@ -251,23 +251,19 @@ def test_every_model_ea18_can_reach_has_operators(both_layers):
         f"fallback operators. Make that leg OPTIONAL before relaxing this.")
 
 
-def test_generated_labels_matches_what_the_generator_emits(tmp_path):
+def test_generated_labels_matches_what_the_generator_emits(fleet):
     """`GENERATED_LABELS` is what `load()` refuses a cache for; keep it honest.
 
     A hand-maintained list beside the code it describes drifts the moment
     someone adds a label and forgets it -- which is the same failure it exists
-    to catch, one level up. Generated at the smallest useful scale: the label
-    *set* does not depend on scale, only the row counts do.
+    to catch, one level up.
+
+    Through the module's `fleet` fixture rather than generating inline: its
+    skip happens in **setup**, where `--no-skips` can convert it, and a skip
+    written in a test body cannot be (`tests/test_environment_skips.py`). The
+    label *set* does not depend on the fixture's scale, only the row counts do.
     """
-    from etl import generate as gen
-    from etl import onnx_catalog as oc
-
-    try:
-        ops = oc.load_cached()
-    except FileNotFoundError:
-        pytest.skip("run `python -m etl.download_data` first")
-
-    emitted = set(gen.generate(seed=gen.DEFAULT_SEED, scale=0.1, operators=ops).nodes)
+    emitted = set(fleet.nodes)
     assert emitted == set(gen.GENERATED_LABELS), (
         f"the generator emits {sorted(emitted - set(gen.GENERATED_LABELS))} that "
         f"GENERATED_LABELS omits, and lists "
