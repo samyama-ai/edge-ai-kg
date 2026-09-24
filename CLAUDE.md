@@ -53,9 +53,12 @@ pip install -e ".[dev]"                        # ~3 min of cargo build
 (Installing `clang`/`libclang-common-*-dev` is the cleaner fix if you have sudo;
 `BINDGEN_EXTRA_CLANG_ARGS` is the workaround when you only have gcc.)
 
-**An editable install does not rebuild when the floor moves.** If
-`tests/test_engine_version.py` fails saying the engine is older than 1.7.1, the
-metadata is right and the installed extension is stale — re-run the install.
+**Raising the floor in `pyproject.toml` does not upgrade an installed
+`samyama`.** The editable install is this repo; `samyama` is an ordinary
+dependency, and pip only re-resolves it when you ask. If
+`tests/test_engine_version.py` fails saying the running engine is older than
+the declared floor, the declaration is right and the installed engine is
+stale — re-run `pip install -e ".[dev]"`.
 
 ## Commands
 
@@ -156,8 +159,11 @@ plausible, wrong output.
 9 against the installed engine, and on **embedded** 1.7.1 none of them
 reproduces. That does not retire a rule: the notes were measured on the 1.7.0
 **HTTP server**, a different binary that has not been re-probed, and note 7
-(no tenant boundary on that server) has no probe at all. The rules below stay
-binding until the server is measured too.
+(no tenant boundary on that server) has no probe at all -- it is a property of
+the HTTP path rather than a Cypher shape, so embedded has nothing to isolate.
+The rules below stay binding until the server is measured too, and no
+workaround should be dropped without re-measuring there; assuming two builds
+agree is what #56 cost.
 
 **Notes 10 and 11 are resolved, and were never what they said they were.** They
 read as disagreements between the embedded build and the HTTP server -- a
@@ -189,16 +195,6 @@ on the real layer the embedded build answers `EA08`, `EA10` and `EA12`
 differently from the server (README, "What the real layer alone can answer").
 Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
 why it is not an engine note — nothing here tells you a shape to avoid.
-
-**Notes 1-6, 8 and 9 also stop reproducing on embedded 1.7.1** —
-`python -m benchmarks.engine_notes_probe --scale 300` re-runs those. **Note 7
-is not among them**: the probe has none, because "the `--graph` argument is
-ignored" is a property of the OSS HTTP path rather than a Cypher shape, and
-this probe runs embedded where there is nothing to isolate. Note 7 stands
-un-re-measured, which is why the sentence above still says it applies. The
-rules below still stand, because those notes were measured against the 1.7.0
-*server* and the probe runs embedded; assuming two builds agree is exactly what
-#56 cost. Do not drop a workaround without re-measuring against the server.
 
 The rules that follow from notes 1-9:
 

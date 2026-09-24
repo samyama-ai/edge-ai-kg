@@ -145,7 +145,16 @@ def main(repro, metrics, collisions, holdout, seed, scale):
     if repro:
         r = run_repro()
         click.echo(f"index accepted: {r['index_accepted']}")
-        click.echo(f"same normalised vector added twice -> {r['outcome']}: {r['detail']}")
+        # The header names the phase `run_repro` reached, not "added twice".
+        # It said "added twice" whatever happened, so an index-creation or
+        # search failure was reported under the add's name -- the conflation
+        # `phase` exists to end, restated one line above the branch that ends
+        # it.
+        reached = {"index": "creating the index",
+                   "add": "adding the same normalised vector twice",
+                   "search": "searching after the duplicate add",
+                   "ok": "index, duplicate add and search"}[r["phase"]]
+        click.echo(f"{reached} -> {r['outcome']}: {r['detail']}")
         # Conditional on the outcome, and on whether the index was accepted
         # at all. Printing "fixed as of 1.7.1" unconditionally would declare
         # the panic gone on a run that had just reproduced it -- the probe
@@ -167,11 +176,22 @@ def main(repro, metrics, collisions, holdout, seed, scale):
             click.echo("no panic on this build. docs/vector-search.md records "
                        "0.6.1 raising PanicException (assertion failed: "
                        "c.dist_to_ref <= 0.) here; see #56.")
+        elif r["outcome"] == "PanicException" and r["phase"] == "add":
+            click.echo("this is the 0.6.1 failure mode -- a PanicException on "
+                       "the duplicate add, which is the reproduction "
+                       "docs/vector-search.md records. Check `pip show "
+                       "samyama` before reading further.")
         elif r["outcome"] == "PanicException":
-            click.echo(f"this is the 0.6.1 failure mode -- the same "
-                       f"PanicException, in the {r['phase']} phase -- "
-                       f"reproducing on this build. Check `pip show samyama` "
-                       f"before reading further.")
+            # A panic, but not *this* reproduction. The page records the
+            # duplicate add panicking; a search-phase panic is the hold-out's
+            # finding (`--holdout`), and an index-phase one is neither. Naming
+            # any panic "the 0.6.1 failure mode" is how two findings become
+            # one.
+            click.echo(f"a PanicException in the {r['phase']} phase. That is "
+                       f"not the duplicate-add reproduction "
+                       f"docs/vector-search.md records; it is a panic "
+                       f"somewhere else in the same run, and worth reporting "
+                       f"as its own finding.")
         else:
             # Named for what it is, and for which phase raised. Calling any
             # exception "the 0.6.1 failure mode" is the mislabelling this
@@ -340,8 +360,11 @@ def holdout_tail(add_failed: str | None, search_failed: str | None,
             f"\n`add_vector` failed ({add_failed}), so the index is incomplete "
             "and the search\nphase above ran against fewer vectors than the "
             "experiment calls for. Whatever\nthe search reported, this run does "
-            "not measure what the hold-out is for.\nA `PanicException` there is "
-            "the 0.6.1 failure mode; anything else is a different\nproblem.\n")
+            "not measure what the hold-out is for.\n\nNote that this is *not* "
+            "the 0.6.1 run docs/vector-search.md records: there\nevery add was "
+            "accepted and the search panicked. An add failing here is a\n"
+            "different finding, whatever it raised, and needs reporting as "
+            "one.\n")
     if search_failed and "PanicException" in search_failed:
         return (
             "\nThis is the measurement the argument rests on: exact duplicates "
@@ -365,14 +388,14 @@ def holdout_tail(add_failed: str | None, search_failed: str | None,
             f"the fleet was generated and that `data/` holds operators.\n")
     return (
         f"\nAll {searched} hold-out searches ran without panicking. "
-        f"docs/vector-search.md\nrecords 0.6.1 panicking on the 9th of its 40, "
-        f"so on this build that reproduction\ndoes not reproduce -- a "
-        f"statement about the build you just ran, not about any\nversion "
-        f"number. The hold-out is `min(40, len(rows))`, so {searched} is this "
-        f"fleet's\nshare rather than a fixed 40. Note what it does not show: "
-        f"the engine *accepts*\nthe workload, and nothing here says whether "
-        f"the nearest neighbour returned is\nthe useful one. Judging the "
-        f"answers is #48.\n")
+        f"docs/vector-search.md\nrecords that run panicking partway through on "
+        f"0.6.1 -- see the page for where.\nSo on this build that reproduction "
+        f"does not reproduce: a statement about the\nbuild you just ran, not "
+        f"about any version number.\n\nThe hold-out is `min(40, len(rows))`, "
+        f"so {searched} is this fleet's share rather\nthan a fixed 40. Note "
+        f"what it does not show: the engine *accepts* the workload,\nand "
+        f"nothing here says whether the nearest neighbour returned is the "
+        f"useful one.\nJudging the answers is #48.\n")
 
 
 if __name__ == "__main__":

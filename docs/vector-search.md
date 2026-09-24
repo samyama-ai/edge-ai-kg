@@ -1,15 +1,15 @@
 # The vector half: what it is for here, and why it did not work on 0.6.1
 
-> **Superseded in part by #56, 2026-09-08. The panic below no longer
-> reproduces.** Everything on this page was measured on `samyama` 0.6.1. #56
-> raised the floor to **1.7.1**, and on that build the two-call reproduction
-> succeeds, and the hold-out experiment — the one this page's argument rests on
-> — runs to completion:
+> **Superseded in part by #56. The panic below no longer reproduces.** This
+> page records the 0.6.1 measurement. On 1.7.1 — first checked 2026-09-08, and
+> the transcript below is a re-run of 2026-09-24 — the two-call reproduction
+> succeeds and the hold-out experiment, the one this page's argument rests on,
+> runs to completion. The `samyama>=1.7.1` floor itself landed 2026-09-16:
 >
 > ```
 > $ python -m benchmarks.vector_probe --repro
 > index accepted: True
-> same normalised vector added twice -> ok:
+> index, duplicate add and search -> ok:
 > no panic on this build. docs/vector-search.md records 0.6.1 raising PanicException (assertion failed: c.dist_to_ref <= 0.) here; see #56.
 >
 > $ python -m benchmarks.vector_probe --holdout
@@ -18,31 +18,29 @@
 > vector_search: 40 of 40 unseen operators queried, none failed
 >
 > All 40 hold-out searches ran without panicking. docs/vector-search.md
-> records 0.6.1 panicking on the 9th of its 40, so on this build that reproduction
-> does not reproduce -- a statement about the build you just ran, not about any
-> version number. The hold-out is `min(40, len(rows))`, so 40 is this fleet's
-> share rather than a fixed 40. Note what it does not show: the engine *accepts*
-> the workload, and nothing here says whether the nearest neighbour returned is
-> the useful one. Judging the answers is #48.
+> records that run panicking partway through on 0.6.1 -- see the page for where.
+> So on this build that reproduction does not reproduce: a statement about the
+> build you just ran, not about any version number.
+>
+> The hold-out is `min(40, len(rows))`, so 40 is this fleet's share rather
+> than a fixed 40. Note what it does not show: the engine *accepts* the workload,
+> and nothing here says whether the nearest neighbour returned is the useful one.
+> Judging the answers is #48.
 > ```
 >
-> Against 0.6.1 that same run panicked on the 9th of 40. **So the blocker is
-> gone on the embedded build**, which is what every measurement on this page
+> Against 0.6.1 that same run panicked partway through. **So the blocker is
+> gone on the embedded build** — which is the only build any measurement here
 > was taken on; the 1.7.0 server was not probed for it, and this repo does not
-> assume the two agree (see #56 for what that cost last time). On embedded
-> 1.7.1, #48's nearest-unknown-operator query is no longer blocked by the
-> panic -- whether it returns *useful* neighbours is #48's own question and is
-> untested. What this page
-> says about *the engine* is now history; what it says about the **embedding**
-> is not — the 26 collision groups are a property of a name catalogue, not of
-> any engine version, and still shape whatever gets built.
+> assume two builds agree (see #56 for what that cost). #48's
+> nearest-unknown-operator query is no longer blocked by the panic; whether it
+> returns *useful* neighbours is #48's own question, and untested.
 >
-> The two tables below now carry a **1.7.1 column**, re-measured on
-> 2026-09-21: every trigger and every metric completes. What does *not* change
-> is that `create_vector_index` accepts `dot`, `inner_product` and `manhattan`
-> without complaint — the metric is still not validated. Building the query
-> itself is #48's remaining work, deliberately not folded into #56: this banner
-> corrects a claim #56's version bump falsified, and stops there.
+> What this page says about *the engine* is history. What it says about the
+> **embedding** is not: the 26 collision groups are a property of a name
+> catalogue rather than of any engine version. The two tables below carry a
+> **1.7.1 column**, re-measured 2026-09-21, and `create_vector_index` still
+> accepts `dot`, `inner_product` and `manhattan` without complaint — the
+> metric is still not validated.
 
 The convergence pitch is graph traversal and vector search in one binary. This
 KG uses the graph half and nothing else, and #48 asks whether the obvious
@@ -73,11 +71,11 @@ client.vector_search("Operator", "emb", query_vector, k=3)
 
 ## The defect, as measured on `samyama` 0.6.1
 
-> Everything from here to the end of this section is a record of **0.6.1**.
-> It is kept because the reasoning is what makes the banner above checkable,
-> not because it still happens. On the pinned floor (1.7.1) none of these
-> panics reproduces — the tables carry a 1.7.1 column saying so, re-measured
-> 2026-09-21, and the commands below re-run them.
+> The prose and the 0.6.1 column from here to the end of this section record
+> **0.6.1**, and are kept because the reasoning is what makes the banner above
+> checkable — not because it still happens. The **1.7.1 column** in each table
+> is the re-measurement (2026-09-21): none of these panics reproduces there,
+> and the commands below re-run it.
 
 
 Adding the **same vector twice** panics the Rust extension:
@@ -241,9 +239,11 @@ is what an embedding is for.
 
 - **Convergence is available, not hypothetical.** The engine really does carry
   graph and vector in one binary, and the API is coherent.
-- **It cannot serve this repo's obvious use case on 0.6.1.** The
-  nearest-unknown-operator query is not blocked by design or by effort; it is
-  blocked by a panic in `hnsw_rs 0.2.1`.
+- **On 0.6.1 it could not serve this repo's obvious use case.** The
+  nearest-unknown-operator query was blocked by neither design nor effort, but
+  by a panic in `hnsw_rs 0.2.1`. On embedded 1.7.1 that panic does not
+  reproduce, so what remains untested is whether the neighbours it returns are
+  useful (#48) -- not whether the call survives.
 - **Nothing in this repo should claim the vector half is in use.** It is not.
   `docs/why-this-engine.md` says "the engine can, this KG does not"; this page
   is why the second half has not changed.
@@ -251,9 +251,11 @@ is what an embedding is for.
 ## What would have unblocked it, and what did
 
 The panic was in a third-party crate (`hnsw_rs 0.2.1`) rather than in Samyama's
-own code, so the likely fixes were upstream or a version bump. **It was the
-version bump**: #56 raised the floor to 1.7.1 and the reproduction stops
-reproducing. No issue was filed against `samyama-ai/samyama-graph` from this
+own code, so the likely fixes were upstream or a version bump. **What is
+measured is that it stops reproducing on 1.7.1**, which is why #56 raised the
+floor there. Which change between the two releases did it -- an `hnsw_rs`
+upgrade, or something in Samyama's own code -- was not investigated, and this
+page cannot say. No issue was filed against `samyama-ai/samyama-graph` from this
 repo -- whether anyone else filed one upstream is not something this page can
 say.
 

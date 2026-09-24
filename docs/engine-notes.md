@@ -1,19 +1,26 @@
-# Engine notes -- Samyama Graph, measured on v1.7.0
+# Engine notes -- Samyama Graph
+
+Notes 1-9 were measured on the **v1.7.0 server**; notes 10 and 11 on embedded
+**0.6.1** against that server, which is what made them look like a build
+difference. The banner below gives what has been re-measured since, and when.
 
 > **Ten of the eleven notes do not reproduce on `samyama` 1.7.1 (embedded).**
 > That is two events, and collapsing them into one date would misdate the
 > evidence:
 >
-> - **2026-09-08, #56:** notes 10 and 11 were resolved. The embedded build went
->   from 0.6.1 to 1.7.1 and both stopped reproducing -- version skew, not a
->   difference between the builds.
-> - **2026-09-21, #104:** notes 1-6, 8 and 9 were re-probed by
->   `benchmarks/engine_notes_probe`, which landed with that PR, and none of
->   them reproduces either. Note 1 was run at cardinality 300, where a
->   cartesian product would return 90,000 rows instead of 300. The
->   sub-behaviours the rules below depend on -- 3b (only the first `ORDER BY`
->   key), 4b (an int property against a float literal) and 8b (`<>` matching
->   nulls) -- are separate probes and are gone too.
+> - **Notes 10 and 11 (#56):** measured 2026-09-08 on an embedded build moved
+>   from 0.6.1 to 1.7.1. Both stopped reproducing, so the difference was
+>   version skew rather than one between the builds. The `samyama>=1.7.1`
+>   floor that makes 1.7.1 what you install landed afterwards, in `d37836c`
+>   on 2026-09-16.
+> - **Notes 1-6, 8 and 9 (#104):** re-probed by
+>   `benchmarks/engine_notes_probe`, committed 2026-09-16 (`7d0b565`) and
+>   merged to `main` with that PR on 2026-09-21. None of them reproduces
+>   either. Note 1 was run at cardinality 300, where a cartesian product
+>   would return 90,000 rows instead of 300. The sub-behaviours the rules
+>   below depend on -- 3b (only the first `ORDER BY` key), 4b (an int
+>   property against a float literal) and 8b (`<>` matching nulls) -- are
+>   separate probes and are gone too.
 >
 > The probe is the authority here rather than this paragraph, and it has been
 > wrong before: two of its own review rounds fixed verdicts that read FIXED
@@ -476,9 +483,9 @@ was **not** this note — EA04 has a single `WITH`. See note 11.
 
 ## 11. `samyama` 0.6.1 typed `sum(CASE ... THEN <int> ... END)` as float, so a `WHERE` on it was dropped
 
-> **RESOLVED by #56 — version skew, not a build difference. 1.7.1 is the floor.**
-> Same cause as note 10: version skew, not a design difference. Verified
-> 2026-08-31; re-verified resolved 2026-09-08.
+> **RESOLVED by #56 — same cause as note 10: version skew, not a build
+> difference. 1.7.1 is the floor.** Measured 2026-08-31; re-measured as
+> resolved 2026-09-08.
 >
 > **This is the one to remember.** Note 10 *raised*; note 11 returned confident
 > wrong rows and nothing errored. `tests/test_engine_version.py` re-runs the
@@ -487,9 +494,9 @@ was **not** this note — EA04 has a single `WITH`. See note 11.
 
 **Severity when live: correctness. Silently returned rows a WHERE should have
 removed.** Re-measured on embedded `samyama` 1.7.1 (2026-09-23), running the
-statement below: the aggregate comes back as an `int` (`2`, `0`), `WHERE hits
-> 0` returns `[['A', 2]]`, and `WHERE hits > 0.0` returns `[['A', 2]]` too --
-so the float literal is no longer a way to lose the row. The "1.7.0 server
+statement below: the aggregate comes back as an `int` (`2`, `0`), and both
+`WHERE hits > 0` and `WHERE hits > 0.0` return `[['A', 2]]` -- so the float
+literal is no longer a way to lose the row. The "1.7.0 server
 returned no rows for `> 0.0`" half of the table below is the original 2026-08-31
 measurement and has **not** been re-run; the server has not been re-probed by
 anything in this repo.

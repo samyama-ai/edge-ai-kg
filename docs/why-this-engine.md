@@ -49,28 +49,25 @@ real divergence, so pinning `samyama>=1.7.1` removed the marks and *that*
 disagreement (#56). One disagreement survives on the real layer, tracked in
 #114.
 
-It is worth being clear about what that does *not* buy either. Notes 1-9 are
-the cost this section is about, and the rules built on them all still stand.
-That is now a narrower statement than it reads: **none of notes 1-6, 8 and 9
-reproduces on embedded 1.7.1** either
-(`python -m benchmarks.engine_notes_probe --scale 300`). See the banner on
-[`docs/engine-notes.md`](engine-notes.md) for which build and which date each
-half of that was measured on. Note 7 is not among
-them and has no probe — "the `--graph` argument is ignored" is a property of
-the OSS HTTP path, and embedded has no tenant boundary to ignore, so it stands
-un-re-measured.
+Notes 1-9 are the cost this section is about, and the rules built on them all
+still stand — but for a narrower reason than they used to. **None of notes
+1-6, 8 and 9 reproduces on embedded 1.7.1**
+(`python -m benchmarks.engine_notes_probe --scale 300`); note 7 has no probe,
+because "the `--graph` argument is ignored" is a property of the OSS HTTP path
+and embedded has no tenant boundary to ignore. The banner on
+[`docs/engine-notes.md`](engine-notes.md) gives which build and which date each
+half of that was measured on.
 
 All of them, note 7 included, were originally measured against the 1.7.0
-*server*, which has not been re-probed. The workarounds in the loader and the
-catalog stay until it is. So the honest position is that this
-cost was real and is now unverified rather than confirmed — which is a reason to
-re-measure against the server, not a reason to quote it as a live cost.
+*server*, and nothing here has re-probed it. So the workarounds in the loader
+and the catalog stay: the cost was real, and is now unverified rather than
+disproved — a reason to re-measure against the server, not a reason to keep
+quoting it as a live cost.
 
 Neo4j has none of these. An engineer who knows Cypher can write Cypher against
-Neo4j; against this engine they must read an eleven-note file first — nine
-binding rules, plus notes 10 and 11 kept as resolved history. That cost was
-real and was paid on day one. Whether it is still being paid depends on the
-server re-measurement above.
+Neo4j; against this engine they read the notes file first. That cost was real
+and was paid on day one. Whether it is still being paid depends on the server
+re-measurement above.
 
 ### The hero query — they win, measured (#47)
 
