@@ -7,8 +7,9 @@
 > benchmarks.engine_notes_probe --scale 300` -- but they were measured on the
 > 1.7.0 *server*, which has not been re-probed, so their workarounds stay.
 > Note 7 has no probe. Notes 1-11 below are the original record, edited only
-> where a later measurement contradicted them; notes 12, 13 and 13b were
-> written against embedded 1.7.1 and are new. #109 rewrites notes 10 and 11
+> where a later measurement contradicted them. **New, and all measured on
+> embedded 1.7.1:** notes 12, 13 and 13b, section **3c** (`ORDER BY` after
+> `UNION ALL`), and the trailing-rebind addendum under note 1. #109 rewrites notes 10 and 11
 > themselves (it replaces #94, which was closed unmerged).
 
 Behaviour observed while building this KG.
@@ -33,8 +34,10 @@ server rather than a live record of it.
 server: both are disagreements between the server and the in-process embedded
 build, neither is filed upstream, and neither is worked around in the catalog
 today -- note 11 has a known workaround that is deliberately deferred to #56,
-note 10 has none established. Between them
-they are why three tests in `tests/test_correctness.py` are marked `xfail`:
+note 10 has none established. Between them they are why three tests in
+`tests/test_correctness.py` **were** marked `xfail` until #105 raised the floor
+to `samyama>=1.7.1` and removed every one of them; the table is the record of
+what they excused, not of the suite today:
 
 | Test | Excused | Note |
 |---|---|---|
@@ -42,9 +45,9 @@ they are why three tests in `tests/test_correctness.py` are marked `xfail`:
 | `test_order_by_is_actually_applied` | `[EA01]`, `[EA02]` only | 10 |
 | `test_ea04_quantization_unlock_is_not_a_cartesian_product` | whole test | **11** |
 
-Three test functions, **five xfailed parameters** in the run output. The two
-sweeps are parametrised over the catalog so only the affected queries are
-excused: marking either whole would excuse the other fourteen, and those two are
+Three test functions, **five xfailed parameters** in the run output while they
+stood. The two sweeps are parametrised over the catalog so only the affected
+queries were excused: marking either whole would have excused the rest, and those two are
 what `CLAUDE.md` calls the catalog-wide invariant enforcers. The marks are
 applied with `request.applymarker`, not `pytest.xfail()` -- the imperative form
 never runs the body, so a parameter could only ever report XFAIL and the XPASS
@@ -121,10 +124,12 @@ other way to express "reachable from some *other* sensor" -- it is note 5's
 anti-join, which needs the re-bind. `EA18` (#37) re-binds `a` in trailing
 position for a different reason, which note 13 gives: carrying the alias into
 an `OPTIONAL MATCH`'s `WHERE` turns it into an inner join. Neither is taken on
-trust:
+trust, and each has its own check (both measured on **embedded 1.7.1**):
 `test_ea17_matches_ground_truth_at_full_scale` compares every sensor, both
 counts and the depth, against a Python breadth-first search at `--scale 1.0`,
-where this note's failure appears if it appears. 0 disagreements.
+where this note's failure appears if it appears -- 0 disagreements. `EA18`'s is
+`tests/test_latency_budget.py::test_ea18_matches_ground_truth_at_full_scale_with_an_injected_breach`,
+which has to inject a breach first, because the shipped fleet has none.
 
 **That test is opt-in.** It is gated on `--full-scale`, so a default `pytest`
 run does not execute it -- loading a scale-1.0 fleet takes minutes. A green
@@ -199,6 +204,8 @@ unsorted within each group. Multi-key sorts are therefore avoided entirely;
 catalog query uses a single sort key *and* that the result really is sorted.
 
 ### 3c. `ORDER BY` after `UNION ALL` is dropped
+
+Measured on **embedded 1.7.1** while writing `EA17` (#35).
 
 Measured 2026-09-09 while writing `EA17` (#35), which is five legs joined
 by `UNION ALL`.
@@ -550,6 +557,15 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 
 ## 12. The 1.7.0 server does not traverse variable-length relationships; embedded 1.7.1 does
 
+> **Read the heading with notes 10 and 11 in mind.** Those two looked like the
+> embedded build disagreeing with the server and turned out to be one pip
+> version against another. This note is the same *shape* of observation --
+> 1.7.0 server against 1.7.1 embedded -- and the same caution applies: what is
+> measured is that these two builds differ, not that the HTTP path is where
+> the defect lives. Nobody has run 1.7.0 embedded or 1.7.1 over HTTP, and
+> until someone does, "the server does not traverse" is shorthand for "the
+> 1.7.0 build we have does not".
+
 > Not filed upstream yet. Found 2026-09-10 while adding `EA17` (#35). Like
 > notes 10 and 11 this is a build disagreement rather than a behaviour of one
 > engine -- but unlike them it is the **server** that is wrong. **Silent for
@@ -613,9 +629,12 @@ this note, and because its per-leg second `WITH` introduces new aliases, which
 is note 10's shape and 0.6.1 rejects. The floor no longer admits a build on
 which `EA17` fails outright.
 
-`tests/test_engine_version.py` reads that floor and re-runs note 11's
-reproduction, so a downgrade fails loudly rather than silently changing what
-`EA17` returns.
+`tests/test_engine_version.py` protects the *floor*, not this note: it checks
+the declared floor in `pyproject.toml`, checks the engine actually imported is
+at least that, and re-runs **note 11's** reproduction. Nothing there re-runs
+`EA17`'s traversal, so a build that regressed note 12 while keeping the version
+number would pass it. What would catch that is running `EA17` over `--url`
+against such a build, which nothing in the suite does.
 
 ---
 

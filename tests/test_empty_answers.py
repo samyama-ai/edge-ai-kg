@@ -1,19 +1,21 @@
 """Zero rows is an answer, so the catalog is driven to it deliberately.
 
-Every catalog query returns rows against the shipped graph. That is what a demo
-needs and not what a test needs: a query only ever run against data that
-satisfies it cannot tell "the answer is none" from "the query is broken" (#27).
+**Every catalog query returns rows against the shipped graph, except the ones
+written down as returning none.** That is what a demo needs and not what a test
+needs: a query only ever run against data that satisfies it cannot tell "the
+answer is none" from "the query is broken" (#27).
 
-That claim is checked rather than assumed --
-`tests/test_correctness.py::test_every_catalog_query_runs_and_returns_rows`
-sweeps the catalog -- though it is checked for 17 of the 19. Two ids are
-excused there, both named in that module's `EMPTY_IS_A_VALID_ANSWER` with the
-test that pins each zero: `EA04`, whose combination may legitimately not occur
-at the fixture's scale, and `EA18`, which is empty because no deployment in
-this fleet misses a latency budget. `EA01` and `EA02` used to be excused too,
-under a non-strict `xfail` for engine note 10; #105 raised the engine floor to
-1.7.1 and removed them (reaching `main` with #104), and the note stopped
-reproducing.
+Both halves are checked rather than assumed, and neither states a count --
+`tests/test_correctness.py` sweeps the catalog and
+`test_every_catalog_query_runs_and_returns_rows` fails on a zero that nothing
+explains, while `test_no_query_is_excused_that_actually_returns_rows` fails on
+an explanation that has outlived its zero. The exemptions live in that module's
+`EMPTY_IS_A_VALID_ANSWER`, each naming the test that pins its zero: `EA04`,
+whose combination may legitimately not occur at the fixture's scale, and
+`EA18`, which is empty because no deployment in this fleet misses a latency
+budget. `EA01` and `EA02` were excused under a non-strict `xfail` for engine
+note 10 until #105 raised the engine floor to 1.7.1 and removed the marks
+(reaching `main` with #104).
 
 The alerting queries keep their zero-and-one-row pairs beside their other
 fixtures rather than here: `EA18` in `tests/test_latency_budget.py` (over budget

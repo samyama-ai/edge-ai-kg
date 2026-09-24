@@ -195,3 +195,57 @@ def test_no_deployment_uses_more_than_one_accelerator(both_layers):
         f"({generated_without[:3]}). EA18 cannot see them at all, so a fleet "
         f"that stopped attaching accelerators would shrink EA18's scope "
         f"silently rather than change its answer.")
+
+
+def test_every_model_ea18_can_reach_has_operators(both_layers):
+    """`EA18` drops a breached deployment whose model has no operators.
+
+    The `MATCH (m)-[:USES_OPERATOR]->(op:Operator)` leg is an inner match, so
+    a model with no operator edges takes its deployment out of the result
+    entirely -- not with a zero fallback count, but absent. For a query whose
+    whole job is finding a breach nothing else would catch, silently dropping
+    one is the worst failure it has.
+
+    **It cannot arise today, and not for the reason the shape suggests.**
+    There *are* operator-less models: the four real-layer MLPerf ones
+    (`model:mlperf-ad`, `-ic`, `-kws`, and one more), stable at every seed and
+    scale measured. What keeps them out of `EA18` is the *earlier*
+    `USES_ACCELERATOR` hop -- the MLPerf deployments that reach them carry no
+    accelerator, so the opening `MATCH` has already dropped them before the
+    operator leg is reached. Give those deployments an accelerator and the
+    operator hole opens.
+
+    So the invariant worth pinning is the reachable one: every model a
+    deployment *with an accelerator* can reach has at least one operator.
+    Measured over both layers at seeds 20260814, 1234 and 999 and scales 0.25
+    and 1.0: 60 reachable models at scale 1.0, none without operators.
+    """
+    edges = both_layers.edges
+    with_operators = {src for label, src, rel, _tl, _tgt, _p in edges
+                      if rel == "USES_OPERATOR" and label == "Model"}
+    variant_of = collections.defaultdict(set)
+    of_variant = collections.defaultdict(set)
+    has_accelerator = set()
+    for _sl, src, rel, _tl, tgt, _p in edges:
+        if rel == "VARIANT_OF":
+            variant_of[src].add(tgt)
+        elif rel == "OF_VARIANT":
+            of_variant[src].add(tgt)
+        elif rel == "USES_ACCELERATOR":
+            has_accelerator.add(src)
+
+    reachable = {model
+                 for deployment in has_accelerator
+                 for variant in of_variant.get(deployment, ())
+                 for model in variant_of.get(variant, ())}
+    assert reachable, (
+        "no model is reachable from a deployment with an accelerator, so "
+        "EA18 cannot return anything and this guard measures nothing")
+
+    without = sorted(reachable - with_operators)
+    assert not without, (
+        f"{len(without)} model(s) reachable from an accelerator-carrying "
+        f"deployment have no USES_OPERATOR edges ({without[:3]}). EA18's "
+        f"operator leg is an inner MATCH, so a breached deployment on one of "
+        f"these is dropped from the result rather than reported with zero "
+        f"fallback operators. Make that leg OPTIONAL before relaxing this.")

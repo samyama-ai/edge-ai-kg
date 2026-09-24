@@ -358,7 +358,8 @@ ORDER BY kernels DESC
             "reachability query alone reports it as one. The `NEXT_STAGE` chain "
             "is of unknown length, so both need `*0..`."),
         # `only_via_me` is the second number because reachability is not the
-        # answer: `etl/generate.py:434` samples every sensor's chain from one
+        # answer: `etl/generate.py`'s sensor-pipeline section (`chain =
+        # rng.sample(stages, ...)`) samples every sensor's chain from one
         # shared 16-stage pool, so an unbounded walk reaches most of the fleet.
         # The ClinicalTask leg matches `o.modality = s.modality` for the same
         # reason -- a task's other sensors replace this one only if they supply
@@ -369,12 +370,27 @@ ORDER BY kernels DESC
         # long form:
         #
         #   1. The `OPTIONAL MATCH` legs use note 1's trailing-rebind shape.
-        #      Validated at `--scale 1.0`, 0 disagreements. Do not edit those
-        #      patterns without re-running `pytest --full-scale`.
+        #      Validated in two tiers, because one of them is opt-in: the
+        #      fixture-scale ground-truth comparison in
+        #      `tests/test_blast_radius.py` runs on every `pytest` and would
+        #      catch a leg that counts the wrong set, while
+        #      `test_ea17_matches_ground_truth_at_full_scale` -- gated on
+        #      `--full-scale`, minutes to load -- is what settles *cardinality*,
+        #      which note 1 says a small graph cannot. 0 disagreements at
+        #      `--scale 1.0`. Do not edit those patterns without re-running the
+        #      full-scale one.
         #   2. Needs the `samyama>=1.7.1` floor #104 landed (note 10's shape,
         #      a per-leg second `WITH`, which 0.6.x rejects).
         #   3. `+1/+2/+4/+5` are schema-fixed hops, not a depth bound. The
         #      variable part is `size(r)`, which is what `*0..` is for.
+        #      **The walk has no cost bound, by design and not by oversight.**
+        #      A depth cap would cap the answer -- the chain's length is what
+        #      is being asked -- so what exists instead is a measurement:
+        #      `docs/volume.md` puts `EA17` at 95 ms at `--scale 1.0` and
+        #      431 ms at 2.0, x4.5 per doubling, the steepest in the catalog.
+        #      Relationship-uniqueness is what stops it looping on the cyclic
+        #      `NEXT_STAGE` graph, pinned by
+        #      `test_the_unbounded_walk_terminates_on_a_cyclic_chain`.
         #   4. The ClinicalTask leg's `depth` is 1 by construction, not a
         #      measured hop count like the other legs': a task points *at* the
         #      sensor, so it is adjacent. `nearest` is therefore comparable
@@ -486,12 +502,11 @@ RETURN kind, affected, only_via_me, nearest
         # 10's shape. Like note 11 that was version skew rather than a build
         # difference: it raised on `samyama` 0.6.1 and does not on 1.7.1:
         # `tests/test_latency_budget.py` runs this embedded and passes. So
-        # `EA18` is deliberately **not** in `NOTE_10_QUERIES`: the mark would
-        # XPASS on every run and excuse nothing, and on 0.6.1 this query was
-        # never run at all. It depends on the `samyama>=1.7.1` floor that #104
-        # landed, the same one `EA17` names -- #105 was the PR that wrote the
-        # pin, and it reached `main` inside #104, so one number for one floor;
-        # the note records this under "EA18 (#37)".
+        # `EA18` carries no note-10 `xfail`: there is no such mark left in the
+        # suite to join -- #105 removed the last of them when it raised the
+        # floor -- and one here would XPASS on every run and excuse nothing.
+        # It depends on the `samyama>=1.7.1` floor #105 wrote and #104 landed,
+        # the same one `EA17` names; the note records this under "EA18 (#37)".
         #
         # `over_by_ms` is computed in its own `WITH`, not beside the
         # aggregates. Engine note 13b: an expression mixing a grouping key with
@@ -505,10 +520,21 @@ RETURN kind, affected, only_via_me, nearest
         # accelerators on one deployment would pool their kernels, and an
         # operator covered on one but not the other would stop counting as a
         # fallback -- the query under-reporting the very thing it looks for.
-        # Measured rather than assumed: one `USES_ACCELERATOR` edge per
-        # deployment across both layers at `--scale 1.0`, 1,451 deployments,
-        # and `tests/test_generate.py::test_a_deployment_uses_exactly_one_accelerator`
+        # Measured rather than assumed: across both layers at `--scale 1.0`,
+        # 1,513 deployments hold 1,451 `USES_ACCELERATOR` edges, never two --
+        # the other 62 are real-layer MLPerf rows with none, which this
+        # query's opening `MATCH` does not bind at all.
+        # `tests/test_generate.py::test_no_deployment_uses_more_than_one_accelerator`
         # fails (naming `EA18`) if a future fleet relaxes that.
+        #
+        # The operator leg is an inner `MATCH`, so a breached deployment whose
+        # model has no operators is dropped rather than reported with zero
+        # fallbacks. Four models do lack operators -- the real-layer MLPerf
+        # ones -- and none is reachable from a deployment that has an
+        # accelerator, so the hole is closed by the *accelerator* hop rather
+        # than by the operators. That is the invariant
+        # `tests/test_generate.py::test_every_model_ea18_can_reach_has_operators`
+        # pins, measured at seeds 20260814/1234/999 and scales 0.25 and 1.0.
         #
         # A deployment whose model solves several breached tasks does not get
         # an inflated `fallback_ops`, but not because the duplicate task paths
