@@ -44,6 +44,8 @@ today there is none.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from benchmarks.queries import BY_ID
@@ -51,6 +53,8 @@ from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
 from etl.loader import NODE_LABELS
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 GRAPH = "default"
 SCALE = 0.3
@@ -338,20 +342,78 @@ def test_ea12_vendor_totals_match_ground_truth(loaded):
 # XPASSed, and the marks came off. Engine note 10 keeps the history.
 
 
+EMPTY_IS_A_VALID_ANSWER = {
+    "EA04": {
+        "why": ("needs a model that misses at fp32 but fits at int8 on the "
+                "same board; at this scale that combination may legitimately "
+                "not occur"),
+        "proved_by": ("tests/test_correctness.py"
+                      "::test_ea04_shape_is_not_a_cartesian_product"),
+    },
+    "EA18": {
+        # The figures are not restated here: the test named below recomputes
+        # the pair count and the worst ratio from the fleet, so a number
+        # copied into this string could disagree with the thing that measures
+        # it and nothing would notice.
+        "why": ("no deployment in the generated fleet misses a clinical task's "
+                "latency budget -- the pairs exist and every one is inside it"),
+        # The test that pins *this fleet's* zero and its cause, not the one
+        # that proves the query fires on a graph with a breach. Both matter,
+        # and only this one is evidence that an empty `EA18` here means "no
+        # breach" rather than "matched nothing".
+        "proved_by": ("tests/test_latency_budget.py"
+                      "::test_the_shipped_fleet_has_no_breach_and_that_is_why_ea18_is_empty"),
+    },
+}
+
+
 @pytest.mark.parametrize("qid", list(BY_ID))
 def test_every_catalog_query_runs_and_returns_rows(loaded, qid):
     """Parametrised rather than one sweep, so a single query can be excused.
 
-    Marking the whole sweep would excuse the other fifteen too: EA07 could stop
+    Marking the whole sweep would excuse the other eighteen too: EA07 could stop
     returning rows and the run would still be green.
     """
     client, _ = loaded
     _, recs = rows(client, BY_ID[qid]["cypher"])
-    # EA04 needs a model that misses at fp32 but fits at int8 on the same board;
-    # at this small scale that combination may legitimately not occur. Its
-    # correctness is pinned by test_ea04_shape_is_not_a_cartesian_product below.
-    if qid != "EA04":
-        assert recs, f"{qid} returned no rows"
+    if not recs:
+        # An allowlist with reasons, not a bare `if qid != "EA04"`. A query that
+        # starts returning nothing is the failure this sweep exists to catch, so
+        # every exemption has to be written down and argued.
+        assert qid in EMPTY_IS_A_VALID_ANSWER, (
+            f"{qid} returned no rows. If that is correct for this fleet, add it "
+            f"to EMPTY_IS_A_VALID_ANSWER with the reason and the test that "
+            f"pins the zero -- an unexplained empty answer is indistinguishable "
+            f"from a pattern that stopped matching."
+        )
+        # The cause, not just the emptiness. Skipping on the id alone reports
+        # a query that has started erroring or matching nothing exactly like
+        # the honest zero -- which is the failure this module's own docstring
+        # says an allowlist must not hide. Each entry names the test that
+        # proves its zero. **What is checked here is that the test exists** --
+        # the module and the `def` -- not that it passes: a test run cannot run
+        # itself. The suite is what makes the named test pass or fail, so a
+        # rotted proof surfaces there rather than here, and the check below
+        # only refuses an excuse that points at nothing.
+        # `module::function`, and both halves are checked. Naming only the
+        # module let `EA04` point at *this* file -- the one doing the asserting
+        # -- so its existence check could never fail and the entry carried no
+        # weight at all.
+        proof = EMPTY_IS_A_VALID_ANSWER[qid]["proved_by"]
+        module, _, function = proof.partition("::")
+        path = ROOT / module
+        assert path.exists(), (
+            f"{qid} is excused from returning rows by {proof}, whose module "
+            f"does not exist. The excuse is the only thing standing between an "
+            f"empty answer and a broken query."
+        )
+        assert function and f"def {function}(" in path.read_text(encoding="utf-8"), (
+            f"{qid} is excused by {proof}, and {module} defines no "
+            f"`{function}`. An excuse naming a test that is not there is the "
+            f"same as no excuse."
+        )
+        pytest.skip(f"{qid}: {EMPTY_IS_A_VALID_ANSWER[qid]['why']} "
+                    f"(pinned by {proof})")
 
 
 @pytest.fixture
@@ -424,6 +486,20 @@ ORDER BY model
     )
 
 
+# Catalog queries that deliberately carry no `ORDER BY`, and why. Everything
+# else must sort: engine note 3 makes an ignored sort look like a top-N, so the
+# sweep below asserts the order really is applied. Listing them by name rather
+# than skipping silently means a query that *loses* its sort is caught instead
+# of quietly leaving the sweep -- which is how a catalog-wide convention stops
+# being one.
+NO_ORDER_BY = {
+    "EA06": "a single aggregate row -- there is nothing to order",
+    "EA17": "five legs joined by UNION ALL, and ORDER BY is silently dropped after "
+            "UNION ALL on this engine (note 3c); the five rows are keyed by "
+            "`kind`, so an order would carry nothing",
+}
+
+
 @pytest.mark.parametrize("qid", list(BY_ID))
 def test_order_by_is_actually_applied(loaded, qid):
     """ORDER BY on a RETURN-introduced alias is silently ignored on v1.7.0, and
@@ -431,7 +507,7 @@ def test_order_by_is_actually_applied(loaded, qid):
     project through WITH and sort on a single key -- assert it really sorts.
 
     Parametrised for the same reason as the sweep above: excusing the whole test
-    for a single query would excuse the other fifteen queries' sort order too.
+    for a single query would excuse the other eighteen queries' sort order too.
     That is what kept EA01 and EA02's note-10 marks from hiding anything, and it
     is why the parametrisation stays now that the marks are gone.
     """
@@ -440,7 +516,11 @@ def test_order_by_is_actually_applied(loaded, qid):
     cypher = BY_ID[qid]["cypher"].strip()
     match = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", cypher, re.DOTALL)
     if not match:
-        pytest.skip(f"{qid} has no ORDER BY")
+        assert qid in NO_ORDER_BY, (
+            f"{qid} has no ORDER BY and is not listed as deliberately unsorted. "
+            f"Either restore the sort or add it to NO_ORDER_BY with the reason."
+        )
+        pytest.skip(f"{qid} is deliberately unsorted: {NO_ORDER_BY[qid]}")
     keys = [k.strip() for k in match.group(1).split(",")]
     assert len(keys) == 1, f"{qid}: multi-key ORDER BY is not honoured by the engine"
 
@@ -450,3 +530,64 @@ def test_order_by_is_actually_applied(loaded, qid):
     descending = keys[0].lower().endswith("desc")
     values = [r[cols.index(key)] for r in recs]
     assert values == sorted(values, reverse=descending), f"ORDER BY not applied for {qid} ({key})"
+
+
+def test_no_query_is_excused_that_actually_returns_rows(loaded):
+    """The reverse of the sweep above: an excuse that has gone stale fails here.
+
+    `test_every_catalog_query_runs_and_returns_rows` catches an *unexplained*
+    zero -- a query that stopped matching without an entry to say why. It
+    cannot catch the opposite: an entry that outlived its reason. A query
+    fixed, or a fleet grown past the scale that made it empty, leaves
+    `EMPTY_IS_A_VALID_ANSWER` quietly excusing something that no longer needs
+    it, and the next genuine zero on that id would then pass unremarked.
+
+    Deriving both directions from the same sweep is also what stops the
+    *count* going stale. Prose saying "17 of the 19" has to be re-edited every
+    time the catalog grows; this compares two sets and needs no number at all.
+    """
+    client, _ = loaded
+    returning = {qid for qid in BY_ID if rows(client, BY_ID[qid]["cypher"])[1]}
+    stale = sorted(set(EMPTY_IS_A_VALID_ANSWER) & returning)
+    assert not stale, (
+        f"{stale} are excused in EMPTY_IS_A_VALID_ANSWER but return rows on "
+        f"this fleet. Remove the entry: while it stands, a real zero on one "
+        f"of these would be treated as expected and pass unnoticed.")
+
+
+# The catalog queries the 1.7.0 OSS server cannot answer, and why each is here.
+# Engine note 12: that build does not traverse a variable-length relationship
+# and rejects `size(r)` on one. `docs/engine-notes.md`, `CLAUDE.md` and
+# `README.md` all state that `EA17` is the only one -- until this test existed
+# that was prose, so a new query with an unbounded walk would have made three
+# pages wrong at once and nothing would have said so.
+EMBEDDED_ONLY = {"EA17"}
+
+
+def test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk():
+    """Derived from the Cypher, not copied from the docs.
+
+    An unbounded `*0..` is the shape note 12 says the server will not walk, and
+    `size(r)` over one is the shape it rejects outright. A bounded walk is not
+    the same thing: `EA07`'s `*0..3` runs on the server and returns only the
+    zero-length match -- wrong rows, not an error -- so it is a note-12 victim
+    without being embedded-only, and the distinction is the one the pages get
+    wrong when they are edited by hand.
+    """
+    import re
+
+    unbounded = {qid for qid, spec in BY_ID.items()
+                 if re.search(r"\*\d*\.\.(?!\d)", spec["cypher"])}
+    assert unbounded == EMBEDDED_ONLY, (
+        f"queries with an unbounded variable-length walk are {sorted(unbounded)}, "
+        f"but EMBEDDED_ONLY says {sorted(EMBEDDED_ONLY)}. Whichever moved, "
+        f"`docs/engine-notes.md` note 12, `CLAUDE.md` and `README.md` all name "
+        f"this set in prose and need the same edit.")
+
+    bounded = {qid for qid, spec in BY_ID.items()
+               if re.search(r"\*\d*\.\.\d", spec["cypher"])}
+    assert bounded and not (bounded & EMBEDDED_ONLY), (
+        f"expected at least one bounded walk outside the embedded-only set "
+        f"(EA07 today); got bounded={sorted(bounded)}. Without one, this test "
+        f"would pass on a catalog where every walk is unbounded and the "
+        f"distinction it exists to hold had collapsed.")

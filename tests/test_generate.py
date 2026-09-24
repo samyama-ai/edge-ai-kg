@@ -1,4 +1,6 @@
 """Invariants of the synthetic fleet. These are what the query tests lean on."""
+import collections
+
 import pytest
 
 from etl import generate as gen
@@ -12,6 +14,25 @@ def fleet():
     except FileNotFoundError:
         pytest.skip("run `python -m etl.download_data` first")
     return gen.generate(seed=1234, scale=0.25, operators=ops)
+
+
+@pytest.fixture(scope="module")
+def both_layers():
+    """The generated fleet plus the real layer, for invariants that span both.
+
+    Separate from `fleet` rather than replacing it: every other test here is
+    about what the *generator* guarantees, and folding public-source rows into
+    that would make a failure ambiguous between the two.
+    """
+    from etl import real_layer
+
+    try:
+        ops = oc.load_cached()
+    except FileNotFoundError:
+        pytest.skip("run `python -m etl.download_data` first")
+    fleet = gen.generate(seed=1234, scale=1.0, operators=ops)
+    real_layer.build_real(fleet, ops)
+    return fleet
 
 
 def test_deterministic_for_a_given_seed(fleet):
@@ -123,6 +144,111 @@ def test_node_property_values_are_scalars(fleet):
                 assert isinstance(value, (str, int, float, bool)) or value is None, (
                     f"{label}.{key} is {type(value).__name__}, not a scalar"
                 )
+
+
+def test_no_deployment_uses_more_than_one_accelerator(both_layers):
+    """`EA18` reads this as an invariant, so it is checked rather than assumed.
+
+    `EA18` counts, per (deployment, operator), the kernels that implement the
+    operator *and* run on the deployment's accelerator, and calls the operator
+    a fallback when that count is zero. With two accelerators on one
+    deployment, `a` binds to either, kernels on **either** are counted
+    together, and an operator covered on one accelerator but not the other
+    stops looking like a fallback -- the query would under-report exactly the
+    thing it exists to find.
+
+    **Not "exactly one":** measured over both layers at `--scale 1.0`, 1,513
+    deployments hold 1,451 `USES_ACCELERATOR` edges, one each. The other 62
+    are real-layer MLPerf Tiny rows carrying no accelerator at all, and
+    `EA18`'s opening `MATCH` simply does not bind them -- they are absent from
+    its result rather than under-reported, which is a different thing and a
+    harmless one. Both halves are asserted below, because the dangerous
+    direction is two and the surprising direction is none.
+
+    Over both layers deliberately: the zero-accelerator rows live in the real
+    one, so a generated-only fleet cannot see them and a docstring claiming
+    both layers would be describing a run this test never made.
+    """
+    deployments = {row["id"] for row in both_layers.nodes.get("Deployment", ())}
+    per_deployment = collections.Counter(
+        src for _sl, src, rel, _tl, _tgt, _p in both_layers.edges
+        if rel == "USES_ACCELERATOR")
+    # Before `max()`, which raises ValueError on an empty counter -- so a
+    # sweep that found no edges at all used to abort here as an error rather
+    # than fail as the assertion written for it, and the assertion placed
+    # after `max()` could never run.
+    assert per_deployment, "no USES_ACCELERATOR edges at all; EA18 cannot mean anything"
+
+    worst = max(per_deployment.values())
+    assert worst == 1, (
+        f"a deployment has {worst} USES_ACCELERATOR edges. EA18 counts kernels "
+        f"on 'the' accelerator and reads zero as a CPU fallback, so a second "
+        f"one hides fallback rather than reporting it. Fix EA18 before "
+        f"relaxing this.")
+
+    without = deployments - set(per_deployment)
+    provenance = {row["id"]: row.get("provenance")
+                  for row in both_layers.nodes["Deployment"]}
+    generated_without = sorted(d for d in without if provenance.get(d) != "real")
+    assert not generated_without, (
+        f"{len(generated_without)} generated deployments have no accelerator "
+        f"({generated_without[:3]}). EA18 cannot see them at all, so a fleet "
+        f"that stopped attaching accelerators would shrink EA18's scope "
+        f"silently rather than change its answer.")
+
+
+def test_every_model_ea18_can_reach_has_operators(both_layers):
+    """`EA18` drops a breached deployment whose model has no operators.
+
+    The `MATCH (m)-[:USES_OPERATOR]->(op:Operator)` leg is an inner match, so
+    a model with no operator edges takes its deployment out of the result
+    entirely -- not with a zero fallback count, but absent. For a query whose
+    whole job is finding a breach nothing else would catch, silently dropping
+    one is the worst failure it has.
+
+    **It cannot arise today, and not for the reason the shape suggests.**
+    There *are* operator-less models: the four real-layer MLPerf ones
+    (`model:mlperf-ad`, `-ic`, `-kws`, and one more), stable at every seed and
+    scale measured. What keeps them out of `EA18` is the *earlier*
+    `USES_ACCELERATOR` hop -- the MLPerf deployments that reach them carry no
+    accelerator, so the opening `MATCH` has already dropped them before the
+    operator leg is reached. Give those deployments an accelerator and the
+    operator hole opens.
+
+    So the invariant worth pinning is the reachable one: every model a
+    deployment *with an accelerator* can reach has at least one operator.
+    Measured over both layers at seeds 20260814, 1234 and 999 and scales 0.25
+    and 1.0: 60 reachable models at scale 1.0, none without operators.
+    """
+    edges = both_layers.edges
+    with_operators = {src for label, src, rel, _tl, _tgt, _p in edges
+                      if rel == "USES_OPERATOR" and label == "Model"}
+    variant_of = collections.defaultdict(set)
+    of_variant = collections.defaultdict(set)
+    has_accelerator = set()
+    for _sl, src, rel, _tl, tgt, _p in edges:
+        if rel == "VARIANT_OF":
+            variant_of[src].add(tgt)
+        elif rel == "OF_VARIANT":
+            of_variant[src].add(tgt)
+        elif rel == "USES_ACCELERATOR":
+            has_accelerator.add(src)
+
+    reachable = {model
+                 for deployment in has_accelerator
+                 for variant in of_variant.get(deployment, ())
+                 for model in variant_of.get(variant, ())}
+    assert reachable, (
+        "no model is reachable from a deployment with an accelerator, so "
+        "EA18 cannot return anything and this guard measures nothing")
+
+    without = sorted(reachable - with_operators)
+    assert not without, (
+        f"{len(without)} model(s) reachable from an accelerator-carrying "
+        f"deployment have no USES_OPERATOR edges ({without[:3]}). EA18's "
+        f"operator leg is an inner MATCH, so a breached deployment on one of "
+        f"these is dropped from the result rather than reported with zero "
+        f"fallback operators. Make that leg OPTIONAL before relaxing this.")
 
 
 def test_generated_labels_matches_what_the_generator_emits(tmp_path):

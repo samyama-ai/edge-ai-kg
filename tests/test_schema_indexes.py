@@ -426,6 +426,13 @@ KNOWN_UNINDEXED = {
     # 105.6ms to 115.5ms and the catalog from 541ms to 615ms -- slower, because
     # Accelerator has 91 rows and the index is overhead a scan does not need.
     ("Accelerator", "is_cpu_fallback"),
+    # EA17's ClinicalTask leg (#35), `o.modality = s.modality`. Measured at
+    # scale 1.0, 15 repeats after 5 warm-ups: EA17 398.4ms -> 394.5ms and the
+    # catalog 563.1ms -> 574.3ms with the index. A 1% move on the query and a
+    # 2% loss on the catalog, both inside run-to-run noise -- Sensor has 14
+    # rows, and the predicate joins two already-bound nodes rather than seeking
+    # a value, so there is nothing for an index to find.
+    ("Sensor", "modality"),
 }
 
 

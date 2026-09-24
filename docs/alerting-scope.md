@@ -31,10 +31,10 @@ rather than the reason it was chosen. Measured on the shipped graph:
 
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
-| #35 | blast radius: what stops with this sensor | no | **take** — in review (#96) |
+| #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #113) |
 | #36 | root cause versus symptom | no | **take** |
-| #37 | silent degradation against a latency budget | no | **take** |
-| #40 | which certifications a failure implicates | no | **take** |
+| #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
+| #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** |
 | #34 | where the sensor physically is | `Site` | **declined, then taken** — see [`location-scope.md`](location-scope.md) |
 | #39 | who owns the affected asset | `Team` | **decline** |
@@ -59,14 +59,38 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35` is **not** delivered on `main`. `EA17` is written and reviewed in #96,
-which is open at the time of writing, so this row is a decision to take the
-work rather than a claim that it is done. The catalog today is `EA01`-`EA16`
-plus `EA20`, the site query this page's own reversal added.
-`tests/test_alerting_scope.py::test_the_pending_claim_about_ea17_matches_the_catalog`
-pins the distinction rather than trusting this sentence: it fails if `EA17`
-joins `benchmarks/queries.py` while this paragraph still says it has not, and
-fails the other way if the paragraph goes but `EA17` is still absent.
+`#35`, `#37` and `#40` are delivered — as `EA17`, `EA18` and `EA19`. The page
+and the queries land together, so wherever this is read the three are in the
+catalog beside it. The catalog is `EA01`-`EA20` — `EA20` is the site query
+that arrived with this page's own reversal of #34, recorded in
+[`location-scope.md`](location-scope.md).
+
+That is not a promise this page makes about itself.
+`tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
+reads every "delivered as `EAnn`" **anywhere on this page** — the verdict table
+is where they happen to be written, but the check is not scoped to it — and
+fails three ways: if the catalog does not hold a claimed id, if the stated
+`EA01`-`EAnn` range is not the catalog's actual last id, and if a query named
+in the **verdict table** exists in the catalog with no delivery claim written
+for it. That last one turns on the claim being absent rather than on the word
+"pending", and it reads the table rather than a fixed list of ids.
+
+What it does not check is the prose: a paragraph elsewhere on this page could
+still describe a shipped query as pending, and only the table is compared
+against the catalog.
+
+`EA17` is the one catalog query the **1.7.0 server** cannot answer at all:
+that build does not traverse variable-length relationships and rejects
+`size(r)` on one (engine note 12). `EA07` uses a variable-length walk too, but
+a bounded one with no `size(r)`, so the server runs it — and note 12 measured
+the two builds returning **byte-identical rows** for it. That is luck rather
+than robustness: `EA07` ends `ORDER BY latency_ms ASC LIMIT 10` and the ten
+lowest-latency paths happen to be reachable at zero hops on this graph, so
+the server's smaller candidate set gives the same answer. Nothing enforces
+it. Note 12 is careful about what that does and does not show —
+1.7.0 *embedded* was never measured, so this may be a fix that landed between
+1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
+it runs on embedded 1.7.1 and fails on the 1.7.0 server.
 
 ## Why the three were declined (two still are)
 

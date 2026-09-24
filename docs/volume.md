@@ -68,13 +68,97 @@ kernel. They diverge:
 `EA11` is the anti-join written as
 `OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op), (k)-[:RUNS_ON]->(a:Accelerator)`
 — the comma-separated multi-variable shape `docs/engine-notes.md` note 1 warns
-about. It is the only catalog query whose cost grows faster than the graph, and
-the shape is the plausible reason.
+about. Until `EA17` arrived it was the only catalog query whose cost grows
+faster than the graph, and the shape is the plausible reason. `EA17` is now
+steeper still — see below.
 
 **At 10.0 it is 4.4 s** — slow but usable, and the gap to `EA08` is now 3.2x
 where at scale 1.0 the two were identical. This is a trajectory rather than a
 problem today; extrapolating the same exponent to 100x puts `EA11` in minutes
 while `EA08` stays in seconds.
+
+### `EA17` is the most expensive query in this table, and grows faster than `EA11`
+
+Added with `EA17` (issue #35, PR #96) and measured separately, because the run
+above predates it. Same machine, **embedded**, schema applied, catalog warmed,
+median of 5, 2026-09-10.
+
+Run mode is part of the result rather than a detail: on the **1.7.0** server
+`EA17` raises as soon as its traversal binds anything (engine note 12), so
+these figures cannot be reproduced over `--url` against that build. Where
+nothing binds — `--layers real`, which has no `Sensor` — it returns 0 rows
+*without* erroring, so "cannot run over HTTP at all" would be too strong.
+
+Whether a **1.7.1 server** still refuses it is unmeasured: the published image
+`ghcr.io/samyama-ai/samyama-graph:1` is 1.7.0, and no 1.7.1 server has been
+run here. Note 12's title names 1.7.0 for that reason, and this paragraph
+should not be read as covering a build nobody has tested.
+
+**Different engine build from the rest of this page.** Everything above was
+measured on `samyama` **0.6.1**, the build in use when that table was taken;
+this one on **1.7.1**, which `pyproject.toml` has floored since #104.
+Absolute milliseconds across the two tables are not comparable — `EA11` reads
+33 ms here against 118 ms above, `EA08` 48 ms against 118 ms — and **the growth
+columns are not directly comparable either**, because the two tables span
+different ranges: ×16.4 edges above, ×2 here. What carries across is the
+*direction*, and the per-doubling rate once normalised: `EA11` grows ×2.45 per
+doubling above and ×2.97 here, `EA08` ×1.83 and ×2.06. Both tables agree that
+`EA11` is superlinear and `EA08` is close to linear; neither licenses reading
+×37.5 against ×3.0.
+
+| query | 1.0 | 2.0 | growth |
+|---|---:|---:|---|
+| `EA17` | **95 ms** | **431 ms** | **×4.5 — superlinear** |
+| `EA11` | 33 ms | 98 ms | ×3.0 — superlinear |
+| `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
+| catalog total (the 17 queries that existed then, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear, but see below |
+
+The graph doubles between those columns — 76,303 edges at 1.0 against 152,717
+at 2.0, and 25,150 nodes against 48,907 — so ×2 is the linear line. Everything
+above it is superlinear in the graph, which is what the column is for.
+
+**The catalog total is mostly one query.** Of the 596 ms it gains between the
+columns, `EA17` accounts for 336 — **56%** — so ×3.2 describes a catalog
+carrying `EA17` rather than sixteen queries each growing that way. Remove it
+and the remaining sixteen go 175 ms → 435 ms, ×2.5.
+
+**An earlier version of this table was measured without indexes** and is
+withdrawn: it read `EA17` 105/480 ms and a 340 ms catalog total, and had
+`EA13` at 22.8 ms where the indexed figure is 0.7 ms. The load helper used here
+did not call `apply_schema`, the same omission that invalidated the first Neo4j
+comparison in #47. Both tables above are indexed.
+
+`EA17` is the slowest of the queries in this table at both sizes, and the only
+one whose cost grows faster than `EA11`. `EA18` and `EA19` were added after
+this sweep and are not in it, so "slowest in the catalog" is a claim this page
+cannot make about them. Both are cheap *relative to `EA17`*, measured in one
+run on the shipped fleet at scale 1.0 (median of 5 after 3 warm-ups, same
+process): `EA17` 691 ms, `EA18` 65 ms, `EA19` 0.1 ms, returning 5, 0 and 4 rows
+respectively. Those absolutes come from a different machine than the tables
+above and are not comparable with them — the ratio within the one run is what
+"cheap" means here. Neither has been run at 2.0.
+
+**`EA17`'s shape is the candidate explanation** for its growth: **four of its
+five legs** carry an unbounded `*0..` in the main pattern *and* another inside an
+`OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
+has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
+`etl/generate.py` samples each sensor's chain from one shared pool in random
+order, so one sensor contributes `s7 -> s1` and another `s1 -> s7`.
+Relationship-uniqueness stops it looping forever. **Why that is expensive is
+inferred, not measured**: `min(size(r))` asks for one shortest path per
+endpoint, and a planner doing a breadth-first search would not need to see the
+others — so the ×4.5 growth is consistent with enumerating them, but nothing
+here inspects a plan. The engine exposes no `EXPLAIN`, so confirming it would
+mean instrumenting the engine rather than the query.
+
+**Not run above 2.0, and the extrapolation rests on two points.** Both figures
+are well inside a demo's patience. Taking `EA17`'s ×4.5 per doubling — which is
+one interval, 1.0 to 2.0, so a rate and not a curve — 431 ms at 2.0 passes a
+second just under scale 3, and reaches `EA11`'s 4.4-s-at-10.0 figure near scale
+6. Both of those are arithmetic on a single measured ratio, not
+measurements: a planner that changes strategy at some cardinality would break
+them in either direction. Anyone loading a larger fleet should time it rather
+than trust this paragraph.
 
 ## Correctness at scale — the half that matters more
 
