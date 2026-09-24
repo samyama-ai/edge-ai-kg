@@ -4,12 +4,17 @@
     python -m demo.demo --url http://127.0.0.1:8080
     python -m demo.demo --fast                   # no typing delays
 
-The story, in five beats:
+The story, in seven beats:
   1. what the graph holds
   2. the question that breaks a document store: what falls back to CPU
   3. what that fallback costs, measured
   4. what quantization unlocks
   5. blast radius: one kernel disappears, what breaks
+  6. electrode to silicon, in one query
+  7. one sensor, one fault, one sentence -- the alert a human is sent
+
+The docstring said "five beats" over a six-beat script until beat 7 was added
+and the count was checked.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
+from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
@@ -60,6 +66,109 @@ def run(client, title: str, cypher: str, note: str = "") -> list:
                   f"{'  --  ' + note if note else ''}[/dim]")
     beat()
     return result.records
+
+
+# Beat 7's one piece of bespoke Cypher, and the reason it is not a catalog
+# entry: `EA18` asks "which deployments miss a clinical task's latency budget"
+# **fleet-wide**, and `EA17` returns per-kind *counts* rather than the ids of
+# the deployments it reached. Neither can answer "how many of **these** tasks
+# -- the ones this sensor feeds -- are over budget", which is the number #42's
+# sentence turns on. This is that join, scoped to one sensor.
+#
+# One linear pattern, no `OPTIONAL MATCH` and no re-binding, so engine note 1
+# does not apply. Both aggregates count a property (`count(DISTINCT t.id)`),
+# never a bare node variable -- note 9. No `ORDER BY`, so note 3 has nothing to
+# drop.
+#
+# It returns **no rows at all** when nothing is over budget, rather than a row
+# of zeros: the opening `MATCH` binds nothing, so there is nothing to aggregate
+# over. `alert_sentence` reads a missing row as zero, which is why the
+# no-breach case has a test of its own.
+TASKS_OVER_BUDGET = """
+MATCH (s:Sensor)<-[:REQUIRES_SENSOR]-(t:ClinicalTask)<-[:SOLVES]-(m:Model)
+      <-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+WHERE s.id = "{subject}" AND d.latency_ms > t.latency_budget_ms
+WITH count(DISTINCT t.id) AS tasks_over_budget,
+     count(DISTINCT d.id) AS deployments_over_budget
+RETURN tasks_over_budget, deployments_over_budget
+""".replace("{subject}", EA17_SUBJECT)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}" if count == 1 else f"{count:,} {noun}s"
+
+
+def alert_sentence(subject: str, radius: list, budget: list, certs: list) -> str:
+    """The sentence a human is sent, built from the rows the queries returned.
+
+    A function rather than a formatted string inside the beat, for the reason
+    #42 gives: the point of the demo is that the message is a **query result**,
+    not a template somebody maintains forever. A template cannot notice that
+    nothing is over budget today, and would go on implying a breach; this reads
+    every number out of `radius`, `budget` and `certs` and says what is there.
+
+    That is not hypothetical on this repo's own data. `EA18` returns six
+    breaches at `--scale 0.5`, the demo's default, and **none** at `--scale
+    1.0`: the same sentence, generated twice, has to say two different things.
+
+    Takes rows rather than a client so it can be tested without an engine --
+    `tests/test_alerting_demo.py` drives every branch here, including the ones
+    the shipped fleet does not currently produce.
+    """
+    counts = {row[0]: row for row in radius}
+
+    def affected(kind: str) -> int:
+        return int(counts[kind][1]) if kind in counts else 0
+
+    if not radius:
+        return (f"{subject} is degrading, and nothing downstream was found. "
+                f"Either the id is not in the graph or it feeds nothing -- "
+                f"check the id before acting on this.")
+
+    tasks = affected("ClinicalTask")
+    exclusive = int(counts["ClinicalTask"][2]) if "ClinicalTask" in counts else 0
+    downstream = ", ".join([
+        _plural(affected("SignalStage"), "signal stage"),
+        _plural(affected("Model"), "model"),
+        _plural(affected("Deployment"), "deployment"),
+        _plural(affected("Board"), "board"),
+    ])
+
+    if tasks == 0:
+        clinical = "No clinical task depends on it."
+    elif exclusive == 0:
+        clinical = (f"{_plural(tasks, 'clinical task')} depend"
+                    f"{'s' if tasks == 1 else ''} on it, none of them "
+                    f"exclusively.")
+    else:
+        clinical = (f"{_plural(tasks, 'clinical task')} depend"
+                    f"{'s' if tasks == 1 else ''} on it, and "
+                    f"{exclusive:,} of those {'has' if exclusive == 1 else 'have'} "
+                    f"no other source.")
+
+    # A missing row is zero breaches, not missing data: see TASKS_OVER_BUDGET.
+    over_tasks = int(budget[0][0]) if budget else 0
+    over_deployments = int(budget[0][1]) if budget else 0
+    if over_tasks == 0:
+        degraded = "None of them is over its latency budget."
+    else:
+        degraded = (f"{over_tasks:,} of them "
+                    f"{'is' if over_tasks == 1 else 'are'} already over the "
+                    f"latency budget, on "
+                    f"{_plural(over_deployments, 'deployment')}.")
+
+    if certs:
+        named = ", ".join(str(row[0]) for row in certs)
+        compliance = (f"{_plural(len(certs), 'certification')} "
+                      f"{'is' if len(certs) == 1 else 'are'} implicated: "
+                      f"{named}.")
+    else:
+        compliance = "No certification is implicated."
+
+    return (f"{subject} is degrading.\n\n"
+            f"Downstream: {downstream}.\n"
+            f"{clinical} {degraded}\n"
+            f"{compliance}")
 
 
 def ensure_loaded(client, scale: float) -> None:
@@ -191,6 +300,34 @@ RETURN sensor, final_stage, model, board, latency_ms
 ORDER BY latency_ms ASC
 LIMIT 8
 """, "variable-length path over the DSP chain")
+
+    # ---- Beat 7: one sensor, one fault, one sentence ------------------
+    console.print()
+    console.rule("[bold]7. One sensor, one fault, one sentence[/bold]")
+    say(f"3am. [bold]{EA17_SUBJECT}[/bold] starts degrading. What does the "
+        f"on-call engineer actually need to be told?")
+
+    radius = run(client, "EA17 -- blast radius: what stops with it",
+                 BY_ID["EA17"]["cypher"],
+                 "stages, models, deployments, boards and tasks, in one pass")
+    say("`only_via_me` is the column that matters: what has no other source, "
+        "and therefore actually stops.")
+
+    budget = run(client, "Which of those tasks are already over budget",
+                 TASKS_OVER_BUDGET,
+                 "EA18 asks this fleet-wide; this is the same question scoped "
+                 "to one sensor")
+    certs = run(client, "EA19 -- certifications implicated",
+                BY_ID["EA19"]["cypher"],
+                "an ops ticket and a reportable event are different things")
+
+    say("Now the message. Every number in it came out of the three answers "
+        "above -- nothing here is a template.")
+    console.print()
+    console.print(Panel(alert_sentence(EA17_SUBJECT, radius, budget, certs),
+                        title="[bold]The alert[/bold]", border_style="bold red",
+                        padding=(1, 3)))
+    beat()
 
     console.print()
     console.print(Panel.fit(
