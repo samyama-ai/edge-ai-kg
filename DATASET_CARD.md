@@ -55,7 +55,7 @@ library's coverage) and **`Deployment`** (one variant landed on one board).
 
 | Task | Description |
 |---|---|
-| Graph query benchmarking | 16-query catalog with recorded questions, timings and expected shapes |
+| Graph query benchmarking | 17-query catalog with recorded questions, timings and expected shapes |
 | Multi-hop retrieval / GraphRAG | Dense, typed, semantically meaningful multi-hop paths over a technical domain |
 | Anti-join / negation evaluation | "Which operator has *no* kernel here" — coverage-gap reasoning |
 | Impact analysis | Blast radius of removing a single node (a dropped kernel) |
@@ -252,13 +252,17 @@ one command.
 A `.sgsnap` of the graph (992 KB; the file is itself gzip) is published at
 [`samyama-graph` releases, `kg-snapshots-v9`](https://github.com/samyama-ai/samyama-graph/releases/tag/kg-snapshots-v9)
 and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
-2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries in
-that build
-were verified to return rows against the imported snapshot.
+2026-09-09 with `python -m benchmarks.snapshot` (#45). All 16 catalog queries
+that existed in that build were verified to return rows against the imported
+snapshot.
 
-Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
-below a fresh build's 25,162 / 77,743: it was exported from an earlier build and
-the upstream inputs are not pinned.
+**The published snapshot predates the `Site` spine and does not carry it.**
+That snapshot holds **25,145 nodes / 76,291 edges**, against a fresh build's
+25,162 / 77,743. Almost all of the gap is this feature rather than drift: 12 of
+the 17 missing nodes are `Site`, and 1,440 of the 1,452 missing edges are
+`DEPLOYED_AT`. The remaining 5 nodes and 12 edges are upstream inputs that
+moved between the export and today, and are not pinned. `EA20` returns nothing
+against the snapshot until it is re-exported.
 
 ---
 

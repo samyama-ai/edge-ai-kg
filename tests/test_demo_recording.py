@@ -45,6 +45,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CAST = ROOT / "demo" / "edgeai-questions.cast"
 README = ROOT / "README.md"
+DEMO_README = ROOT / "demo" / "README.md"
 
 STALE_REASON = (
     "the recording predates the current build; re-record with "
@@ -232,3 +233,34 @@ def test_the_recording_still_covers_every_catalog_query():
         f"the recording no longer shows {dropped}; these are not new queries, "
         f"so the recording lost them"
     )
+
+
+def test_the_demo_readme_caption_counts_what_the_recording_shows():
+    """`demo/README.md` states the same count twice, and neither was checked.
+
+    The root README's caption is pinned above; this page carries its own --
+    the image's alt text, and the sentence under it -- and both went stale
+    when `EA20` joined the catalog, because nothing read them. The number is
+    the recording's, not the catalog's: the GIF predates `EA20` on purpose.
+    """
+    from benchmarks.queries import BY_ID
+
+    text = DEMO_README.read_text(encoding="utf-8")
+    really_shown = sum(1 for qid in BY_ID if qid in cast_text())
+
+    alt = re.search(r"!\[Edge AI KG — (\d+) questions answered", text)
+    assert alt, (
+        "demo/README.md's GIF alt text no longer reads "
+        "'![Edge AI KG — <N> questions answered'. If it was reworded, update "
+        "this test with it rather than leaving the count unchecked.")
+    assert int(alt.group(1)) == really_shown, (
+        f"demo/README.md's alt text says {alt.group(1)} questions; the "
+        f"recording shows {really_shown}")
+
+    sentence = re.search(r"\*\*The GIF above records (\d+) of them\.\*\*", text)
+    assert sentence, (
+        "demo/README.md no longer says '**The GIF above records <N> of "
+        "them.**'; that sentence is the claim a reader acts on.")
+    assert int(sentence.group(1)) == really_shown, (
+        f"demo/README.md says the GIF records {sentence.group(1)} queries; it "
+        f"shows {really_shown}")

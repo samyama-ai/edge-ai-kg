@@ -237,9 +237,12 @@ def test_the_site_spine_is_exactly_what_was_agreed(fleet):
     placing a *type*. Without this, `Board -[:DEPLOYED_AT]-> Site` would satisfy
     every other test on this page while being the shape that page rejects.
     """
-    assert "Site" in fleet.nodes, (
-        "`Site` is gone, but docs/location-scope.md says #34 was taken. Either "
-        "the reversal was reverted -- in which case restore `Site` to "
+    # `.get(...)`, not `in`: the key survives an empty row list, so
+    # `"Site" in fleet.nodes` is true for a generator that declares the label
+    # and emits nothing -- the reversal reverted in everything but name.
+    assert fleet.nodes.get("Site"), (
+        "`Site` holds no rows, but docs/location-scope.md says #34 was taken. "
+        "Either the reversal was reverted -- in which case restore `Site` to "
         "DECLINED_LABELS above and say so in alerting-scope.md -- or the "
         "generator stopped emitting it."
     )
@@ -254,16 +257,30 @@ def test_the_site_spine_is_exactly_what_was_agreed(fleet):
                if rel == "DEPLOYED_AT"}
     assert targets == {"Site"}, f"DEPLOYED_AT points at {sorted(targets)}, not Site"
 
-    # Cardinality, not just direction. `docs/location-scope.md` rests on "one
-    # installed instance, in exactly one place" -- a deployment at two sites
-    # turns EA20's per-site count into a set union and the counts stop summing
-    # to the fleet.
+    # Cardinality in both directions. `docs/location-scope.md` rests on "one
+    # installed instance, in exactly one place": two sites turn EA20's per-site
+    # count into a set union, and *no* site drops a deployment out of the
+    # answer entirely. A `Counter` over the edges sees only the first of those
+    # -- a deployment with no `DEPLOYED_AT` edge contributes no key at all --
+    # so the generated deployments are enumerated and checked against it.
     placements = collections.Counter(
         src for _sl, src, rel, _tl, _t, _p in fleet.edges if rel == "DEPLOYED_AT")
     multi = {did: k for did, k in placements.items() if k > 1}
     assert not multi, (
         f"deployments placed more than once: {sorted(multi)[:3]}. "
         f"docs/location-scope.md commits to one site per deployment.")
+    # Real deployments are MLPerf submissions with no known location and are
+    # given none on purpose, so the floor is the generated half.
+    generated = {d["id"] for d in fleet.nodes.get("Deployment", [])
+                 if d.get("provenance") != "real"}
+    assert generated, "no generated deployments; this check is measuring nothing"
+    unplaced = sorted(generated - set(placements))
+    assert not unplaced, (
+        f"{len(unplaced)} generated deployments sit at no site "
+        f"({unplaced[:3]}). EA20 counts `deployments_here` per site, so an "
+        f"unplaced deployment is missing from the answer rather than reported "
+        f"as homeless -- and docs/location-scope.md commits to exactly one "
+        f"place per installed instance.")
 
 
 def test_the_site_label_carries_only_what_the_decision_allows(fleet):
@@ -394,6 +411,16 @@ def test_every_quote_from_the_decline_is_verbatim():
     Only block-quoted, italicised strings are checked, which is how that page
     marks a quotation from another document. Whitespace and the `> ` prefix
     are normalised, because line wrapping is not part of the quote.
+
+    Every `*"` opening in a block must yield a quote, and that guard is
+    load-bearing rather than tidy. `*"..."*` closes on the first `"` followed
+    by `*`, so a quotation holding an *italicised* inner quote ends early --
+    and the truncated text is a **prefix** of the source, which passes the
+    verbatim check below while leaving the rest of the sentence unchecked.
+    Measured: quoting `the question that prompted this -- *"a company keeps a
+    sensor in some place"* -- cannot be expressed` captures 75 of its 100
+    characters and the tail goes unverified. Counting the openings turns that
+    silence into a failure.
     """
     import re
 
@@ -404,9 +431,17 @@ def test_every_quote_from_the_decline_is_verbatim():
         return re.sub(r"\s+", " ", re.sub(r"^> ?", "", text, flags=re.MULTILINE)).strip()
 
     source = flatten(decline)
-    quotes = [quoted
-              for block in re.findall(r"(?:^> .*\n)+", reversal, re.MULTILINE)
-              for quoted in re.findall(r'\*"(.+?)"\*', flatten(block), re.DOTALL)]
+    quotes, openings = [], 0
+    for block in re.findall(r"(?:^> .*\n)+", reversal, re.MULTILINE):
+        flat = flatten(block)
+        openings += flat.count('*"')
+        quotes += re.findall(r'\*"(.+?)"\*', flat, re.DOTALL)
+    assert len(quotes) == openings, (
+        f"{openings} quotation openings in docs/location-scope.md and "
+        f"{len(quotes)} quotes parsed from them. A quote holding an "
+        f"italicised inner quote closes early, and the truncated prefix still "
+        f"matches the source -- so the rest of that sentence would go "
+        f"unchecked. Re-mark the inner quotation, or quote it in two pieces.")
     assert quotes, (
         "no quotations found in docs/location-scope.md. Either the page stopped "
         "quoting the decline -- in which case its argument needs re-reading -- "

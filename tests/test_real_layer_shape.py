@@ -9,11 +9,11 @@ Measured (see the README section this pins): **it is connected** -- 1,240 nodes,
 kernel registers. It is not 1,030 orphans.
 
 What it is missing is a *half*, not the joins. The real layer carries the
-hardware and kernel spine and none of the clinical one, so seven labels and eleven
-edge types are empty -- including `USES_OPERATOR`, which is the edge the hero
-question traverses. That is why 8 of the 16 catalog queries measured for this
-were empty against it -- `EA20` joined the catalog later and is empty against it
-too, since `Site` is generated-only.
+hardware and kernel spine and none of the clinical one, so seven labels and
+twelve edge types are empty -- including `USES_OPERATOR`, which is the edge the
+hero question traverses. That is why 8 of the 16 catalog queries measured for
+this were empty against it -- `EA20` joined the catalog later and is empty
+against it too, since `Site` is generated-only.
 
 These assertions are about **shape, not counts**. The counts move whenever ONNX
 Runtime publishes new kernel registrations -- 734 became 738 during one week --
@@ -37,12 +37,18 @@ GRAPH = "default"
 # The hardware and kernel spine, plus the MLPerf submissions.
 LABELS_PRESENT = {"Vendor", "SoC", "Accelerator", "Board", "Runtime",
                   "Operator", "Kernel", "Model", "BenchmarkTask", "Deployment"}
-# The clinical spine, entirely generated.
+# Everything the real layer does not build: the clinical spine, entirely
+# generated, plus `Site`.
 LABELS_ABSENT = {"ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
                  "Dataset", "Certification",
-                 # `Site` is generated-only by decision (#34,
-                 # docs/location-scope.md), so the real layer never carries
-                 # one. Listing it here is what fails if that ever changes.
+                 # `Site` is not clinical -- it is here because the real layer
+                 # gets no sites by decision (#34, docs/location-scope.md): an
+                 # MLPerf submission has no known location, and inventing one
+                 # would put a synthetic property on a node stamped
+                 # `provenance: "real"`. What this list buys is the assertion
+                 # below, that no real node carries the label; the *reason* it
+                 # stays empty is pinned by
+                 # `tests/test_site_spine.py::test_the_real_layer_gets_no_sites`.
                  "Site"}
 
 EDGES_PRESENT = {"HAS_SOC", "IMPLEMENTS", "MADE_BY", "MEASURES", "ON_BOARD",

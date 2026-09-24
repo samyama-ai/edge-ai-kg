@@ -215,7 +215,7 @@ returns ranked `(node_id, distance)` pairs. So convergence is **available**, not
 hypothetical.
 
 **But this repo does not use it.** `grep` for vector/embedding/hnsw across the
-source returns nothing; the catalog is 16 Cypher queries. So the claim today is
+source returns nothing; the catalog is 17 Cypher queries. So the claim today is
 "the engine can, this KG does not" — #48 is the issue that closes that gap, and
 until it lands the convergence differentiator is real in the engine and
 undemonstrated here. #49 asks the same of the MCP surface.
@@ -320,7 +320,7 @@ existed, and the contract test was written to permit exactly that phrasing.
 | ~48K nodes/s, ~3.0K edges/s ingest | **Measured** | `python -m benchmarks.ingest` |
 | `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
 | | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
-| 16-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
+| 17-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` |
 | Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Measured — no. Neo4j is 4.3-4.7x faster on `EA01`** | `python -m benchmarks.compare_neo4j --repeats 15 --natural`; needs a Neo4j and `NEO4J_PASSWORD`. Results in [`neo4j-comparison.md`](neo4j-comparison.md), #47 |

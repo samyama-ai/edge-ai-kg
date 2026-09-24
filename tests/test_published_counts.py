@@ -321,3 +321,64 @@ def test_the_docs_agree_with_each_other_on_the_headline(counts):
         f"documents not quoting the current both-layer edge count {edges:,}: "
         f"{disagreeing_edges}"
     )
+
+
+# Every shape the docs use to state how big the catalog is. Found by grepping
+# for the phrasings actually in the tree, not invented: a new spelling is a new
+# entry here, and `test_at_least_one_document_states_the_catalog_size` fails if
+# every one of them disappears.
+CATALOG_SIZE_PATTERNS = (
+    r"(\d+)-query catalog",
+    r"catalog is (\d+) Cypher queries",
+    r"`benchmarks/queries\.py` holds (\d+) entries",
+    r"Walks all (\d+) queries",
+)
+CATALOG_SIZE_DOCS = ("README.md", "CLAUDE.md", "DATASET_CARD.md",
+                     "demo/README.md", "docs/why-this-engine.md")
+
+
+def catalog_size_claims() -> list[tuple[str, int, str]]:
+    """Every published claim about the catalog's size, as (doc, number, phrase)."""
+    found = []
+    for doc in CATALOG_SIZE_DOCS:
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        for pattern in CATALOG_SIZE_PATTERNS:
+            found.extend((doc, int(m.group(1)), m.group(0))
+                         for m in re.finditer(pattern, text))
+    return found
+
+
+def test_every_document_states_the_catalog_size_correctly():
+    """One catalog, five documents, one number.
+
+    `EA20` landed in three places that quote this figure and was updated in
+    one of them, leaving `docs/why-this-engine.md` saying 16 in two spots and
+    `DATASET_CARD.md` in a third. Nothing failed, because nothing compared a
+    published count to `BY_ID` -- the sibling checks above do exactly that for
+    node and edge counts, and this closes the same gap for the catalog.
+
+    The number is derived, never restated here: adding a query and forgetting a
+    document fails with the document named.
+    """
+    from benchmarks.queries import BY_ID
+
+    actual = len(BY_ID)
+    wrong = [(doc, phrase, stated) for doc, stated, phrase in catalog_size_claims()
+             if stated != actual]
+    assert not wrong, (
+        f"the catalog holds {actual} queries; these documents say otherwise: "
+        + "; ".join(f"{doc} — {phrase!r}" for doc, phrase, _ in wrong)
+        + ". A published count that is silently wrong is worse than one that "
+          "fails loudly."
+    )
+
+
+def test_at_least_one_document_states_the_catalog_size():
+    """The check above passes vacuously if every phrasing is reworded away."""
+    claims = catalog_size_claims()
+    assert len(claims) >= 4, (
+        f"only {len(claims)} catalog-size claims found in {list(CATALOG_SIZE_DOCS)}. "
+        f"Either the docs stopped publishing the figure -- unlikely -- or the "
+        f"phrasing changed and CATALOG_SIZE_PATTERNS needs the new spelling, "
+        f"or this test is checking nothing."
+    )

@@ -50,6 +50,28 @@ def _recalled_board() -> str:
 RECALLED_BOARD = _recalled_board()
 
 
+def _columns() -> dict[str, int]:
+    """`EA20`'s RETURN names, mapped to their positions in each row.
+
+    Rows come back as bare tuples, so every reader here was an index: `row[3]`
+    for `on_recalled_board` and `row[4]` for `deployments_here`. Those two are
+    both integers and adjacent, so swapping the RETURN clause would leave every
+    assertion in this module passing while comparing the wrong column against
+    the wrong truth -- silently, because the ground truth would be rebuilt the
+    same wrong way. Reading the clause once turns that into an immediate,
+    loud failure.
+    """
+    match = re.search(r"^RETURN (.+)$", BY_ID["EA20"]["cypher"], re.MULTILINE)
+    assert match, (
+        "EA20 has no single-line RETURN clause; this module maps its columns "
+        "by name, so update this reader together with the query.")
+    names = [name.strip() for name in match.group(1).split(",")]
+    return {name: i for i, name in enumerate(names)}
+
+
+COL = _columns()
+
+
 @pytest.fixture(scope="module")
 def operators():
     try:
@@ -149,7 +171,8 @@ def test_there_is_more_than_one_campus_to_group_by(fleet):
 def test_site_names_stay_distinct_where_the_suffix_list_wraps():
     """Above `--scale 1.04` the suffix list runs out, and `EA20` groups by name.
 
-`SITE_SUFFIXES` holds 12 names, so the 13th site is where the wrap begins.
+    `SITE_SUFFIXES` holds 12 names, so the 13th site is where the wrap
+    begins.
     Without the wrap number it is a second `Ward 3` in the same campus as the
     first -- and `EA20` groups by `(campus, name)`, so the two merge into one
     row and each under-reports the other's deployments.
@@ -198,8 +221,8 @@ def test_a_tiny_scale_still_has_two_places_to_compare():
 def test_placing_sites_did_not_move_any_deployment_metric(operators):
     """The `Site` draw must not consume from the generator's shared stream.
 
-A `rng.choice(sites)` in the deployment loop shifts every later draw, so a
-    location silently changes the cost model: at seed 20260814 that spelling
+    A `rng.choice(sites)` in the deployment loop shifts every later draw, so
+    a location silently changes the cost model: at seed 20260814 that spelling
     gives `deploy:00001` latency 78.036 / power 3591.96 against the 87.684 /
     3990.6 below. `etl/generate.py`'s contract is that a seed reproduces the
     graph byte-for-byte, and `docs/data-provenance.md`'s figures rest on it.
@@ -228,7 +251,7 @@ def test_sites_are_deterministic_from_the_seed(operators):
     assert [s["id"] for s in again.nodes["Site"]] == [s["id"] for s in once.nodes["Site"]]
 
 
-def test_the_real_layer_gets_no_sites(operators, fleet):
+def test_the_real_layer_gets_no_sites(operators):
     """Real MLPerf submissions have no known location, so they are given none.
 
     Inventing one would put a synthetic property on a node stamped
@@ -248,23 +271,52 @@ def test_the_real_layer_gets_no_sites(operators, fleet):
     assert not (real_ids & set(after)), "a real deployment was given a synthetic site"
 
 
-def test_ea20_stays_inside_its_limit_at_shipped_scales(operators):
-    """`LIMIT 12` must not truncate, or the tail is an arbitrary pick among ties.
+# Every fleet scale the repo documents (`README.md`, `docs/volume.md`,
+# `CLAUDE.md`), and whether `EA20`'s `LIMIT` covers it. Measured, not assumed:
+# sites scale linearly with the fleet, so the limit that fits the shipped graph
+# stops fitting above it.
+DOCUMENTED_SCALES = {0.15: 2, 0.3: 4, 1.0: 12, 5.0: 60, 10.0: 120}
 
-    `EA20` orders by `on_recalled_board`, where ties are common -- most sites
+
+def test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops(
+        operators):
+    """`LIMIT 12` covers the shipped graph, and truncates above it -- both pinned.
+
+    `EA20` orders by `on_recalled_board`, where ties are common: most sites
     hold none of the recalled board at all. Truncating a tie is how `EA02` and
     `EA11` came to be withdrawn from the Neo4j comparison as unstable, so the
-    limit is checked against the site count rather than assumed generous.
+    limit is measured against the site count rather than assumed generous.
+
+    The earlier version of this test checked `--scale 1.0` alone while its name
+    claimed "shipped scales", which hid the boundary. Measured across every
+    scale the docs use: 2 sites at 0.15, 4 at 0.3, 12 at 1.0 -- all inside the
+    limit -- then **60 at 5.0 and 120 at 10.0, which the limit cuts**. That is
+    a real bound on the query rather than a bug in the fixture, and
+    `benchmarks/queries.py` says so where the limit is written; this test fails
+    if either half of that claim stops being true.
     """
     limit = int(BY_ID["EA20"]["cypher"].rsplit("LIMIT", 1)[1])
-    # The shipped seed and scale, with the cached operators this module already
-    # has -- `operators=None` made the generator re-read them from disk, which
-    # is a second source for the same data inside one test run.
-    full = gen.generate(seed=gen.DEFAULT_SEED, scale=1.0, operators=operators)
-    assert len(full.nodes["Site"]) <= limit, (
-        f"scale 1.0 generates {len(full.nodes['Site'])} sites and EA20 keeps "
-        f"{limit}; the rows past the limit would be an arbitrary choice among "
-        f"equal `on_recalled_board` values")
+    # The cached operators this module already has -- `operators=None` made the
+    # generator re-read them from disk, a second source for the same data
+    # inside one test run.
+    for scale, expected in sorted(DOCUMENTED_SCALES.items()):
+        built = gen.generate(seed=gen.DEFAULT_SEED, scale=scale,
+                             operators=operators)
+        count = len(built.nodes["Site"])
+        assert count == expected, (
+            f"--scale {scale} now generates {count} sites, not {expected}. "
+            f"Site density changed, so re-measure this table and the "
+            f"truncation note in `benchmarks/queries.py` with it.")
+        if scale <= 1.0:
+            assert count <= limit, (
+                f"--scale {scale} generates {count} sites and EA20 keeps "
+                f"{limit}; the rows past the limit would be an arbitrary "
+                f"choice among equal `on_recalled_board` values")
+        else:
+            assert count > limit, (
+                f"--scale {scale} now fits inside EA20's LIMIT {limit}. If the "
+                f"limit was raised, say so in `benchmarks/queries.py` and move "
+                f"this boundary rather than leaving the comment stale.")
 
 
 # --------------------------------------------------------------------------
@@ -300,7 +352,21 @@ def test_ea20_counts_match_ground_truth(loaded):
 
     truth = {(by_site[sid]["campus"], by_site[sid]["name"]):
              (recalled[sid], here[sid]) for sid in here}
-    got = {(row[0], row[1]): (row[3], row[4]) for row in records}
+    # Keyed by `(campus, name)` on both sides, so a duplicated pair would
+    # collapse two rows into one in *both* dicts and the comparison would
+    # still pass -- losing a site each way and saying nothing. The distinctness
+    # itself is `test_site_names_stay_distinct_where_the_suffix_list_wraps`;
+    # what is checked here is that this comparison saw every row it was given.
+    assert len(truth) == len(here), (
+        f"two sites share a (campus, name) in the fixture: {len(here)} sites "
+        f"collapsed to {len(truth)} keys. This comparison would merge them "
+        f"and pass while under-reporting both.")
+    got = {(row[COL["campus"]], row[COL["site"]]):
+           (row[COL["on_recalled_board"]], row[COL["deployments_here"]])
+           for row in records}
+    assert len(got) == len(records), (
+        f"EA20 returned {len(records)} rows that collapse to {len(got)} "
+        f"(campus, name) keys; the duplicates would be compared as one.")
     assert got == truth, (
         f"EA20 disagrees with the fleet. query={got}\nfleet={truth}")
 
@@ -314,7 +380,7 @@ def test_ea20_ranks_the_worst_hit_site_first(loaded):
     """
     client, _fleet = loaded
     records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
-    counts = [row[3] for row in records]
+    counts = [row[COL["on_recalled_board"]] for row in records]
     assert counts == sorted(counts, reverse=True), (
         f"EA20 came back in {counts}, not descending; the site with the most "
         f"recalled boards is the one an ops team pages first")
@@ -332,7 +398,9 @@ def test_ea20_separates_a_site_wide_failure_from_one_device(loaded):
     """
     client, _fleet = loaded
     records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
-    fractions = {(row[0], row[1]): (row[3], row[4]) for row in records}
+    fractions = {(row[COL["campus"]], row[COL["site"]]):
+                 (row[COL["on_recalled_board"]], row[COL["deployments_here"]])
+                 for row in records}
     assert fractions, "EA20 returned nothing against a loaded fixture"
     impossible = {k: v for k, v in fractions.items() if v[0] > v[1]}
     assert not impossible, (
@@ -373,7 +441,8 @@ def test_ea20_shows_both_affected_and_untouched_sites_at_full_scale(
     create_edges(client, GRAPH, full.edges)
 
     records = client.query(BY_ID["EA20"]["cypher"].strip(), GRAPH).records
-    counts = [(row[3], row[4]) for row in records]
+    counts = [(row[COL["on_recalled_board"]], row[COL["deployments_here"]])
+              for row in records]
     assert any(hit == 0 for hit, _total in counts), (
         f"every site at scale 1.0 holds a recalled board: {counts}. The "
         f"'is it site-wide' question needs an untouched site to contrast with.")
