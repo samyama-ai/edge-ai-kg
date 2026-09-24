@@ -159,17 +159,88 @@ def test_the_recording_shows_the_current_real_kernel_count(fresh):
     )
 
 
+# Queries added to the catalog *after* the recording was made. A recording
+# cannot show a query that did not exist when it was recorded, and re-recording
+# needs `asciinema` and `agg` (#30 owns that).
+#
+# This is not a general excuse list. Each entry is a query the recording
+# predates, and the README caption is worded to match -- it counts rather than
+# saying "all". The exact numbers are derived from this set and the catalog
+# size, and are asserted by `test_the_readme_caption_does_not_overclaim`, which
+# is why they are not repeated here: quoting them went stale the moment `EA18`
+# landed and the caption moved from "16 of the 17" to "16 of the 18".
+ADDED_AFTER_THE_RECORDING = {"EA17",   # #35, added 2026-09-09
+                             "EA18",   # #37, added 2026-09-15
+                             "EA19"}   # #40, added 2026-09-17
+
+
 def test_the_recording_still_covers_every_catalog_query():
     """Structure, not figures -- so this one is asserted rather than excused.
 
-    The README calls it "all 16 catalog queries run end to end". A recording
-    that silently dropped one would keep that caption while making it false,
-    and no figure comparison would notice.
+    A recording that silently dropped a query it *did* record would keep the
+    caption while making it false, and no figure comparison would notice.
     """
     from benchmarks.queries import BY_ID
     text = cast_text()
-    missing = [qid for qid in BY_ID if qid not in text]
+    missing = [qid for qid in BY_ID
+               if qid not in text and qid not in ADDED_AFTER_THE_RECORDING]
     assert not missing, (
-        f"the recording does not show {missing}; the README claims all "
-        f"{len(BY_ID)} catalog queries run end to end"
+        f"the recording does not show {missing}, and they are not listed as "
+        f"post-dating it. Either re-record with scripts/record_gif.sh, or add "
+        f"them to ADDED_AFTER_THE_RECORDING with the issue that introduced them."
     )
+
+
+def test_every_query_said_to_postdate_the_recording_really_is_absent():
+    """`ADDED_AFTER_THE_RECORDING` cannot outlive a re-record.
+
+    Otherwise the set only ever grows: someone re-records, the entry stays, and
+    the next query that quietly vanishes from the recording is excused by it.
+    """
+    from benchmarks.queries import BY_ID
+    text = cast_text()
+    stale = sorted(q for q in ADDED_AFTER_THE_RECORDING if q in text)
+    assert not stale, (
+        f"{stale} are in the recording, so they no longer post-date it. Remove "
+        f"them from ADDED_AFTER_THE_RECORDING and update the README caption."
+    )
+    unknown = sorted(q for q in ADDED_AFTER_THE_RECORDING if q not in BY_ID)
+    assert not unknown, f"{unknown} are not catalog queries at all"
+
+
+def test_the_readme_caption_does_not_overclaim():
+    """The caption must not say "all" while a query is missing from the recording.
+
+    The caption is the claim a reader actually sees; the recording is the
+    evidence. This is the pair that goes wrong silently -- a query is added, the
+    caption keeps saying "all", and nothing on the page is false-looking.
+    """
+    from benchmarks.queries import BY_ID
+    # The caption line itself, not the whole file. A substring search anywhere
+    # in the README could be satisfied by an unrelated sentence -- the snapshot
+    # section carries its own "16 of the 17", about a different claim -- so this
+    # would pass while the caption under the GIF said something else entirely.
+    lines = [line for line in README.read_text(encoding="utf-8").splitlines()
+             if "[catalog queries](benchmarks/queries.py)" in line]
+    assert len(lines) == 1, (
+        f"expected exactly one line linking the catalog from the GIF caption, "
+        f"found {len(lines)}. This test reads that line; if the caption moved, "
+        f"point it at the new one."
+    )
+    caption = lines[0]
+    shown = len(BY_ID) - len(ADDED_AFTER_THE_RECORDING)
+    if ADDED_AFTER_THE_RECORDING:
+        assert f"{shown} of the {len(BY_ID)} [catalog queries]" in caption, (
+            f"the recording shows {shown} of {len(BY_ID)} catalog queries, so the "
+            f"README caption must say so. Expected "
+            f"'{shown} of the {len(BY_ID)} [catalog queries]'."
+        )
+    else:
+        # The symmetric half. Without it, a re-record empties the set and the
+        # caption keeps under-claiming forever -- the same silent drift in the
+        # other direction, and nobody notices an understatement.
+        assert f"All {len(BY_ID)} [catalog queries]" in caption, (
+            f"nothing post-dates the recording any more, so the caption should "
+            f"be back to 'All {len(BY_ID)} [catalog queries]'. It reads as though "
+            f"the recording is still short."
+        )

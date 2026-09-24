@@ -136,7 +136,7 @@ real/synthetic split is therefore *queryable* (see EA16), not a README claim.
 
 ### The query catalog is the single source of truth
 
-`benchmarks/queries.py` holds 16 entries (`EA01`–`EA16`), each with
+`benchmarks/queries.py` holds 19 entries (`EA01`–`EA19`), each with
 `question` / `why_graph` / `cypher`, exported as `QUERIES` and `BY_ID`. It is
 consumed by `benchmarks/run_benchmark.py`, `demo/questions.py` and
 `tests/test_correctness.py`. Editing a query changes the benchmark, the demo and
@@ -196,7 +196,26 @@ differently from the server (README, "What the real layer alone can answer").
 Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
 why it is not an engine note — nothing here tells you a shape to avoid.
 
-The rules that follow from notes 1-9:
+**Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
+13 and 13b return wrong rows rather than erroring; note 12 does both, and which
+half you get depends on the query. The 1.7.0 server does not *traverse* a
+variable-length relationship the embedded 1.7.1 build walks: it matches only
+the zero-length case, silently, and it *rejects* `size(r)` over such a
+relationship outright. `EA17` asks for `size(r)`, so on the server it **raises**
+-- which is why it is embedded-only rather than reshaped. `EA07` walks a
+bounded `*0..3` without `size(r)`, so it runs; note 12 measured both builds
+returning byte-identical rows for it, which its `ORDER BY ... LIMIT 10` makes
+true on this graph and nothing enforces. That set is derived rather than asserted:
+`tests/test_correctness.py::test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk`
+fails if a new query carries an unbounded `*0..`, because this sentence,
+`README.md` and note 12 all name `EA17` as the only one. Notes 13 and 13b were measured on embedded
+1.7.1 while writing `EA18`: a `WHERE` on an `OPTIONAL MATCH` mentioning a
+**`WITH`-introduced** alias drops the unmatched rows, and an expression mixing
+a grouping key with an aggregate in one projection returns `NULL`. Note 13 has
+a rule in the list below; 13b's workaround is to compute the expression one
+`WITH` later.
+
+The rules that follow from notes 1-9 and 13:
 
 - **Project through `WITH` before `RETURN`, and sort on the `WITH` alias.**
   `ORDER BY` on a `RETURN`-introduced alias is silently dropped. With `LIMIT`
@@ -215,6 +234,11 @@ The rules that follow from notes 1-9:
   with `WITH` + an aggregate to deduplicate.
 - **No negated pattern predicates.** Anti-joins are
   `OPTIONAL MATCH ... WITH ... count(k) AS n ... WHERE n = 0`.
+- **Never filter an `OPTIONAL MATCH` on a `WITH`-introduced alias.** It drops
+  the unmatched rows -- the `OPTIONAL` becomes an inner join, silently, which
+  turns the anti-join above into the opposite of what it is for (note 13). A
+  literal or a `MATCH`-bound alias is safe; if a `WITH` alias is unavoidable,
+  `collect` and filter after the aggregation.
 - **Keep numeric literal types matching the stored property type.** `WHERE x > 0.5`
   against an int-typed property returns nothing; `min(CASE ... ELSE 999999 END)`
   returns the int sentinel while `999999.0` works.

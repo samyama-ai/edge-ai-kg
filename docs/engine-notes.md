@@ -1,8 +1,10 @@
-# Engine notes -- Samyama Graph
+# Engine notes -- Samyama Graph (notes 10-13b cover the embedded build)
 
 Notes 1-9 were measured on the **v1.7.0 server**; notes 10 and 11 on embedded
 **0.6.1** against that server, which is what made them look like a build
-difference. The banner below gives what has been re-measured since, and when.
+difference. Notes 12, 13 and 13b, section 3c and the trailing-rebind addendum
+under note 1 were all measured on **embedded 1.7.1** and are newer than the
+rest. The banner below gives what has been re-measured since, and when.
 
 > **Ten of the eleven notes do not reproduce on `samyama` 1.7.1 (embedded).**
 > That is two events, and collapsing them into one date would misdate the
@@ -21,6 +23,12 @@ difference. The banner below gives what has been re-measured since, and when.
 >   below depend on -- 3b (only the first `ORDER BY` key), 4b (an int
 >   property against a float literal) and 8b (`<>` matching nulls) -- are
 >   separate probes and are gone too.
+>
+> **Newer than the re-measurement above, and not part of it:** notes 12, 13
+> and 13b, section **3c** (`ORDER BY` after `UNION ALL`) and the
+> trailing-rebind addendum under note 1, all measured on embedded 1.7.1 while
+> writing `EA17` and `EA18`. Notes 10 and 11 were rewritten in their own words
+> by #109, which has merged; this banner no longer forwards to it.
 >
 > The probe is the authority here rather than this paragraph, and it has been
 > wrong before: two of its own review rounds fixed verdicts that read FIXED
@@ -66,6 +74,8 @@ the loader or the query catalog works around it. Verified 2026-08-14.
 **Versions these describe.** The server is
 `ghcr.io/samyama-ai/samyama-graph:1`, labelled 1.7.0; the embedded build is
 `samyama` 1.7.1 from pip, pinned by `pyproject.toml` as `samyama>=1.7.1`.
+**Notes 12, 13 and 13b were measured on that embedded 1.7.1 build**, not on
+the server, and are newer than notes 1-11.
 
 **Notes 10 and 11 are resolved, and kept as history (#56).** They were never
 behaviours of the server. They were disagreements between the server and the
@@ -178,6 +188,27 @@ is *detectable*: `tests/test_correctness.py` asserts that ratio, and
 `test_ea04_shape_is_not_a_cartesian_product` pins the behaviour on a
 purpose-built 4-deployment fixture.
 
+**Two queries re-bind in trailing position deliberately, and both are
+measured.** `EA17` (#35) is five `OPTIONAL MATCH` legs that each re-bind a
+variable the opening `MATCH` already bound. That is this shape, and there is no
+other way to express "reachable from some *other* sensor" -- it is note 5's
+anti-join, which needs the re-bind. `EA18` (#37) re-binds `a` in trailing
+position for a different reason, which note 13 gives: carrying the alias into
+an `OPTIONAL MATCH`'s `WHERE` turns it into an inner join. Neither is taken on
+trust, and each has its own check (both measured on **embedded 1.7.1**):
+`test_ea17_matches_ground_truth_at_full_scale` compares every sensor, both
+counts and the depth, against a Python breadth-first search at `--scale 1.0`,
+where this note's failure appears if it appears -- 0 disagreements. `EA18`'s is
+`tests/test_latency_budget.py::test_ea18_matches_ground_truth_at_full_scale_with_an_injected_breach`,
+which has to inject a breach first, because the shipped fleet has none.
+
+**That test is opt-in.** It is gated on `--full-scale`, so a default `pytest`
+run does not execute it -- loading a scale-1.0 fleet takes minutes. A green
+default run is therefore *not* evidence about this note; `pytest --full-scale`
+is. Re-run it after any edit to `EA17`'s patterns, because a small graph cannot
+settle this and the failure is silent in the direction that looks like the
+finding.
+
 ---
 
 ## 2. `RETURN DISTINCT` is a no-op
@@ -242,6 +273,30 @@ pass establishes the alias.
 unsorted within each group. Multi-key sorts are therefore avoided entirely;
 `tests/test_correctness.py::test_order_by_is_actually_applied` asserts every
 catalog query uses a single sort key *and* that the result really is sorted.
+
+### 3c. `ORDER BY` after `UNION ALL` is dropped
+
+Measured on **embedded 1.7.1** while writing `EA17` (#35).
+
+Measured 2026-09-09 while writing `EA17` (#35), which is five legs joined
+by `UNION ALL`.
+Appending `ORDER BY affected DESC` to the whole statement returned the rows in
+leg order -- `16, 60, 1440, 120, 4` -- unchanged and unsorted. No error.
+
+Same family as note 3 and the same severity: with `LIMIT` it would be an
+arbitrary N dressed as a top-N. `test_order_by_is_actually_applied` cannot
+assert this note -- `EA17` deliberately carries no `ORDER BY`, so there is no
+sort to check applied. What the allowlist does is narrower than "covered", and
+worth stating exactly: an unsorted query must name itself in that test's
+`NO_ORDER_BY` with its reason, so a query that *loses* its `ORDER BY` fails
+rather than quietly leaving the sweep. **Nothing tests this note itself** --
+that would need a `UNION ALL` with an `ORDER BY` the catalog deliberately does
+not contain, and the reproduction above is the only evidence for it.
+
+**Workaround used here:** `EA17` carries no `ORDER BY` at all, and returns five
+rows keyed by `kind` so there is nothing an order would tell you. A `UNION`
+result that genuinely needs sorting has no known workaround on this build --
+sort it in the caller.
 
 ---
 
@@ -479,6 +534,23 @@ day the bug is fixed.
 The third failing test, `test_ea04_quantization_unlock_is_not_a_cartesian_product`,
 was **not** this note — EA04 has a single `WITH`. See note 11.
 
+**`EA18` (#37) chains three `WITH`s, the second and third introducing all-new
+aliases, and runs embedded without raising.** That is this note's shape, and on
+`samyama` 1.7.1 it does not raise: `tests/test_latency_budget.py` passes
+embedded, returning rows on a fixture and zero on the fleet.
+
+That is a statement about `EA18` on 1.7.1, not a verdict on the note itself.
+The note was written against 0.6.1, and #56 settled the wider question: the
+split was version skew, the floor is now `samyama>=1.7.1`, and
+`tests/test_empty_answers.py::test_ea01_zero_row_case` is live and passing
+rather than `xfail(strict=True)`.
+
+**Nothing here stays binding.** The server was the build that answered this
+shape *correctly*, so there is no server path to keep working around -- what
+is unmeasured is 1.7.0 **embedded**, which nobody has run, and that matters
+only to someone pinning an engine below the floor. Recorded so the next reader
+does not conclude `EA18` is untested against the note.
+
 ---
 
 ## 11. `samyama` 0.6.1 typed `sum(CASE ... THEN <int> ... END)` as float, so a `WHERE` on it was dropped
@@ -576,6 +648,202 @@ never needed. The distinction was the useful part: *fix deferred* and *no fix
 known* are different states, and recording which one this was is what let #56
 weigh "rewrite the query" against "reconcile the builds" instead of assuming the
 query had to change.
+
+---
+
+## 12. The 1.7.0 server does not traverse variable-length relationships; embedded 1.7.1 does
+
+> **Read the heading with notes 10 and 11 in mind.** Those two looked like the
+> embedded build disagreeing with the server and turned out to be one pip
+> version against another. This note is the same *shape* of observation --
+> 1.7.0 server against 1.7.1 embedded -- and the same caution applies: what is
+> measured is that these two builds differ, not that the HTTP path is where
+> the defect lives. Nobody has run 1.7.0 embedded or 1.7.1 over HTTP, and
+> until someone does, "the server does not traverse" is shorthand for "the
+> 1.7.0 build we have does not".
+
+> Not filed upstream yet. Found 2026-09-10 while adding `EA17` (#35). Like
+> notes 10 and 11 this is a build disagreement rather than a behaviour of one
+> engine -- but unlike them it is the **server** that is wrong. **Silent for
+> `EA07`'s shape** -- a bounded walk returns the zero-length match and no
+> error -- and **loud for `EA17`'s**, where `size(r)` raises a type error. The
+> silent half is the dangerous one; the loud half is why `EA17` is
+> embedded-only.
+>
+> **Version labels, because this file carries two vintages.** Notes 1-9 are
+> the **1.7.0 server**; notes 10 and 11 compare it against `samyama` **0.6.1**
+> embedded, which is what `pyproject.toml` resolved when they were written;
+> notes 12, 13 and 13b are the 1.7.1 vintage. (The "Versions these describe"
+> paragraph at the top of this file is the same split, stated once.) This
+> note was measured against **1.7.1** embedded -- the floor written in #105,
+> reaching `main` inside #104. So the
+> comparison below is 1.7.0 server against 1.7.1 embedded, and
+> the conclusion "the server is the one that is wrong" is really "the server at
+> 1.7.0 does not do what the embedded build at 1.7.1 does". Whether 1.7.0
+> *embedded* traverses has not been measured; there is no reason to think the
+> defect is HTTP-specific rather than a fix that landed between the two.
+
+**Severity: correctness. Returns fewer rows rather than erroring.**
+
+A four-node chain `a -> b -> c -> d`, loaded identically into both builds, then
+`MATCH (a:P)-[:R<pattern>]->(b:P) WHERE a.id = "a" RETURN b.id`:
+
+| pattern | server 1.7.0 | embedded 1.7.1 |
+|---|---|---|
+| `*0..` | `['a']` | `['a', 'b', 'c', 'd']` |
+| `*0..3` | `['a']` | `['a', 'b', 'c', 'd']` |
+| `*1..3` | `[]` | `['b', 'c', 'd']` |
+| `*` | `[]` | `['b', 'c', 'd']` |
+| `*0..1` | `['a']` | `['a', 'b']` |
+| `*2..2` | `[]` | `['c']` |
+
+**The server matches the zero-length case and nothing else**, for every form,
+bounded or not. It does not error; it returns a smaller answer.
+
+`size(r)` on a variable-length relationship is a second, louder symptom on the
+same build: `Type error: size() requires string, list, or path`. `length(p)`
+and `size(relationships(p))` parse there, and then report the zero-length
+result, which is worse.
+
+**What it costs the catalog, measured rather than reasoned.** `EA07` and
+`EA17` are the two queries with a variable-length pattern. `EA17` raises. **For
+`EA07` the two builds return byte-identical rows** -- checked on one scale-1.0
+graph loaded into both, comparing row content and not row counts.
+
+That is not what this note predicts, and the prediction is what was wrong. An
+earlier draft here said `EA07` "silently drops everything deeper", reasoned from
+the table above and not measured. `EA07` ends `ORDER BY latency_ms ASC LIMIT
+10`, and the ten lowest-latency paths are reachable at zero hops on this graph,
+so the smaller candidate set produces the same answer. That is luck, not
+robustness: it holds for this data and this `LIMIT`, and nothing enforces it.
+
+**No workaround.** There is no way to express "walk a chain of unknown length"
+that the 1.7.0 server executes. The options are an engine that does it
+(embedded 1.7.1 does), or not asking the question over HTTP.
+
+**`EA17` therefore needs the `samyama>=1.7.1` floor** (#105, reaching `main`
+inside #104) -- for
+this note, and because its per-leg second `WITH` introduces new aliases, which
+is note 10's shape and 0.6.1 rejects. The floor no longer admits a build on
+which `EA17` fails outright.
+
+`tests/test_engine_version.py` protects the *floor*, not this note: it checks
+the declared floor in `pyproject.toml`, checks the engine actually imported is
+at least that, and re-runs **note 11's** reproduction. Nothing there re-runs
+`EA17`'s traversal, so a build that regressed note 12 while keeping the version
+number would pass it. What would catch that is running `EA17` over `--url`
+against such a build, which nothing in the suite does.
+
+---
+
+## 13. A `WITH` alias in an `OPTIONAL MATCH`'s `WHERE` turns it into an inner join
+
+Measured 2026-09-15 while writing `EA18` (#37). **Silently returns wrong rows.**
+
+An `OPTIONAL MATCH` whose `WHERE` compares against a **literal** behaves
+correctly: rows with no match survive with `NULL`, and `count()` over them is 0.
+An `OPTIONAL MATCH` whose `WHERE` mentions an alias introduced by an earlier
+`WITH` drops the unmatched rows instead. The `OPTIONAL` is gone. No error.
+
+```cypher
+// two operators; only `op:c` has a kernel
+MATCH (op:Operator)
+OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op)
+WHERE k.name = "Relu-npu"                 // literal
+WITH op.id AS o, count(k) AS n RETURN o, n
+// -> [("op:a", 0), ("op:c", 1)]          correct
+
+// one Kernel in this fixture, so `want` is a single row
+MATCH (x:Kernel) WITH x.name AS want
+MATCH (op:Operator)
+OPTIONAL MATCH (k:Kernel)-[:IMPLEMENTS]->(op)
+WHERE k.name = want                       // the only change
+WITH op.id AS o, count(k) AS n RETURN o, n
+// -> [("op:c", 1)]                       `op:a` is gone
+```
+
+The single `Kernel` is deliberate: with more, that first `MATCH` yields one row
+per kernel and the result multiplies, which obscures the drop rather than
+changing it. The constant-alias form below shows the same thing with nothing to
+multiply.
+
+The trigger is an alias introduced by a **`WITH`**, and not what it holds:
+carrying a plain constant through one (`WITH op, "accel:npu" AS accel_id`) and
+comparing against that reproduces it exactly. The pattern shape does not matter
+-- single-pattern and comma-separated `OPTIONAL MATCH` both do it.
+
+**A `MATCH`-bound alias is safe**, which is a narrower rule than "anything that
+is not a literal" and had to be measured rather than assumed:
+
+```cypher
+MATCH (t:T)-[:R]->(s:S) WHERE s.id = "s:1"
+OPTIONAL MATCH (t)-[:R]->(o:O)
+WHERE o.modality = s.modality        // `s` comes from the MATCH
+WITH t.id AS task, count(o) AS alts RETURN task, alts
+// -> [("t:1", 0), ("t:2", 1)]        correct
+
+MATCH (t:T)-[:R]->(s:S) WHERE s.id = "s:1"
+WITH t, s.modality AS mine           // the same value, through a WITH
+OPTIONAL MATCH (t)-[:R]->(o:O)
+WHERE o.modality = mine
+WITH t.id AS task, count(o) AS alts RETURN task, alts
+// -> [("t:2", 1)]                    `t:1` is gone
+```
+
+That matters for the catalog: `EA17`'s `ClinicalTask` leg filters
+`o.modality = s.modality` inside an `OPTIONAL MATCH`, with `s` bound by the
+opening `MATCH`. It is the first form, so it is correct -- and it is the reason
+the rule has to be stated as "a `WITH` alias" rather than "a non-literal".
+
+**Why this is the dangerous kind.** The whole point of the shape is the
+anti-join: `OPTIONAL MATCH ... WITH count(k) AS n ... WHERE n = 0`, which note 5
+forces on us because negated patterns do not parse. The rows this drops are
+exactly the rows with no match -- the answer. A "what is missing" query comes
+back saying nothing is missing, which is a plausible, reassuring, wrong answer.
+
+**Workaround used here:** none is needed in the catalog. Its anti-joins compare
+against a literal or against a `MATCH`-bound alias, and neither triggers this.
+Where a `WITH` alias is genuinely required, collect and filter after the
+aggregation, which is correct on this build:
+
+```cypher
+WITH op.id AS o, want, collect(k.name) AS names
+WITH o, [n IN names WHERE n = want] AS hit
+RETURN o, size(hit)
+// -> [("op:a", 0), ("op:c", 1)]          correct
+```
+
+**This is why `EA18` re-binds `a` in trailing position** rather than carrying
+`a.id` through a `WITH` and filtering on it. The second spelling is the one note
+1 would prefer, and it is unavailable: it silently drops every deployment whose
+operators are uncovered, which is the entire answer. Measured both ways on the
+same fixture -- the trailing re-bind returns the two uncovered operators, the
+`WITH`-alias form returns the deployment as though nothing were uncovered.
+
+---
+
+### 13b. A grouping key mixed with an aggregate in one projection is NULL
+
+Same session, same query. Also silent.
+
+```cypher
+MATCH (n:N) WITH n.v AS v, min(n.v) AS lo, n.v - min(n.v) AS diff RETURN v, lo, diff
+// -> [[250.0, 250.0, NULL], [90.0, 90.0, NULL]]      the arithmetic is gone
+
+MATCH (n:N) WITH n.v AS v, min(n.v) AS lo WITH v, lo, v - lo AS diff RETURN v, lo, diff
+// -> [[250.0, 250.0, 0.0], [90.0, 90.0, 0.0]]        correct
+```
+
+Aggregate-minus-aggregate in one projection is fine
+(`max(n.v) - min(n.v)` returns 160.0). It is specifically a **grouping key**
+referenced in the same projection as an aggregate over the group.
+
+**Severity is lower than 13's** -- a NULL column is visible, where a dropped row
+is not. But `ORDER BY` on that column then sorts on nothing, and with `LIMIT`
+that is note 3's failure again: an arbitrary N dressed as a top-N.
+
+**Workaround used here:** compute it one `WITH` later, which is what `EA18`
+does for `over_by_ms`.
 
 ---
 

@@ -23,6 +23,7 @@ stale the moment the takeable half moved.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -127,35 +128,67 @@ def test_the_decision_document_exists():
     )
 
 
-def test_the_pending_claim_about_ea17_matches_the_catalog():
-    """The doc says `#35` is not delivered and that a test pins it. This is it.
+def test_the_delivery_claims_match_the_catalog():
+    """Every ``delivered as `EAnn` `` on the page, checked against `BY_ID`.
 
-    Without this the sentence is unenforced -- and the page asserts enforcement,
-    which is worse than silence. If #96 merges, `EA17` joins the catalog and
-    "the catalog is `EA01`-`EA16`" becomes false with the suite green; if #96 is
-    abandoned, the sentence stays correct and this keeps passing.
+    The previous version keyed on one exact phrase -- "not** delivered on
+    `main`" -- so any other wording of "pending" walked past it, and the page
+    could claim a delivery the catalog did not have. This derives both
+    directions from the catalog instead:
 
-    Keyed on the catalog rather than on the PR's state, because the catalog is
-    what the sentence actually claims and is the thing this repo can see.
+    - every id the page says is delivered must be in `BY_ID`;
+    - the range the page states ("the catalog is `EA01`-`EAnn`") must be the
+      catalog's actual last id;
+    - and an issue whose query exists while the page carries no "delivered as"
+      claim for it fails. That is the absence of a claim, not the presence of
+      the word "pending" -- any other wording fails identically, because what
+      is compared is the set of claimed ids against the catalog.
     """
     from benchmarks.queries import BY_ID
 
     text = DOC.read_text(encoding="utf-8")
-    claims_pending = "not** delivered on `main`" in text
-    delivered = "EA17" in BY_ID
 
-    if delivered and claims_pending:
-        raise AssertionError(
-            "`EA17` is in the catalog, so #96 has landed, but "
-            "docs/alerting-scope.md still says `#35` is not delivered and the "
-            "catalog is EA01-EA16. Update the sentence and the verdict table."
-        )
-    if not delivered and not claims_pending:
-        raise AssertionError(
-            "`EA17` is not in the catalog, but docs/alerting-scope.md no longer "
-            "says `#35` is pending. Either the sentence was removed too early "
-            "or the query was reverted."
-        )
+    claimed = set(re.findall(r"delivered as `(EA\d\d)`", text))
+    assert claimed, (
+        "no `delivered as `EAnn`` claim on the page at all. The verdict table "
+        "is what this test reads; if its shape changed, update this test.")
+    missing = sorted(qid for qid in claimed if qid not in BY_ID)
+    assert not missing, (
+        f"docs/alerting-scope.md says {missing} are delivered, and the catalog "
+        f"does not hold them. Either the queries were reverted or the page is "
+        f"claiming work that has not landed.")
+
+    stated = re.search(r"the catalog is\s+`EA01`-`(EA\d\d)`", text, re.IGNORECASE)
+    assert stated, (
+        "the page no longer states the catalog range as `EA01`-`EAnn`; that "
+        "sentence is what this test pins, so update both together.")
+    # By number, not lexicographically: `max()` over strings ranks "EA9"
+    # above "EA10", and the catalog will pass EA99 eventually.
+    last = max(BY_ID, key=lambda qid: int(qid[2:]))
+    assert stated.group(1) == last, (
+        f"the page says the catalog is `EA01`-`{stated.group(1)}`; the catalog "
+        f"ends at `{last}`. A reader trusts that range to know what exists.")
+
+    # Derived from the verdict table rather than a hardcoded triple, and
+    # scoped to it: the prose names `EA01` and `EA07` as examples, which are
+    # not this page's to deliver. A table row is `| #nn | ... | verdict |`, so
+    # a row marked **take** that names a query must also say it was delivered
+    # -- the drift being a shipped query whose row still reads as work not yet
+    # done. Listing the ids here by hand would mean editing this test every
+    # time the alerting theme grows.
+    rows = [line for line in text.splitlines() if line.startswith("| #")]
+    assert rows, (
+        "no verdict table rows found; the table is what this test reads, so "
+        "if its shape changed, update this test with it.")
+    in_table = {qid for row in rows for qid in re.findall(r"`(EA\d\d)`", row)}
+    assert in_table, (
+        "the verdict table names no catalog query at all; if the delivery "
+        "claims moved out of it, this test is pinning nothing.")
+    unclaimed = sorted(qid for qid in in_table if qid in BY_ID and qid not in claimed)
+    assert not unclaimed, (
+        f"{unclaimed} are named in the verdict table and exist in the catalog, "
+        f"but carry no `delivered as` claim. Either add the claim, or say why "
+        f"the query exists while the verdict reads otherwise.")
 
 
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):

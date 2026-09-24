@@ -9,9 +9,9 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue" alt="License"></a>
 
-![Edge AI KG — 16 questions answered](demo/edgeai-questions.gif)
+![Edge AI KG — the catalog questions answered](demo/edgeai-questions.gif)
 
-*All 16 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The last four run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+*16 of the 19 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (issue #35, PR #96), `EA18` (#37) and `EA19` (#40), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
 *Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
@@ -126,13 +126,13 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 8 of the 16 catalog queries return rows**, 8 come
+**Against the HTTP server, 6 of the 19 catalog queries return rows**, 13 come
 back empty, none error:
 
 | | Queries |
 |---|---|
-| Return rows | `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` |
-| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA11` |
+| Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
+| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19` |
 
 **The embedded build still answers three of them differently** on the same
 data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
@@ -155,6 +155,63 @@ someone could avoid.
 before the upgrade too. Note 10 made them raise on the old embedded build, but
 only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
 yields nothing, so the failing clause was never reached.
+
+`EA18` and `EA19` are the two entries here **not** from the server run, which
+predates both. Their place in the table is **measured embedded**, against the
+real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
+query and compares the result to this table. **Over HTTP it is expected, not
+measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
+`Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
+`EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
+build. The distinction between measured and expected is kept rather than
+smoothed over, because on this page it has mattered before.
+
+**"Identical" is a claim about this table, not about the two builds.** On the
+**full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
+comparing row *content*: row counts match for 16 of the 17 in the catalog on
+that date (`EA17` raises on the server, see below; `EA18` and `EA19` were added
+afterwards and are not in this run), and **seven queries return the same number
+of different rows** — `EA01`, `EA02`, `EA08`, `EA09`, `EA10`, `EA11`, `EA13`.
+Every one is a tie under `ORDER BY … LIMIT`, where an arbitrary N of many
+equal-ranked rows comes back, except `EA10`, which differs in the sixteenth
+significant digit of a float. Those are not different answers, but they are not
+"no disagreements" either, and comparing lengths would have hidden all seven.
+
+**The engine-notes section below describes an older build, not a contradiction
+of this one.** Notes 10 and 11 were measured on `samyama` 0.6.1, where `EA01`,
+`EA02` and `EA04` were wrong under `pytest` and carried `xfail`s. The
+comparison above was run at 1.7.1, where neither note reproduces and the marks
+are gone — #56's finding being that the "embedded versus server" disagreement
+was version skew (0.6.1 against a 1.7.0 server) rather than a difference
+between the two builds.
+
+`pyproject.toml` declares `samyama>=1.7.1` since #104, so the build these
+pages describe is the build you get.
+
+`EA17` is empty here because the real layer has no `Sensor` — the clinical spine
+is entirely generated.
+
+**That is why "none error" above is true and still consistent with engine note
+12**, which says `EA17` raises on the 1.7.0 server. It raises only when there is
+something to traverse: with no `Sensor` nodes the opening `MATCH` binds nothing,
+`size(r)` is never evaluated, and the query returns empty. Measured on the
+server with `--layers real`: 0 rows, no error. On the **full** graph it raises,
+and is the one catalog query that cannot be asked over HTTP.
+
+`EA07` walks the same `NEXT_STAGE` chain with a fixed bound, `*0..3`, and the
+bound does not exempt it: note 12 measured the server matching only the
+zero-length case for **every** form, bounded or not. It does not raise, because
+`EA07` never calls `size(r)` — that type error is what makes `EA17` fail loudly.
+Measured on a scale-1.0 graph loaded into both builds, `EA07` returns
+byte-identical rows, because its `ORDER BY latency_ms ASC LIMIT 10` is
+satisfied by paths at zero hops. That is luck rather than robustness; note 12
+says so. Separately, the bound costs completeness on the embedded build — the
+longest chain at scale 1.0 is 13 hops — which is written down on `EA07` in
+[`benchmarks/queries.py`](benchmarks/queries.py) and pinned by
+`tests/test_blast_radius_semantics.py`.
+
+(On the real layer, which this section is about, `EA07` is simply empty like
+most of the catalog — there are no `Sensor` nodes for it to start from.)
 
 **The hero question is one of the empty ones.** It walks
 `Model -[:USES_OPERATOR]-> Operator`, and the real layer has no `USES_OPERATOR`
@@ -284,9 +341,12 @@ Two things worth knowing before you quote the number:
   76,303 a fresh build produces. It was exported from a slightly earlier build,
   and `data/` is not pinned (see `docs/build-manifest.json`).
 
-All 16 catalog queries were verified to return rows against the imported
-snapshot, not just against a freshly-loaded graph — re-check with
-`--verify-queries` below.
+16 of the 17 catalog queries then present were verified to return rows against
+the imported snapshot, not just against a freshly-loaded graph — re-check with
+`--verify-queries` below. `EA18` and `EA19` postdate that run. The exception is
+`EA17`, which needs an engine that walks variable-length paths; the 1.7.0 server
+does not (engine note 12), and it raises there rather than quietly answering one
+hop deep.
 
 Reproduce, including the export side (0.63 s, 989 KB):
 
@@ -309,10 +369,45 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 ## The query catalog
 
-16 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
-the question it answers and why it's awkward without a graph. All 16 return
-rows; median 14 ms, slowest 73 ms. **EA13–EA16 run entirely on real data**, so
-their answers can be checked against the upstream sources.
+19 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
+the question it answers and why it's awkward without a graph. On the
+**embedded** build, 18 of the 19 return rows against the **full** graph at
+`--scale 1.0`. The timings — median 5.8 ms, slowest `EA17` at 95 ms — are from
+the sweep of the **17** queries that existed when it was run; `EA18` and `EA19`
+post-date it and are not in that median.
+
+**Over HTTP, that is one fewer — 17 — and it is an inference, not a sweep.**
+`EA17` raises on the 1.7.0 server, which *is* measured (engine note 12); the
+count is that measurement subtracted from the embedded result. No full-graph
+HTTP sweep has been run since `EA18` and `EA19` were added. The only recorded
+HTTP run is over the **real layer**, in the section above.
+
+The other one is `EA18`, which asks which deployments miss a clinical task's
+latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs
+are inside budget, the worst at 54.5% of it — that is a property of the data
+rather than of the engine, so it holds wherever the query runs. The empty result
+is the answer rather than a gap, and `tests/test_latency_budget.py` pins both
+the zero and the reason for it.
+
+(Re-measured at 1.7.1 over 17 queries with
+`python -m benchmarks.run_benchmark`; the previous 14 ms / 73 ms pair was 16
+queries at 0.6.1 and is not comparable — the engine moved and so did the
+catalog. `EA18` and `EA19` postdate that run. Timed separately on 2026-09-21,
+embedded 1.7.1 at `--scale 1.0`, median of five after one warm-up: `EA18` 37.5
+ms (36.9 ms when first recorded), above the median and well under `EA17`, and
+`EA19` 0.1 ms. These figures are hand-recorded and **not pinned by a test**,
+unlike the node and edge counts on this page, which
+`tests/test_published_counts.py` checks: they are machine-dependent, so the
+command is the thing to trust, not the numbers. Expect them to drift.)
+
+Against `--layers real` only 6 return rows. Which six is
+[tabulated under Data](#data-whats-real-whats-synthetic) — that table is the
+**server** run, and this paragraph's timings are embedded, so it is the
+partition being shared between them and not the measurement. The cause is the
+same either way: that subgraph has no clinical spine. **EA13–EA16 run entirely on real data**, so
+their answers can be checked against the upstream sources; **EA17 needs an
+engine that walks variable-length paths**, which the 1.7.0 server does not
+(engine note 12).
 
 | id | Question |
 |---|---|
@@ -332,6 +427,9 @@ their answers can be checked against the upstream sources.
 | **EA14** | **REAL:** MLPerf Tiny v1.2 throughput leaders per benchmark task |
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
+| **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
+| **EA18** | **EMPTY ON THIS FLEET:** which deployments miss a clinical task's latency budget, and which operators have no kernel on their accelerator? |
+| **EA19** | **COMPLIANCE:** this sensor fails — which certifications does that touch, through the tasks that require it? |
 
 ## Engine notes
 
@@ -350,11 +448,47 @@ two that **silently return wrong rows** rather than erroring:
 
 All nine are filed upstream — tracking issue [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-Two more were recorded but **not** filed, because they were not behaviours of
-the server: the embedded build and the HTTP server disagreed about a second
-`WITH` that introduces a new alias ([note 10](docs/engine-notes.md)), and about
-the type `sum(CASE ...)` returns, which silently drops a `WHERE` on it
-([note 11](docs/engine-notes.md)).
+**Notes 10 to 13b are recorded but not filed**, for two different reasons.
+Notes 10 and 11 were **version skew** — `samyama` 0.6.1 against a 1.7.0 server,
+not a defect in either — which is what #56 settled, so there is nothing to
+file. Notes 12, 13 and 13b *are* engine behaviours: note 12 is a capability the
+1.7.0 OSS server lacks and the embedded 1.7.1 build has, which reads as a
+version gap rather than a defect, and notes 13 and 13b were found on embedded
+1.7.1 while writing `EA18` and are not yet filed.
+
+- `samyama` 0.6.1 did not register a second `WITH` that introduces a new
+  alias, where the 1.7.0 server did ([note 10](docs/engine-notes.md)); it does
+  not reproduce on the `>=1.7.1` floor;
+- the same for the type `sum(CASE ...)` returns, which silently dropped a
+  `WHERE` on it ([note 11](docs/engine-notes.md));
+- the 1.7.0 **server** does not traverse a variable-length relationship,
+  bounded or not — it matches only the zero-length case, silently — and it
+  *rejects* `size(r)` over one, where the embedded 1.7.1 build walks it
+  ([note 12](docs/engine-notes.md)). `EA17` asks for `size(r)`, so it **raises**
+  on the server and is embedded-only; `EA07` walks a bounded `*0..3` without
+  `size(r)`, and note 12 measured both builds returning byte-identical rows for
+  it — true of this graph and this `LIMIT`, not enforced. `EA17` needs the
+  `samyama>=1.7.1` floor (written in #105, reaching `main` inside #104);
+- an `OPTIONAL MATCH` whose `WHERE` mentions a `WITH`-introduced alias drops
+  the unmatched rows, turning it into an inner join
+  ([note 13](docs/engine-notes.md)), and an expression mixing a grouping key
+  with an aggregate in one projection returns `NULL`
+  ([note 13b](docs/engine-notes.md)) — both measured on embedded 1.7.1 while
+  writing `EA18`.
+
+Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
+raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
+workaround either, and one is not possible: there is no way to write "walk a
+chain of unknown length" that the 1.7.0 server executes, so `EA17` is
+embedded-only rather than reshaped.
+
+`EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
+four test functions, six reported outcomes, since two of them are parametrised
+sweeps, and they span two modules -- `tests/test_correctness.py` and
+`tests/test_empty_answers.py`. Those marks were written against `samyama`
+0.6.1. **#105 raised the floor to 1.7.1 and removed them** (reaching `main`
+inside #104), and the three queries now pass unmarked under `pytest` and under
+`run_benchmark`.
 
 **Both are resolved (#56).** There was nothing to file: the cause was version
 skew, not a design difference. `pyproject.toml` asked for `samyama>=0.6.0`
@@ -395,7 +529,7 @@ returns plausible rows is not evidence that it is right.
 etl/          onnx_catalog.py, ort_kernels.py, mlperf_tiny.py, real_layer.py (real)
               generate.py (synthetic) + loader.py
 schema/       edge_ai_kg.cypher — indexes and documented relationship shapes
-benchmarks/   the 16-query catalog + runner
+benchmarks/   the 19-query catalog + runner
 mcp_server/   7 MCP tools shaped around deployment questions
 demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording
