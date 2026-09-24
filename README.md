@@ -141,16 +141,16 @@ query and compares the result to this table. **Over HTTP it is expected, not
 measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
 `Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
 `EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
-build. This section already records that an earlier claim here did not survive
-re-measurement, so the distinction is kept rather than smoothed over.
+build. The distinction between measured and expected is kept rather than
+smoothed over, because on this page it has mattered before.
 
 Re-measured 2026-09-09, server 1.7.0 against embedded 1.7.1 over the same real
 layer: the partition above is identical on both, for the seventeen queries that
 existed then — `EA18` and `EA19` are covered by the embedded check only. `EA10`
-and `EA12` are empty on *both* — they lost their rows to an upstream ONNX
-Runtime refresh, not to a build difference, which an earlier version of this
-section reported as a divergence by comparing a fresh embedded run against a
-recorded server figure.
+and `EA12` are empty on *both*: they lost their rows to an upstream ONNX
+Runtime refresh, not to a build difference. Reading that as a divergence is
+what comparing a fresh embedded run against a recorded server figure produces,
+and it is the trap this paragraph exists to mark.
 
 **"Identical" is a claim about this table, not about the two builds.** On the
 **full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
@@ -348,9 +348,16 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 19 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. On the
-**embedded** build, 18 of the 19 return rows against the **full** graph —
-median 5.8 ms, slowest `EA17` at 95 ms, at `--scale 1.0`. Over HTTP it is 17:
-`EA17` raises on the 1.7.0 server (engine note 12).
+**embedded** build, 18 of the 19 return rows against the **full** graph at
+`--scale 1.0`. The timings — median 5.8 ms, slowest `EA17` at 95 ms — are from
+the sweep of the **17** queries that existed when it was run; `EA18` and `EA19`
+post-date it and are not in that median.
+
+**Over HTTP, that is one fewer — 17 — and it is an inference, not a sweep.**
+`EA17` raises on the 1.7.0 server, which *is* measured (engine note 12); the
+count is that measurement subtracted from the embedded result. No full-graph
+HTTP sweep has been run since `EA18` and `EA19` were added. The only recorded
+HTTP run is over the **real layer**, in the section above.
 
 The other one is `EA18`, which asks which deployments miss a clinical task's
 latency budget: **none do**, on either build. All 1,440 (deployment, task) pairs
@@ -418,18 +425,17 @@ two that **silently return wrong rows** rather than erroring:
 
 All nine are filed upstream — tracking issue [samyama-graph#368](https://github.com/samyama-ai/samyama-graph/issues/368).
 
-**Three more are recorded but not filed.** Notes 10 and 11 are disagreements
-between the embedded build and the server rather than behaviours of either, so
-there is no server bug to file. Note 12 *is* a server behaviour — the reason it
-is unfiled is different: it is a missing capability on the 1.7.0 OSS build that
-the newer embedded engine has, so it reads as a version gap rather than a
-defect. Grouping the three under "not behaviours of the server" was wrong about
-note 12.
+**Notes 10 to 13b are recorded but not filed**, for two different reasons.
+Notes 10 and 11 were **version skew** — `samyama` 0.6.1 against a 1.7.0 server,
+not a defect in either — which is what #56 settled, so there is nothing to
+file. Notes 12, 13 and 13b *are* engine behaviours: note 12 is a capability the
+1.7.0 OSS server lacks and the embedded 1.7.1 build has, which reads as a
+version gap rather than a defect, and notes 13 and 13b were found on embedded
+1.7.1 while writing `EA18` and are not yet filed.
 
 - `samyama` 0.6.1 did not register a second `WITH` that introduces a new
-  alias, where the 1.7.0 server did ([note 10](docs/engine-notes.md)) — version
-  skew rather than a difference between the two builds, which is what #56
-  settled, and it does not reproduce on the `>=1.7.1` floor;
+  alias, where the 1.7.0 server did ([note 10](docs/engine-notes.md)); it does
+  not reproduce on the `>=1.7.1` floor;
 - the same for the type `sum(CASE ...)` returns, which silently dropped a
   `WHERE` on it ([note 11](docs/engine-notes.md));
 - the 1.7.0 **server** does not traverse a variable-length relationship,
@@ -446,9 +452,9 @@ embedded-only rather than reshaped.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised
-sweeps. Those marks were written against `samyama` 0.6.1. **#104 raised the
-floor to 1.7.1 and removed them**, and the three queries now pass unmarked
-under `pytest` and under `run_benchmark`. #109 rewrites the notes themselves.
+sweeps. Those marks were written against `samyama` 0.6.1. **#105 raised the floor to
+1.7.1 and removed them, reaching `main` with #104**, and the three queries now
+pass unmarked under `pytest` and under `run_benchmark`.
 
 Each is documented with a minimal reproduction and the workaround used in
 [`docs/engine-notes.md`](docs/engine-notes.md). Because of these,

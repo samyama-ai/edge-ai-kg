@@ -11,8 +11,9 @@ excused there, both named in that module's `EMPTY_IS_A_VALID_ANSWER` with the
 test that pins each zero: `EA04`, whose combination may legitimately not occur
 at the fixture's scale, and `EA18`, which is empty because no deployment in
 this fleet misses a latency budget. `EA01` and `EA02` used to be excused too,
-under a non-strict `xfail` for engine note 10; #104 raised the engine floor to
-1.7.1, the note stopped reproducing, and those marks are gone.
+under a non-strict `xfail` for engine note 10; #105 raised the engine floor to
+1.7.1 and removed them (reaching `main` with #104), and the note stopped
+reproducing.
 
 The alerting queries keep their zero-and-one-row pairs beside their other
 fixtures rather than here: `EA18` in `tests/test_latency_budget.py` (over budget

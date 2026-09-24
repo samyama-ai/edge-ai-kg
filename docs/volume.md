@@ -77,7 +77,7 @@ where at scale 1.0 the two were identical. This is a trajectory rather than a
 problem today; extrapolating the same exponent to 100x puts `EA11` in minutes
 while `EA08` stays in seconds.
 
-### `EA17` is the new most expensive query, and it grows faster than `EA11`
+### `EA17` is the most expensive query in this table, and grows faster than `EA11`
 
 Added with `EA17` (issue #35, PR #96) and measured separately, because the run
 above predates it. Same machine, **embedded**, schema applied, catalog warmed,
@@ -105,7 +105,7 @@ them.
 | query | 1.0 | 2.0 | growth |
 |---|---:|---:|---|
 | `EA17` | **95 ms** | **431 ms** | **×4.5 — superlinear** |
-| `EA11` | 33 ms | 98 ms | ×2.9 — superlinear |
+| `EA11` | 33 ms | 98 ms | ×3.0 — superlinear |
 | `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
 | catalog total (the 17 queries that existed then, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear |
 
@@ -123,8 +123,10 @@ comparison in #47. Both tables above are indexed.
 one whose cost grows faster than `EA11`. `EA18` and `EA19` were added after
 this sweep and are not in it; both are cheap on the shipped fleet (`EA18`
 returns no rows at all, `EA19` six), but neither has been run at 2.0, so
-"slowest in the catalog" is a claim this page cannot make about them. The shape explains it: **four of its five legs**
-carry an unbounded `*0..` in the main pattern *and* another inside an
+"slowest in the catalog" is a claim this page cannot make about them.
+
+**`EA17`'s shape is the candidate explanation** for its growth: **four of its
+five legs** carry an unbounded `*0..` in the main pattern *and* another inside an
 `OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
 has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
 `etl/generate.py` samples each sensor's chain from one shared pool in random
