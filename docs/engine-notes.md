@@ -572,7 +572,11 @@ reading #56 should not re-derive `toFloat()` from scratch. See the mark on
 > `EA07`'s shape** -- a bounded walk returns the zero-length match and no
 > error -- and **loud for `EA17`'s**, where `size(r)` raises a type error. The
 > silent half is the dangerous one; the loud half is why `EA17` is
-> embedded-only.
+> embedded-only. **`EA21` (#36) joins it**: it walks `NEXT_STAGE*0..` to rank
+> alerts by reachability, so the server returns only the zero-length match and
+> the ranking collapses to zeros. `tests/test_correctness.py`'s
+> `EMBEDDED_ONLY` is derived from the Cypher and is what keeps this sentence
+> and the two pages that repeat it honest.
 >
 > **Version labels, because this file carries two vintages.** Notes 1-9 are
 > the **1.7.0 server**; notes 10 and 11 compare it against `samyama` **0.6.1**

@@ -238,6 +238,12 @@ def truth_for(fleet, alert_ids) -> list[tuple[str, int]]:
                     queue.append(nxt)
         return seen
 
+    # Deduplicated first, because the query does and this does not: `IN` over
+    # a list with a repeat matches the sensor once, so a caller passing the
+    # same id twice would get one row from the engine and two from here, and
+    # the comparison would fail on a difference that is not about the graph.
+    alert_ids = list(dict.fromkeys(alert_ids))
+
     known = {row["id"] for row in fleet.nodes.get("Sensor", ())}
     counts = []
     for alert in alert_ids:
@@ -314,8 +320,9 @@ def test_ea21_matches_ground_truth_on_the_generated_fleet(loaded_fleet):
     # so the mutual pairs are asserted here rather than described. At this
     # fixture's seed and scale every pair is mutual -- all three alerts reach
     # each other, so the counts tie at 2 and no row is upstream of another. At
-    # `--scale 1.0` it is one pair (`sensor:00003` with `sensor:00007`) under
-    # a genuine root (`sensor:00000`). Either way the claim being tested is
+    # At `--scale 1.0` it has been both -- one pair under a root at 205
+    # operators, and all three mutual at 379 -- because the chain sampling
+    # moves with the upstream catalogue. Either way the claim being tested is
     # the same: whatever the truth says is mutual, the `reaches` column names
     # in both directions, because that is the only place a caller can see it.
     both_ways = mutual_pairs(want)
@@ -370,10 +377,12 @@ def test_ea21_matches_ground_truth_at_full_scale(request, engine_factory,
       measured on three- and four-node fixtures and at scale 0.3;
     - the `reaches` column is `collect` over a join, so an unenforced one
       would show as inflated lists here first;
-    - `why_graph`, the query comment and the README all make specific claims
-      about `--scale 1.0` -- that `sensor:00003` and `sensor:00007` reach each
-      other, and that `sensor:00000` reaches both while neither reaches it.
-      Those were hand-measured. This is what pins them.
+    What it does **not** pin is which alert is a root. That moves with the
+    upstream ONNX operator catalogue, because the chain sampling draws from
+    it: at 205 operators `sensor:00000` reaches the other two and neither
+    reaches it, and at 379 (fresh download, 2026-09-24) all three reach each
+    other. Asserting a root here would fail the day someone re-downloads,
+    with nothing wrong in the repo. The invariants below hold on any fleet.
 
     Opt-in via `--full-scale`: the load costs about three minutes. Skipped
     from the body rather than a fixture, because `conftest.py` converts only
@@ -394,11 +403,86 @@ def test_ea21_matches_ground_truth_at_full_scale(request, engine_factory,
         f"at --scale 1.0 EA21 gives {got} and the Fleet gives {want}; this is "
         f"the cardinality at which an unenforced join would first show")
 
+    # Every mutual pair the truth holds must be visible in both directions,
+    # at full cardinality as well as at 0.3. This is the claim the `reaches`
+    # column exists for, and it does not depend on which catalogue built the
+    # fleet.
     seen = {alert: set(others) for alert, _n, others in got}
-    assert seen["sensor:00003"] == {"sensor:00007"}, seen
-    assert seen["sensor:00007"] == {"sensor:00003"}, seen
-    assert seen["sensor:00000"] == {"sensor:00003", "sensor:00007"}, seen
-    assert "sensor:00000" not in seen["sensor:00003"], (
-        f"the docs call sensor:00000 a genuine root at --scale 1.0, meaning "
-        f"nothing reaches it: {seen}")
-    assert "sensor:00000" not in seen["sensor:00007"], seen
+    for a, b in mutual_pairs(want):
+        assert b in seen[a] and a in seen[b], (
+            f"{a} and {b} reach each other at --scale 1.0 and `reaches` does "
+            f"not say so: {seen}")
+    assert all(alert not in others for alert, others in seen.items()), (
+        f"an alert reaches itself: {seen}. `o.id <> s.id` is what excludes "
+        f"that, and at this cardinality is where a broken join would show.")
+
+
+def test_a_repeated_alert_id_is_answered_once(known_root):
+    """`IN` matches a sensor once however many times the caller names it.
+
+    Worth pinning on both sides: the query deduplicates and `truth_for` did
+    not, so `[root, root, mid]` gave one row from the engine and two from
+    Python -- a comparison failing on a difference that was never about the
+    graph. A live alert set arriving from a pager is exactly where a repeat
+    comes from.
+    """
+    doubled = rank(known_root, ["sensor:root", "sensor:root", "sensor:mid"])
+    once = rank(known_root, ["sensor:root", "sensor:mid"])
+    assert doubled == once, (
+        f"naming an alert twice changed the answer: {doubled} against {once}")
+
+
+def test_an_empty_alert_set_answers_nothing_rather_than_everything(known_root):
+    """No alerts, no rows -- not every sensor in the graph.
+
+    `IN []` is the degenerate case of a list-literal filter, and the failure
+    mode worth excluding is the one where an empty set stops filtering at all.
+    """
+    assert rank(known_root, []) == []
+
+
+def test_a_single_alert_reaches_nobody(known_root):
+    """One alert is an order of one: a row, scoring zero, not an empty answer.
+
+    `sensor:root` reaches two others in this fixture, so the 0 here is the
+    filter working -- the others are not in the alert set -- rather than the
+    sensor having nothing downstream.
+    """
+    assert rank(known_root, ["sensor:root"]) == [("sensor:root", 0)]
+    assert reached(known_root, ["sensor:root"]) == {"sensor:root": []}
+
+
+def test_a_quoted_alert_id_cannot_break_out_of_the_list(known_root):
+    """An id carrying a quote is data, not Cypher.
+
+    `retargeted_ea21`'s docstring says an MCP tool will call it with a live
+    alert set, which makes the ids external input. Before `_alert_list` ran
+    them through `cypher_literal`, `['sensor:x"] OR true //']` produced
+    `IN ["sensor:x"] OR true //"]` -- the list closed early, a true predicate
+    was disjoined onto the `WHERE`, and the rest of the line was commented
+    out, so the query answered about **every sensor in the graph** instead of
+    the three named.
+
+    The fixture has three sensors and the payload names none of them, so a
+    successful escape is visible as rows coming back at all.
+    """
+    payload = ['sensor:x"] OR true //']
+    assert rank(known_root, payload) == [], (
+        "a quoted id escaped the list literal and matched sensors it does not "
+        "name")
+
+    cypher = retargeted_ea21(payload)
+    assert 'IN ["sensor:x] OR true //"]' in cypher, (
+        f"expected the quote to be stripped by `cypher_literal`; the `WHERE` "
+        f"reads {[ln for ln in cypher.splitlines() if ln.startswith('WHERE s.id')]}")
+
+
+def test_a_bare_string_is_refused_rather_than_iterated(known_root):
+    """`"sensor:00000"` is not an alert set, and silently behaved like one.
+
+    Python iterates a string by character, so a caller passing one id instead
+    of a list of ids asked about twelve one-letter sensors, got nothing back
+    and saw no error -- the shape this catalog treats as a finding.
+    """
+    with pytest.raises(TypeError, match="bare string"):
+        retargeted_ea21("sensor:root")

@@ -30,8 +30,8 @@ EA17_SUBJECT = "sensor:00000"
 # interpolated, for the same reason as `EA17_SUBJECT` -- the query names it
 # twice, and a set rewritten in one place and not the other would rank one
 # population against a different one, which reads as a finding rather than an
-# edit. `retargeted_ea21` in `tests/test_root_cause.py` is how a caller asks
-# about a different set.
+# edit. `retargeted_ea21`, just below, is how a caller asks about a
+# different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
 
@@ -743,16 +743,19 @@ LIMIT 20
             "alert -- gives the opposite order, and this query does not "
             "answer it; there the useful answer is the stages common to every "
             "alerting sensor, an intersection rather than a per-sensor count. "
-            "**It gives a partial order, not a guaranteed single root.** "
+            "**It gives a partial order, and often no root at all.** "
             "`NEXT_STAGE` is the union of every sensor's chain over one "
-            "shared pool of stages, so it contains cycles: measured on the "
-            "shipped fleet at `--scale 1.0`, `sensor:00003` and "
-            "`sensor:00007` each reach the other, while `sensor:00000` "
-            "reaches both and neither reaches it. Two alerts in a cycle have "
-            "no upstream-of between them, and `reaches` is the column that "
-            "says so -- each id appearing in the other's list is the signal. "
-            "What the ranking buys is the top of the order, which is the row "
-            "a human acts on first."),
+            "shared pool of stages, so it contains cycles, and two alerts in "
+            "a cycle have no upstream-of between them. Whether any alert is "
+            "upstream of the rest is a property of the fleet, not of this "
+            "query: on the generated graph it turns on the chain sampling, "
+            "which moves with the upstream ONNX operator catalogue -- at 205 "
+            "operators `sensor:00000` reaches the other two and neither "
+            "reaches it, at 379 all three reach each other. So the catalog "
+            "set is an example of the *shape*, not a worked root-cause. "
+            "`reaches` is what carries the answer: each id appearing in the "
+            "other's list means neither is upstream, and an alert named by "
+            "nobody is a root."),
         # `OPTIONAL MATCH`, so an alert with nothing downstream still gets a
         # row. Not a detail: the case that proves this ranks by dependency
         # rather than by degree is the one where the alerts are independent
@@ -776,11 +779,15 @@ LIMIT 20
         #     `tests/test_blast_radius_semantics.py` names one
         #     (`stage:00012 -> 00009 -> 00010 -> 00012`).
         #
-        # Measured on the shipped fleet at `--scale 1.0`: `sensor:00003` and
-        # `sensor:00007` reach each other, and `sensor:00000` reaches both
-        # with neither reaching back. So the answer is a partial order with a
-        # real root at the top and a mutually-reachable pair below it -- not
-        # a ranking in which every row is upstream of the row beneath it.
+        # Whether the shipped fleet has a root at all is **not stable**: the
+        # chain sampling moves with the upstream ONNX operator catalogue. At
+        # 205 operators `sensor:00000` reaches the other two and neither
+        # reaches it; at 379 (a fresh download, 2026-09-24) all three reach
+        # each other and there is no root. `tests/test_root_cause.py` pins
+        # the behaviour on fixtures it builds itself for that reason, and its
+        # full-scale test asserts only what holds on any fleet: the engine
+        # agrees with a Python BFS, and every mutual pair is visible in
+        # `reaches`.
         #
         # `reaches` exists to make that visible rather than leave it implied:
         # if `b` is in `a`'s list and `a` is in `b`'s, neither is upstream of
@@ -798,6 +805,15 @@ LIMIT 20
         # about -- a fixture holding one gives the same three rows with the
         # guard and without it, so the guard was inert and note 8b's `<>`
         # behaviour never reached it.
+        #
+        # **Cost.** `*0..` over a cyclic graph enumerates paths before
+        # `count(DISTINCT)` reduces them, so the work is bounded by paths and
+        # not by stages. Cheap on this fleet -- 16 stages, 40 `NEXT_STAGE`
+        # edges, 0.1 ms warm at `--scale 1.0` -- and that is a statement about
+        # the fixture, not about the shape: a denser real pipeline could grow
+        # this sharply, and the fix there is a bound on the walk, which costs
+        # the deep chains (`EA07`'s trade, one comment block above). Measure
+        # before assuming it still holds on real topology.
         #
         # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts
         # reaching the same number of others, and their order among

@@ -558,10 +558,12 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # The catalog queries the 1.7.0 OSS server cannot answer, and why each is here.
 # Engine note 12: that build does not traverse a variable-length relationship
 # and rejects `size(r)` on one. `docs/engine-notes.md`, `CLAUDE.md` and
-# `README.md` all state that `EA17` is the only one -- until this test existed
+# `README.md` all state which queries these are -- until this test existed
 # that was prose, so a new query with an unbounded walk would have made three
-# pages wrong at once and nothing would have said so.
-EMBEDDED_ONLY = {"EA17"}
+# pages wrong at once and nothing would have said so. `EA21` is the second
+# member, and this guard is what caught it: it walks `NEXT_STAGE*0..` for the
+# same reason `EA17` does, so the server cannot answer it either.
+EMBEDDED_ONLY = {"EA17", "EA21"}
 
 
 def test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk():

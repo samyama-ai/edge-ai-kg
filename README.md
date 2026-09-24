@@ -453,14 +453,14 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
 - the 1.7.0 **server** does not traverse a variable-length relationship,
   bounded or not — it returns only the zero-length match, and rejects `size(r)`
   on one — where the embedded 1.7.1 build walks it
-  ([note 12](docs/engine-notes.md)). That is why `EA17` is embedded-only, and
-  why it needs the `samyama>=1.7.1` floor #104 landed.
+  ([note 12](docs/engine-notes.md)). That is why `EA17` and `EA21` are
+  embedded-only, and why they need the `samyama>=1.7.1` floor #104 landed.
 
 Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
 workaround either, and one is not possible: there is no way to write "walk a
-chain of unknown length" that the 1.7.0 server executes, so `EA17` is
-embedded-only rather than reshaped.
+chain of unknown length" that the 1.7.0 server executes, so `EA17` and `EA21`
+are embedded-only rather than reshaped.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised
