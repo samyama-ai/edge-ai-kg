@@ -84,6 +84,13 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # fixture cannot see the difference.
 "tests/test_embedded_engine_fixture.py" = ["S603"]
 
+# S603: the cyclic-chain check runs `sys.executable -c <literal probe>` so the
+# timeout can kill it. A worker thread cannot be killed, and a join that timed
+# out would leave the query running for the rest of the session -- the failure
+# this check reports would itself corrupt what follows. No input is untrusted:
+# the argument list is literal and the script is a constant in that file.
+"tests/test_blast_radius_semantics.py" = ["S603"]
+
 # BLE001/PERF203: the catalog sweep catches per-query so it reports every
 # failure rather than stopping at the first -- the same reason
 # `benchmarks/run_benchmark.py` is exempt, and the engine raises untyped errors

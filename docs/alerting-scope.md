@@ -60,8 +60,8 @@ already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
 `#35`, `#37`, `#40` and `#36` are delivered — as `EA17`, `EA18`, `EA19` and
-`EA21` — and reach `main` in the same merge as this paragraph, so the page and
-the queries arrive together. The catalog is `EA01`-`EA21`, with one gap:
+`EA21`. The page and the queries land together, so wherever this is read they
+are in the catalog beside it. The catalog is `EA01`-`EA21`, with one gap:
 **`EA20` is not in it.** That id is claimed by #115's `Site` query, which is a
 separate PR; two queries sharing an id would silently overwrite one of them in
 `BY_ID`, so the gap is deliberate. If #115 is closed without merging — its own
@@ -70,17 +70,22 @@ free again, and the next query to be added takes it rather than leaving a hole
 here. Either way this sentence is what tells a reader the gap is not an
 accident.
 
-That is not a promise this page makes about itself:
+That is not a promise this page makes about itself.
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
 reads every "delivered as `EAnn`" **anywhere on this page** — the verdict table
 is where they happen to be written, but the check is not scoped to it — and
-fails if the catalog does not hold one, fails if the stated `EA01`-`EAnn` range
-is not the catalog's actual last id, and fails if an issue is still described
-as pending while its query exists.
+fails three ways: if the catalog does not hold a claimed id, if the stated
+`EA01`-`EAnn` range is not the catalog's actual last id, and if `EA17`, `EA18`
+or `EA19` is in the catalog with **no delivery claim written for it**. That
+last one is about the claim being absent, not about the word "pending": a page
+that described them in any other words would fail it just the same.
 
-`EA17` is the one catalog query the **1.7.0 server** cannot run: that build does
-not traverse variable-length relationships and rejects `size(r)` on one
-(engine note 12). Note 12 is careful about what that does and does not show —
+`EA17` is the one catalog query the **1.7.0 server** cannot answer *at all*:
+that build does not traverse variable-length relationships and rejects
+`size(r)` on one (engine note 12). `EA07` uses a variable-length walk too, but
+a bounded one with no `size(r)`, so the server runs it and returns only the
+zero-length match -- wrong rows rather than an error, which note 12 calls the
+more dangerous half. Note 12 is careful about what that does and does not show —
 1.7.0 *embedded* was never measured, so this may be a fix that landed between
 1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
 it runs on embedded 1.7.1 and fails on the 1.7.0 server.

@@ -173,7 +173,10 @@ reproduction, because note 11 does not raise. On a downgraded build it makes
 three return wrong rows rather than erroring. Note 12: the 1.7.0 server does
 not *traverse* a variable-length relationship the embedded 1.7.1 build walks,
 and it does not error, it returns fewer rows -- which is why `EA17` is
-embedded-only rather than reshaped. Notes 13 and 13b were measured on embedded
+embedded-only rather than reshaped. That set is derived rather than asserted:
+`tests/test_correctness.py::test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk`
+fails if a new query carries an unbounded `*0..`, because this sentence,
+`README.md` and note 12 all name `EA17` as the only one. Notes 13 and 13b were measured on embedded
 1.7.1 while writing `EA18`: a `WHERE` on an `OPTIONAL MATCH` mentioning a
 **`WITH`-introduced** alias drops the unmatched rows, and an expression mixing
 a grouping key with an aggregate in one projection returns `NULL`. Note 13 has

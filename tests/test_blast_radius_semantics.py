@@ -20,6 +20,10 @@ these fixtures exist and why the ground-truth sweep alone is not enough.
 """
 from __future__ import annotations
 
+import pathlib
+
+import pytest
+
 from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl.helpers import create_edges, create_nodes
 from tests.test_blast_radius import (
@@ -173,15 +177,16 @@ def one_row_per_kind(records):
     true. A second row for a kind would mean a leg's grouping had changed, and
     every assertion below would then be checking half an answer while looking
     exactly as it does now.
-    """
-    import collections
 
-    seen = collections.Counter(row[0] for row in records)
-    duplicated = sorted(kind for kind, n in seen.items() if n > 1)
-    assert not duplicated, (
-        f"EA17 returned more than one row for {duplicated}. Each leg groups to "
-        f"a single row per kind, so this means a leg's grouping changed -- the "
-        f"assertions below would silently read whichever row came last.")
+    The duplicate check is `tests/test_blast_radius.py`'s, not a second copy:
+    this module takes rows from a query it ran itself (and, for the cyclic
+    chain, from a subprocess), so it cannot call `run_ea17` -- but two
+    implementations of one invariant is how they drift apart, so the guard is
+    imported and this function only reshapes what it returns.
+    """
+    from tests.test_blast_radius import assert_one_row_per_kind
+
+    assert_one_row_per_kind(records)
     return {row[0]: (row[1], row[2]) for row in records}
 
 
@@ -245,7 +250,7 @@ def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
 def test_a_task_stops_when_it_loses_the_last_sensor_of_a_modality(engine_factory):
     """A task's other sensors are alternatives only if they share its modality.
 
-    `etl/generate.py:425` links a `ClinicalTask` to **every** sensor whose
+    `etl/generate.py` links a `ClinicalTask` to **every** sensor whose
     modality it requires, so "this task has other sensors" and "this task has a
     replacement for this sensor" are different statements. `EA17` used to treat
     them as one, and reported a task as surviving whenever it had any second
@@ -341,8 +346,10 @@ def test_ea07s_fixed_bound_is_lossy_and_that_is_a_known_trade(engine_factory):
     shipped = BY_ID["EA07"]["cypher"]
     assert "*0..3" in shipped, (
         "EA07 no longer carries a fixed bound. If it was lifted to `*0..`, "
-        "check note 12 -- the 1.7.0 server refuses that -- and replace this "
-        "test with one that pins the new behaviour."
+        "check note 12 first -- the 1.7.0 server does not refuse an unbounded "
+        "walk, it returns only the zero-length match, so EA07 would go "
+        "silently wrong over HTTP rather than raise -- and replace this test "
+        "with one that pins the new behaviour."
     )
     bounded = client.query(shipped, GRAPH).records
     unbounded = client.query(shipped.replace("*0..3", "*0.."), GRAPH).records
@@ -358,50 +365,78 @@ def test_ea07s_fixed_bound_is_lossy_and_that_is_a_known_trade(engine_factory):
     )
 
 
-def answered_within(client, cypher, seconds):
-    """Run `cypher` and fail if it has not returned inside `seconds`.
+CYCLIC_PROBE = """
+import json, sys
+from samyama import SamyamaClient
+from etl.helpers import create_edges, create_nodes
+from tests.test_blast_radius import retargeted_ea17
 
-    The test below exists because an unbounded walk over a cyclic graph could
-    in principle not terminate, and a test for that which simply calls the
-    query would *itself* hang -- reporting as a stuck suite rather than as a
-    finding, which is the least legible failure this catalog could produce.
+GRAPH = "default"
+client = SamyamaClient.embedded()
+create_nodes(client, GRAPH, "Sensor", [{"id": "sensor:cycle", "modality": "ecg"}])
+create_nodes(client, GRAPH, "SignalStage",
+             [{"id": "stage:a", "kind": "filter"}, {"id": "stage:b", "kind": "filter"}])
+create_edges(client, GRAPH, [
+    ("Sensor", "sensor:cycle", "FEEDS", "SignalStage", "stage:a", None),
+    ("SignalStage", "stage:a", "NEXT_STAGE", "SignalStage", "stage:b", None),
+    ("SignalStage", "stage:b", "NEXT_STAGE", "SignalStage", "stage:a", None),
+])
+rows = client.query(retargeted_ea17("sensor:cycle"), GRAPH).records
+print(json.dumps([list(row) for row in rows]))
+"""
 
-    A worker thread and a join, rather than `pytest-timeout`: the repo does
-    not depend on it, and adding a plugin for one assertion is a larger change
-    than the assertion. **What this cannot do is stop the query.** If the
-    engine holds the GIL for the whole call the join still returns after the
-    timeout and the failure is reported, but the process stays busy until the
-    engine gives up; Python cannot kill a thread. So this converts a hang into
-    a named failure, and does not promise a clean exit after one.
+
+def ea17_on_a_cyclic_chain_within(seconds):
+    """Build the smallest cyclic chain in a **subprocess** and run `EA17` on it.
+
+    A subprocess rather than a worker thread, because the timeout has to be
+    survivable. Python cannot kill a thread: a join that times out leaves the
+    query still running, still holding its client, for the rest of the pytest
+    session -- so the very failure this check exists to report would leave
+    the session in a state nobody can reason about. A process can be killed,
+    and is.
+
+    The fixture is three nodes and three edges, so rebuilding it on the other
+    side of the fork costs less than the engine import that dominates either
+    way. Nothing is shared with the caller: the child builds its own client,
+    and on timeout it is killed and reaped before the assertion runs.
     """
-    import threading
+    import json
+    import subprocess
+    import sys
 
-    out = {}
+    root = pathlib.Path(__file__).resolve().parent.parent
+    proc = subprocess.Popen(
+        [sys.executable, "-c", CYCLIC_PROBE],
+        cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        pytest.fail(
+            f"EA17 did not return within {seconds}s on a cyclic NEXT_STAGE "
+            f"chain. The walk is `*0..` with no depth cap, so this is the "
+            f"query failing to terminate -- in `run_benchmark` it would read "
+            f"as a hung sweep. The probe process was killed.")
+    assert proc.returncode == 0, (
+        f"the cyclic-chain probe exited {proc.returncode} rather than "
+        f"answering:\n{err[-600:]}")
+    return json.loads(out.strip().splitlines()[-1])
 
-    def run():
-        out["rows"] = client.query(cypher, GRAPH).records
 
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    worker.join(seconds)
-    assert not worker.is_alive(), (
-        f"EA17 did not return within {seconds}s on a cyclic NEXT_STAGE chain. "
-        f"The walk is `*0..` with no depth cap, so this is the query failing "
-        f"to terminate -- in `run_benchmark` it would read as a hung sweep.")
-    return out["rows"]
-
-
-def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
+def test_the_unbounded_walk_terminates_on_a_cyclic_chain():
     """`EA17` walks `NEXT_STAGE*0..` with no depth cap. The fleet has cycles.
 
     Both halves of that are measured, because the pair is what matters.
 
     **The fleet really is cyclic.** `etl/generate.py` gives each sensor a
     random *sample* of a shared stage pool and chains it, so two sensors'
-    chains cross in opposite orders. At the fixture's scale the generated graph
-    contains `stage:00012 -> stage:00009 -> stage:00010 -> stage:00012`. Any
-    reasoning that starts "the stage graph is a DAG" is therefore wrong, and a
-    depth cap on `EA17` cannot be justified that way either.
+    chains cross in opposite orders. Observed at seed 1234, scale 0.25:
+    `stage:00012 -> stage:00009 -> stage:00010 -> stage:00012`. Nothing pins
+    that particular cycle -- it is one seed's -- but the mechanism is in the
+    generator, so any reasoning that starts "the stage graph is a DAG" is
+    wrong, and a depth cap on `EA17` cannot be justified that way.
 
     **It terminates anyway**, because Cypher's variable-length matching does
     not traverse the same relationship twice within one path, so the walk is
@@ -414,20 +449,9 @@ def test_the_unbounded_walk_terminates_on_a_cyclic_chain(engine_factory):
     A hang here is a hang in `run_benchmark`, so if this ever stops returning,
     that is the finding.
     """
-    client = engine_factory()
-    create_nodes(client, GRAPH, "Sensor",
-                 [{"id": "sensor:cycle", "modality": "ecg"}])
-    create_nodes(client, GRAPH, "SignalStage",
-                 [{"id": "stage:a", "kind": "filter"},
-                  {"id": "stage:b", "kind": "filter"}])
-    create_edges(client, GRAPH, [
-        ("Sensor", "sensor:cycle", "FEEDS", "SignalStage", "stage:a", None),
-        ("SignalStage", "stage:a", "NEXT_STAGE", "SignalStage", "stage:b", None),
-        ("SignalStage", "stage:b", "NEXT_STAGE", "SignalStage", "stage:a", None),
-    ])
-
-    rows = answered_within(client, retargeted_ea17("sensor:cycle"), seconds=30)
-    by_kind = {row[0]: row[1] for row in rows}
+    by_kind = {kind: counts[0]
+               for kind, counts in one_row_per_kind(
+                   ea17_on_a_cyclic_chain_within(seconds=30)).items()}
     assert by_kind.get("SignalStage") == 2, (
         f"the two stages of a cyclic chain should both be in the blast "
         f"radius, exactly once each; got {by_kind}")

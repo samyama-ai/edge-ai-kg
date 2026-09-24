@@ -530,3 +530,64 @@ def test_order_by_is_actually_applied(loaded, qid):
     descending = keys[0].lower().endswith("desc")
     values = [r[cols.index(key)] for r in recs]
     assert values == sorted(values, reverse=descending), f"ORDER BY not applied for {qid} ({key})"
+
+
+def test_no_query_is_excused_that_actually_returns_rows(loaded):
+    """The reverse of the sweep above: an excuse that has gone stale fails here.
+
+    `test_every_catalog_query_runs_and_returns_rows` catches an *unexplained*
+    zero -- a query that stopped matching without an entry to say why. It
+    cannot catch the opposite: an entry that outlived its reason. A query
+    fixed, or a fleet grown past the scale that made it empty, leaves
+    `EMPTY_IS_A_VALID_ANSWER` quietly excusing something that no longer needs
+    it, and the next genuine zero on that id would then pass unremarked.
+
+    Deriving both directions from the same sweep is also what stops the
+    *count* going stale. Prose saying "17 of the 19" has to be re-edited every
+    time the catalog grows; this compares two sets and needs no number at all.
+    """
+    client, _ = loaded
+    returning = {qid for qid in BY_ID if rows(client, BY_ID[qid]["cypher"])[1]}
+    stale = sorted(set(EMPTY_IS_A_VALID_ANSWER) & returning)
+    assert not stale, (
+        f"{stale} are excused in EMPTY_IS_A_VALID_ANSWER but return rows on "
+        f"this fleet. Remove the entry: while it stands, a real zero on one "
+        f"of these would be treated as expected and pass unnoticed.")
+
+
+# The catalog queries the 1.7.0 OSS server cannot answer, and why each is here.
+# Engine note 12: that build does not traverse a variable-length relationship
+# and rejects `size(r)` on one. `docs/engine-notes.md`, `CLAUDE.md` and
+# `README.md` all state that `EA17` is the only one -- until this test existed
+# that was prose, so a new query with an unbounded walk would have made three
+# pages wrong at once and nothing would have said so.
+EMBEDDED_ONLY = {"EA17"}
+
+
+def test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk():
+    """Derived from the Cypher, not copied from the docs.
+
+    An unbounded `*0..` is the shape note 12 says the server will not walk, and
+    `size(r)` over one is the shape it rejects outright. A bounded walk is not
+    the same thing: `EA07`'s `*0..3` runs on the server and returns only the
+    zero-length match -- wrong rows, not an error -- so it is a note-12 victim
+    without being embedded-only, and the distinction is the one the pages get
+    wrong when they are edited by hand.
+    """
+    import re
+
+    unbounded = {qid for qid, spec in BY_ID.items()
+                 if re.search(r"\*\d*\.\.(?!\d)", spec["cypher"])}
+    assert unbounded == EMBEDDED_ONLY, (
+        f"queries with an unbounded variable-length walk are {sorted(unbounded)}, "
+        f"but EMBEDDED_ONLY says {sorted(EMBEDDED_ONLY)}. Whichever moved, "
+        f"`docs/engine-notes.md` note 12, `CLAUDE.md` and `README.md` all name "
+        f"this set in prose and need the same edit.")
+
+    bounded = {qid for qid, spec in BY_ID.items()
+               if re.search(r"\*\d*\.\.\d", spec["cypher"])}
+    assert bounded and not (bounded & EMBEDDED_ONLY), (
+        f"expected at least one bounded walk outside the embedded-only set "
+        f"(EA07 today); got bounded={sorted(bounded)}. Without one, this test "
+        f"would pass on a catalog where every walk is unbounded and the "
+        f"distinction it exists to hold had collapsed.")
