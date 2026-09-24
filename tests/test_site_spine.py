@@ -16,6 +16,7 @@ unknown multiplicity and nothing in the query would say so.
 from __future__ import annotations
 
 import collections
+import pathlib
 import re
 
 import pytest
@@ -26,6 +27,7 @@ from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
 from etl.loader import NODE_LABELS
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 GRAPH = "default"
 SCALE = 0.3
 SEED = 4242
@@ -296,6 +298,23 @@ def test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops(
     if either half of that claim stops being true.
     """
     limit = int(BY_ID["EA20"]["cypher"].rsplit("LIMIT", 1)[1])
+
+    # The note is read, not assumed. This test told the reader that
+    # `benchmarks/queries.py` documents the boundary while the entry carried
+    # no comment at all -- a test asserting a claim the code does not make,
+    # which is worse than either alone because the cross-reference looks
+    # checked. Source text rather than the dict: a `#` comment is not data.
+    catalog_source = (ROOT / "benchmarks" / "queries.py").read_text(encoding="utf-8")
+    start = catalog_source.index('"id": "EA20"')
+    entry = catalog_source[start:catalog_source.index("\n    },", start)]
+    for expected in ("truncates above it", str(max(DOCUMENTED_SCALES)),
+                     str(DOCUMENTED_SCALES[max(DOCUMENTED_SCALES)])):
+        assert expected in entry, (
+            f"`benchmarks/queries.py`'s EA20 entry does not mention "
+            f"{expected!r}. This test points a reader there for the "
+            f"truncation boundary, so the note has to exist, and has to move "
+            f"when the limit or the site density does.")
+
     # The cached operators this module already has -- `operators=None` made the
     # generator re-read them from disk, a second source for the same data
     # inside one test run.

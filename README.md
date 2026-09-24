@@ -93,6 +93,8 @@ carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
 1,513 deployments (73 of them real MLPerf Tiny measurements).
 **Clinical**: 14 biosignal sensors, 16 DSP stages, 18 clinical tasks, 4 MLPerf
 benchmark tasks, 12 datasets, 6 certifications.
+**Places**: 12 sites across 4 campuses, one per generated deployment
+([#34](docs/location-scope.md)); real MLPerf submissions are given none.
 
 Full detail in [`docs/schema.md`](docs/schema.md).
 
@@ -103,7 +105,7 @@ Full detail in [`docs/schema.md`](docs/schema.md).
 | [onnx/onnx](https://github.com/onnx/onnx) | Apache-2.0 | **205 real operators** — names, domains, opset versions |
 | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) | MIT | **734 real kernel registrations** across CPU / CUDA / DirectML execution providers |
 | [mlcommons/tiny_results_v1.2](https://github.com/mlcommons/tiny_results_v1.2) | Apache-2.0 | **73 measured submissions** — real boards from Qualcomm, Renesas, ST, Syntiant, Bosch, with real throughput, accuracy and energy |
-| generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
+| generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments, 12 sites. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
 
 **1,035 nodes are real; 24,127 are generated.** The split is queryable, not just
 documented — every node carries `provenance` and `source`:
@@ -121,8 +123,8 @@ of islands sharing a database:
 |---|---:|
 | nodes | 1,240 |
 | edges | 2,478 |
-| labels with nodes | 10 of 16 |
-| edge types present | 11 of 22 |
+| labels with nodes | 10 of 17 |
+| edge types present | 11 of 23 |
 | orphaned nodes | **18**, all `Operator`s no ONNX Runtime kernel registers |
 
 What it lacks is a *half*, not the joins. The real layer is the hardware and
@@ -220,7 +222,7 @@ Scale the fleet with `--scale` (`1.0` ≈ 24K nodes) and change the world with
 `--seed`. Same seed, same graph, every time.
 
 After loading, the loader counts edges per type against what it intended and
-reports `verified: N of N intended edges across 22 types`. It exits non-zero if
+reports `verified: N of N intended edges across 23 types`. It exits non-zero if
 the graph holds fewer (an endpoint id did not resolve -- edges are created in
 batches sharing one `MATCH`, so one bad id drops its whole batch) or more (the
 graph was not empty, or two nodes share an `id`). `--no-verify` skips the

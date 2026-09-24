@@ -6,9 +6,10 @@ Answers #34. **Reverses the decline recorded in
 
 > **This is a proposal, not a settled call.** `alerting-scope.md` declined #34
 > with three reasons, and this page does not pretend they evaporated. Only
-> **one is answered** below; the other **two are accepted as real costs**. @TarunAllam owns the
-> decision. **If the decline stands, the PR carrying this page should be closed
-> rather than merged**, and `alerting-scope.md`'s section reads as written with
+> **one is answered** below; the other **two are accepted as real costs**. The
+> decision is the repo owners' to make. **If the decline stands, the PR
+> carrying this page should be closed rather than merged**, and
+> `alerting-scope.md`'s section reads as written with
 > its "superseded" banner removed. The code is then what the "yes" branch would
 > have cost, made concrete — which is easier to judge than the argument alone.
 
@@ -114,9 +115,19 @@ Two counts arrive on one row — the site's deployments, and how many are on the
 recalled board — so the difference between "replace one unit in Ward 3" and
 "this whole floor is affected" is readable rather than inferred. Both columns
 are recomputed from the `Fleet` in Python and compared row by row in
-`tests/test_site_spine.py`, and the fixture is checked to contain an unaffected
-site *and* a partially affected one, so the distinction is demonstrated rather
-than asserted.
+`tests/test_site_spine.py`.
+
+**What that demonstrates depends on which run you do, and the difference is
+worth stating on a page arguing to be judged on what was measured.** The
+default `pytest` run uses a small fixture — 4 sites, 36 boards — where every
+site holds at least one of the recalled board, so it can show a *partially*
+affected site and nothing else. The contrast case, a site holding **none** of
+them, needs the shipped graph: it is
+`test_ea20_shows_both_affected_and_untouched_sites_at_full_scale`, which is
+**skipped unless `pytest --full-scale` is given**. Measured on that run: of 12
+sites, 6 hold none of `board:00003` and 6 hold some but not all. So "site-wide
+or one device" is demonstrated at `--scale 1.0` and only half-demonstrated by
+a default run.
 
 ## What this still does not claim
 

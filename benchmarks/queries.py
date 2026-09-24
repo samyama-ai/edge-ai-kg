@@ -338,6 +338,22 @@ ORDER BY kernels DESC
                       "Site<-Deployment->Board once and aggregates both; the "
                       "relational form is a join plus a correlated subquery "
                       "per site, and neither is a traversal."),
+        # `board:00003` is the recall subject, hardcoded like `EA01`'s model
+        # and accelerator: the catalog asks one concrete question rather than
+        # taking parameters, and `mcp_server/server.py` is where a caller
+        # supplies their own. `tests/test_site_spine.py` reads this id back out
+        # of the Cypher rather than restating it, so moving it here moves the
+        # ground truth with it.
+        #
+        # `LIMIT 12` covers the shipped graph and **truncates above it**. Sites
+        # scale linearly with the fleet: 2 at `--scale 0.15`, 4 at 0.3, 12 at
+        # 1.0 -- then 60 at 5.0 and 120 at 10.0, both scales `docs/volume.md`
+        # uses. Past the limit the tail is an arbitrary pick among equal
+        # `on_recalled_board` values, which is how `EA02` and `EA11` came to be
+        # withdrawn from the Neo4j comparison as unstable. The boundary is
+        # measured in both directions by
+        # `test_ea20_keeps_every_site_up_to_the_shipped_scale_and_says_where_it_stops`
+        # -- raise the limit and that test asks for this note to move with it.
         "cypher": """
 MATCH (s:Site)<-[:DEPLOYED_AT]-(d:Deployment)-[:ON_BOARD]->(b:Board)
 WITH s.campus AS campus, s.name AS site, s.kind AS kind,

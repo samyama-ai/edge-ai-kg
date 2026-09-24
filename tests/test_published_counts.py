@@ -382,3 +382,73 @@ def test_at_least_one_document_states_the_catalog_size():
         f"phrasing changed and CATALOG_SIZE_PATTERNS needs the new spelling, "
         f"or this test is checking nothing."
     )
+
+
+# The schema's two totals, and every published phrasing that states one. Same
+# treatment as the catalog size above and for the same reason: `Site` and
+# `DEPLOYED_AT` moved both totals, and the count went stale in four places in
+# `README.md` alone -- the loader summary, two rows of the real-layer table,
+# and the inventory paragraph -- because nothing compared any of them to the
+# schema. Every pattern here was found by grepping the tree, not invented.
+#
+# Deliberately narrow. `DATASET_CARD.md` also says "3 edge types carry 87% of
+# edges", which is a share and not a total; a looser `(\d+) edge types` would
+# match it and demand it equal 23.
+LABEL_TOTAL_PATTERNS = (
+    r"(\d+) node labels",
+    r"\| labels with nodes \| \d+ of (\d+) \|",
+)
+EDGE_TYPE_TOTAL_PATTERNS = (
+    r"· (\d+) edge types",
+    r"labels, (\d+) edge types",
+    r"(\d+) of the (?:\d+) edge types|names \d+ of the (\d+) edge types",
+    r"\| edge types present \| \d+ of (\d+) \|",
+    r"across (\d+) types",
+)
+SCHEMA_TOTAL_DOCS = ("README.md", "DATASET_CARD.md", "docs/schema.md")
+
+
+def schema_total_claims(patterns) -> list[tuple[str, int, str]]:
+    found = []
+    for doc in SCHEMA_TOTAL_DOCS:
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        for pattern in patterns:
+            found.extend(
+                (doc, int(next(g for g in m.groups() if g)), m.group(0))
+                for m in re.finditer(pattern, text) if any(m.groups()))
+    return found
+
+
+def test_every_document_states_the_schema_totals_correctly():
+    """One schema, three documents, two numbers -- derived, never restated.
+
+    `etl.loader.NODE_LABELS` and `schema/edge_ai_kg.cypher` are the sources;
+    a spine that adds a label and forgets a document fails here with the
+    document and the phrase named, rather than in review three rounds later.
+    """
+    from etl.loader import NODE_LABELS
+    from tests.test_schema_docs import declared_in_schema
+
+    labels, edges = len(NODE_LABELS), len(set(declared_in_schema("Edge types")))
+    wrong = [(doc, phrase, stated, labels)
+             for doc, stated, phrase in schema_total_claims(LABEL_TOTAL_PATTERNS)
+             if stated != labels]
+    wrong += [(doc, phrase, stated, edges)
+              for doc, stated, phrase in schema_total_claims(EDGE_TYPE_TOTAL_PATTERNS)
+              if stated != edges]
+    assert not wrong, (
+        "published schema totals that disagree with the schema "
+        f"({labels} labels, {edges} edge types): "
+        + "; ".join(f"{doc} — {phrase!r} (should be {want})"
+                    for doc, phrase, _got, want in wrong))
+
+
+def test_the_schema_totals_are_actually_published_somewhere():
+    """The check above passes vacuously if every phrasing is reworded away."""
+    labels = schema_total_claims(LABEL_TOTAL_PATTERNS)
+    edges = schema_total_claims(EDGE_TYPE_TOTAL_PATTERNS)
+    assert len(labels) >= 2 and len(edges) >= 3, (
+        f"found {len(labels)} label totals and {len(edges)} edge-type totals "
+        f"in {list(SCHEMA_TOTAL_DOCS)}. Either the docs stopped publishing "
+        f"them, or the phrasing changed and these patterns need the new "
+        f"spelling -- otherwise the check above is testing nothing.")
