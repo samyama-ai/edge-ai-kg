@@ -13,9 +13,13 @@ generated fleet, and prints every query including the ones we lose.
 
 ## What makes this believable, and what does not
 
-**Same query text, both engines.** All 16 catalog queries parse on Neo4j 5
-unchanged -- checked before any of this was written. Nothing is translated, so
-there is no translation to argue with.
+**Same query text, both engines.** The 16 catalog queries measured in
+`docs/neo4j-comparison.md` parse on Neo4j 5 unchanged, checked before any of
+this was written. **Four have been added since that run and none has been
+tried on Neo4j**: `EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA20` (#34).
+The sweep runs all twenty, so it will find out; until someone runs it, whether
+those four parse there is unmeasured. Nothing is translated, so there is no
+translation to argue with.
 
 **These are our query shapes, and it is worth knowing whether that helps us.**
 `docs/engine-notes.md` records that the catalog is shaped around Samyama's
@@ -40,7 +44,7 @@ faster everywhere". What it does rule out is the specific objection that these
 timings are a thumb on the scale against Neo4j, at least on the query the repo
 is built around.
 
-**Indexes on both sides.** `schema/edge_ai_kg.cypher`'s 22 indexes are created
+**Indexes on both sides.** `schema/edge_ai_kg.cypher`'s 23 indexes are created
 on Neo4j too, in its own syntax. Without that the comparison measures index
 availability rather than engines.
 
@@ -102,9 +106,10 @@ def load_samyama(client, fleet) -> float:
     157 s here against 24.5 s from `benchmarks/ingest.py`, which applies the
     schema -- 486 edges/s against 3,110.
 
-    Worse than a slow load, it meant **the query comparison ran Samyama with no
-    indexes at all while Neo4j had all 22**, which is not a comparison. Both
-    engines now get their indexes before anything is timed.
+    Worse than a slow load, it meant **the query comparison ran Samyama with
+    no indexes at all while Neo4j had all 22 the schema declared then**, which
+    is not a comparison. Both engines now get their indexes before anything is
+    timed.
 
     `apply_schema` runs **outside** the returned time, which is what
     `benchmarks/neo4j_client.load_neo4j` already assumed of this side when it
@@ -175,7 +180,8 @@ def _verify_reused(neo, nodes: int, edges_expected: int) -> None:
     # creates plain RANGE indexes -- a UNIQUE or TEXT index on the same
     # `label.property` is a different structure with different lookup
     # behaviour. Counting either as the index we asked for would time an
-    # unindexed or differently-indexed Neo4j while reporting all 22 verified.
+    # unindexed or differently-indexed Neo4j while reporting every index
+    # verified.
     present = {f"{labels[0]}.{properties[0]}"
                for labels, properties, state, kind in neo.run(
                    "SHOW INDEXES YIELD labelsOrTypes, properties, state, type "

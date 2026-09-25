@@ -25,10 +25,46 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 
+from etl import sites as sites_mod
 from etl.onnx_catalog import Operator, load_cached
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLEET_PATH = DATA_DIR / "fleet" / "fleet.json"
+
+
+# What `generate()` puts in the fleet, and therefore what a current
+# `fleet.json` must contain. Not `etl.loader.NODE_LABELS`: that set also holds
+# `BenchmarkTask`, which only `etl/real_layer.py` builds, so checking against
+# it would reject every cache ever written.
+#
+# `tests/test_generate.py` compares this against a freshly generated fleet, so
+# it cannot drift from the generator it describes.
+GENERATED_LABELS = ("Accelerator", "Board", "Certification", "ClinicalTask",
+                    "Dataset", "Deployment", "Kernel", "Model", "ModelVariant",
+                    "Operator", "Runtime", "Sensor", "SignalStage", "Site",
+                    "SoC", "Vendor")
+
+
+class StaleFleetCache(RuntimeError):
+    """`data/fleet/fleet.json` predates a label `etl.loader` now expects.
+
+    Its own type rather than a bare `RuntimeError`: a caller that regenerates
+    instead of failing -- `etl.loader` does -- needs to tell this apart from
+    any other read failure.
+
+    It carries the **cache's own** `seed` and `scale`, not the caller's. A
+    regeneration that used the CLI defaults would hand back a different fleet
+    from the one the reader had cached: a `--scale 0.3` cache would silently
+    become a scale-1.0 one, and the run after it would be measuring a
+    different graph than the run before.
+    """
+
+    def __init__(self, message: str, *, missing: tuple[str, ...],
+                 seed: int, scale: float):
+        super().__init__(message)
+        self.missing = missing
+        self.seed = seed
+        self.scale = scale
 DEFAULT_SEED = 20260814
 
 # Deployment latency is the cost model's output times a spread, rounded.
@@ -255,6 +291,16 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
     certs = [{"id": _rid("cert", i), "name": nm, "body": body, "class": cls}
              for i, (nm, body, cls) in enumerate(CERTIFICATIONS)]
     fleet.add_nodes("Certification", certs)
+
+    # ---------------- Sites (#34) ----------------
+    # The shape, and the decision behind it, are in `etl/sites.py` and
+    # `docs/location-scope.md`. Generated-layer only: the real layer is never
+    # placed.
+    # Its own stream, derived from the run's seed so placement is still
+    # deterministic, and separate so it cannot perturb the draws above.
+    site_rng = random.Random(seed + 34)
+    sites = sites_mod.build_sites(n(len(sites_mod.SITE_SUFFIXES)), _rid)
+    fleet.add_nodes("Site", sites)
 
     # ---------------- Datasets ----------------
     datasets = [{"id": _rid("dataset", i), "name": nm, "source": src,
@@ -547,8 +593,23 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
             fits = 1 if (memory_kb <= b["ram_kb"] and v["size_kb"] <= b["flash_kb"]) else 0
 
             did = _rid("deploy", len(deployments))
+            # Placement draws from `site_rng`, **not** the shared `rng`. A
+            # draw taken from the shared stream shifts every draw after it, so
+            # one new field moves every deployment metric at an unchanged seed:
+            # measured, `deploy:00001` reads 78.036 / 3591.96 that way against
+            # 87.684 / 3990.6 here. This module's contract is that a seed
+            # reproduces the graph byte-for-byte and
+            # `docs/data-provenance.md`'s cost-model figures rest on it, so any
+            # field added later needs its own stream for the same reason.
+            #
+            # One site per deployment: a deployment is one installed unit, so
+            # it is in exactly one place -- which is what makes "how many of
+            # this site's deployments are on the recalled board" a count
+            # rather than a set union.
+            site = site_rng.choice(sites)
             deployments.append({
                 "id": did,
+                "_site": site["id"],
                 "latency_ms": latency_ms,
                 "power_mw": power_mw,
                 "energy_mj": round(energy_mj, 4),
@@ -567,6 +628,7 @@ def generate(seed: int = DEFAULT_SEED, scale: float = 1.0,
         fleet.add_edge("Deployment", d["id"], "ON_BOARD", "Board", d["_board"], None)
         fleet.add_edge("Deployment", d["id"], "VIA_RUNTIME", "Runtime", d["_rt"], None)
         fleet.add_edge("Deployment", d["id"], "USES_ACCELERATOR", "Accelerator", d["_accel"], None)
+        fleet.add_edge("Deployment", d["id"], "DEPLOYED_AT", "Site", d["_site"], None)
 
     return fleet
 
@@ -582,12 +644,38 @@ def write(fleet: Fleet, path: Path = FLEET_PATH) -> Path:
 
 
 def load(path: Path = FLEET_PATH) -> Fleet:
+    """The cached fleet, refused if it predates a label the loader now expects.
+
+    `data/` is gitignored, so a fresh clone regenerates and is always current.
+    An *existing* checkout is the problem: `git pull` brings a new label --
+    `Site` was the first -- while `fleet.json` keeps the shape it was written
+    with, and nothing notices. The catalog query over the new label then
+    returns zero rows, which reads exactly like "the answer is none" rather
+    than "your cache is old"; `--verify` does not catch it either, because it
+    compares the load against this same cache.
+
+    A missing label is therefore refused here rather than loaded. What to do
+    about it belongs to the caller, not to this function: `etl.loader`
+    regenerates from the cache's own seed and scale, which the exception
+    carries, while a caller reading the fleet directly gets the command in the
+    message. Extra labels are ignored: a cache written by a *newer* checkout
+    is not this function's business.
+    """
     if not path.exists():
         raise FileNotFoundError(f"{path} not found -- run `python -m etl.download_data` first.")
     payload = json.loads(path.read_text(encoding="utf-8"))
     fleet = Fleet(seed=payload["seed"], scale=payload["scale"])
     fleet.nodes = payload["nodes"]
     fleet.edges = [tuple(e) for e in payload["edges"]]
+
+    missing = [label for label in GENERATED_LABELS if label not in fleet.nodes]
+    if missing:
+        raise StaleFleetCache(
+            f"{path} was written before {', '.join(missing)} existed, so every "
+            f"query over {'it' if len(missing) == 1 else 'them'} would return "
+            f"zero rows and look like a real answer. Re-run "
+            f"`python -m etl.download_data` to rebuild it.",
+            missing=tuple(missing), seed=fleet.seed, scale=fleet.scale)
     return fleet
 
 

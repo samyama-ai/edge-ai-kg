@@ -1,15 +1,15 @@
 # Edge AI KG -- schema
 
-16 node labels, 22 edge types. At `--scale 1.0`, seed `20260814`, the generated
-layer is **24,115 nodes, 73,825 edges**.
+17 node labels, 23 edge types. At `--scale 1.0`, seed `20260814`, the generated
+layer is **24,127 nodes, 75,265 edges**.
 
 **Every count on this page is that generated layer unless it carries
 `(+M real)`** (#14). The two totals a reader is likely to want:
 
 | | nodes | edges |
 |---|---:|---:|
-| generated layer -- what this page's bare counts sum to | 24,115 | 73,825 |
-| both layers -- what `python -m etl.loader` actually loads | 25,150 | 76,303 |
+| generated layer -- what this page's bare counts sum to | 24,127 | 75,265 |
+| both layers -- what `python -m etl.loader` actually loads | 25,162 | 77,743 |
 | the real layer adds | +1,035 | +2,478 |
 
 The README quotes both-layer figures, so the two pages disagreed by 1,035 nodes
@@ -48,6 +48,7 @@ and what does it cost me when it can't?**
 | `SignalStage` | 16 | id, name, kind, window_ms, cost_kmacs |
 | `Sensor` | 14 | id, name, modality, sample_rate_hz, channels, adc_bits |
 | `Dataset` | 12 | id, name, source, subjects, hours, license |
+| `Site` | 12 | id, name, kind, campus, region |
 | `Vendor` | 8 (+7 real) | id, name, country |
 | `Runtime` | 7 (+6 real) | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
@@ -62,9 +63,10 @@ nodes. `tests/test_id_uniqueness.py` asserts the invariant.
 
 A count written `N (+M real)` is N from the generated layer plus M more once the
 real layer is loaded. **N is what the generated-layer total counts; N+M is what
-the both-layer total counts.** The six labels with no `(+M real)` --
-`ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset` and
-`Certification` -- are generated only, so their two counts are the same number.
+the both-layer total counts.** The seven labels with no `(+M real)` --
+`ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`,
+`Certification` and `Site` -- are generated only, so their two counts are the
+same number.
 
 The `(+M real)` figures are a snapshot of the current upstream dumps, not an
 invariant: ONNX Runtime's kernel registrations went 734 to 738 during one week
@@ -74,7 +76,7 @@ ours, and deliberately not the real one.
 `BenchmarkTask` is the one label the generator does not produce. Its four nodes
 -- Anomaly Detection, Image Classification, Keyword Spotting, Visual Wake Words
 -- come from MLPerf Tiny v1.2 and are stamped `provenance: "real"`, so a
-generated-only load holds none of them and they fall outside the 24,115 total
+generated-only load holds none of them and they fall outside the 24,127 total
 above. That is why the label was absent from this table until now; the counts
 here describe the generated layer, which is itself worth stating more plainly
 (see #14).
@@ -90,6 +92,7 @@ here describe the generated layer, which is itself worth stating more plainly
 | `ON_BOARD` | Deployment -> Board | 1,440 (+73 real) | where |
 | `VIA_RUNTIME` | Deployment -> Runtime | 1,440 (+60 real) | through which runtime |
 | `USES_ACCELERATOR` | Deployment -> Accelerator | 1,440 (+11 real) | on which compute unit |
+| `DEPLOYED_AT` | Deployment -> Site | 1,440 | where it physically sits |
 | `USES_OPERATOR` | Model -> Operator `{count}` | 1,069 | model's operator surface |
 | `TARGETS` | Runtime -> Accelerator | 426 (+3 real) | runtime can target this unit |
 | `VARIANT_OF` | ModelVariant -> Model | 240 | fp32 / fp16 / int8 / int4 |
@@ -106,9 +109,9 @@ here describe the generated layer, which is itself worth stating more plainly
 | `FEEDS` | Sensor -> SignalStage | 14 | front of the pipeline |
 | `MEASURES` | Deployment -> Model | 0 (+73 real) | a measured MLPerf Tiny submission against its reference model |
 
-The `N` column is the generated layer and sums to the **73,825** stated above --
+The `N` column is the generated layer and sums to the **75,265** stated above --
 verified against the `Fleet` and pinned by `tests/test_schema_docs.py`. Eleven
-of the 22 types also gain real edges, written `(+M real)`; those add 2,478 more,
+of the 23 types also gain real edges, written `(+M real)`; those add 2,478 more,
 which is the whole of the real layer (see [`data-provenance.md`](data-provenance.md)).
 
 **The `(+M real)` figures are a snapshot, not an invariant.** They move whenever

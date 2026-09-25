@@ -13,9 +13,10 @@
       "USES_ACCELERATOR": 11,
       "VIA_RUNTIME": 60
     },
-    "both_layers_total": 76303,
+    "both_layers_total": 77743,
     "generated": {
       "CERTIFIED_FOR": 104,
+      "DEPLOYED_AT": 1440,
       "FEEDS": 14,
       "GOVERNED_BY": 22,
       "HAS_ACCELERATOR": 85,
@@ -37,7 +38,7 @@
       "VARIANT_OF": 240,
       "VIA_RUNTIME": 1440
     },
-    "generated_total": 73825
+    "generated_total": 75265
   },
   "inputs": {
     "onnx_catalogue": {
@@ -61,6 +62,7 @@
     "Runtime",
     "Sensor",
     "SignalStage",
+    "Site",
     "SoC",
     "Vendor"
   ],
@@ -77,7 +79,7 @@
       "SoC": 12,
       "Vendor": 7
     },
-    "both_layers_total": 25150,
+    "both_layers_total": 25162,
     "generated": {
       "Accelerator": 85,
       "Board": 120,
@@ -92,10 +94,11 @@
       "Runtime": 7,
       "Sensor": 14,
       "SignalStage": 16,
+      "Site": 12,
       "SoC": 40,
       "Vendor": 8
     },
-    "generated_total": 24115
+    "generated_total": 24127
   },
   "scale": 1.0,
   "seed": 20260814

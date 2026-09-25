@@ -743,6 +743,60 @@ ORDER BY tasks_affected DESC
 LIMIT 20
 """.replace("{subject}", f'"{EA17_SUBJECT}"'),
     },
+    # `EA20`, not `EA17`: `EA17`, `EA18` and `EA19` are the alerting stack
+    # (#35, #37, #40), which reached `main` with #113. This spine reserved the
+    # next free id rather than reusing a live one, and the two landed without
+    # colliding -- which is what the gap was for.
+    {
+        "id": "EA20",
+        "title": "Site-wide or one device: where a recalled board is installed",
+        "question": ("A board model is recalled. Which sites run it, how many "
+                     "of each site's deployments does it account for, and is "
+                     "that site-wide or one device?"),
+        "why_graph": ("Two facts about the same site have to arrive in one "
+                      "row: how many deployments it holds, and how many of "
+                      "those are on the recalled board. The graph walks "
+                      "Site<-Deployment->Board once and aggregates both; the "
+                      "relational form is a join plus a correlated subquery "
+                      "per site, and neither is a traversal."),
+        # `board:00003` is the recall subject, hardcoded like `EA01`'s model
+        # and accelerator: the catalog asks one concrete question rather than
+        # taking parameters, and `mcp_server/server.py` is where a caller
+        # supplies their own. `tests/test_site_spine.py` reads this id back out
+        # of the Cypher rather than restating it, so moving it here moves the
+        # ground truth with it.
+        #
+        # **No `LIMIT`, deliberately.** Every other catalog entry caps its
+        # rows because it asks a top-N question; this one asks "where is the
+        # recalled board", and a recall answer that omits a site is wrong
+        # rather than abbreviated. With `LIMIT 12` it did omit sites, and not
+        # marginally: measured at `--scale 5.0`, 60 sites, 38 of them running
+        # the recalled board, and **26 of those 38 fell past the cut**. The
+        # 12th `on_recalled_board` value is 2 and nine sites share it, so
+        # *which* of them survived could differ between engines -- the same tie
+        # instability that had `EA02` and `EA11` withdrawn from the Neo4j
+        # comparison. A second `ORDER BY` key cannot break the tie either
+        # (engine note 3b: only the first key is honoured).
+        #
+        # The cost is row count at large scales -- 60 rows at `--scale 5.0`,
+        # 120 at 10.0, both scales `docs/volume.md` uses -- and that is the
+        # right trade for a question whose value is completeness. At the
+        # shipped 12 sites the output is unchanged.
+        #
+        # The untouched sites are part of the answer, which is why this is not
+        # filtered to `on_recalled_board > 0` either: "leave that site alone"
+        # and "replace one unit here" are the two halves of "site-wide or one
+        # device", and `docs/location-scope.md` rests on both being readable
+        # off the same rows.
+        "cypher": """
+MATCH (s:Site)<-[:DEPLOYED_AT]-(d:Deployment)-[:ON_BOARD]->(b:Board)
+WITH s.campus AS campus, s.name AS site, s.kind AS kind,
+     count(DISTINCT d.id) AS deployments_here,
+     sum(CASE WHEN b.id = "board:00003" THEN 1 ELSE 0 END) AS on_recalled_board
+RETURN campus, site, kind, on_recalled_board, deployments_here
+ORDER BY on_recalled_board DESC
+""",
+    },
     {
         "id": "EA21",
         "title": "ROOT CAUSE: twenty alerts, one fault -- which are upstream?",

@@ -21,7 +21,7 @@ python -m benchmarks.compare_neo4j --repeats 15 --warmup 10 --natural
 Re-running against a server that already holds a fleet needs `--force-wipe`,
 which deletes everything in the database first. `--reuse-neo4j` is the other
 option and keeps what is there, but only if it is byte-for-byte this fleet: it
-verifies the node and edge counts and all 22 indexes, and refuses otherwise.
+verifies the node and edge counts and all 23 indexes, and refuses otherwise.
 
 ## Where Neo4j wins, including the hero query
 
@@ -255,10 +255,10 @@ not reproduce** for them.
 | neo4j | 5.26.30 Community, Docker, 2 GB heap, HTTP transactional endpoint |
 | samyama | 1.7.1, embedded, in-process — the floor `pyproject.toml` declares since #104 |
 | data | 25,150 nodes / 76,303 edges, seed 20260814, scale 1.0, both layers |
-| indexes | the same 22 on both, translated from `schema/edge_ai_kg.cypher` |
+| indexes | the same 22 on both, translated from `schema/edge_ai_kg.cypher` (the schema declares 23 since `Site(id)` landed with #34, after this run) |
 | method | 10-pass catalog warm-up, then 10 per-query warm-ups, then median of 15 |
 | runs | two, both published |
-| queries | identical Cypher text; all 16 parse on Neo4j 5 unchanged |
+| queries | identical Cypher text; `EA01`-`EA16` parse on Neo4j 5 unchanged, which was the whole catalog when this ran. `EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA20` (#34) all post-date it and are unmeasured on Neo4j |
 
 ## What this does not measure
 

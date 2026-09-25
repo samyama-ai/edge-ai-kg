@@ -2,7 +2,7 @@
 //
 // Node labels: Vendor, SoC, Accelerator, Board, Runtime, Operator, Kernel,
 //              Model, ModelVariant, Sensor, SignalStage, ClinicalTask,
-//              BenchmarkTask, Dataset, Certification, Deployment
+//              BenchmarkTask, Dataset, Certification, Deployment, Site
 //
 // Every node carries `provenance` ("real" | "synthetic") and `source`.
 //
@@ -10,7 +10,7 @@
 //              RUNS_ON, PROVIDED_BY, USES_OPERATOR, VARIANT_OF, SOLVES,
 //              TRAINED_ON, REQUIRES_SENSOR, FEEDS, NEXT_STAGE, PRECEDES,
 //              OF_VARIANT, ON_BOARD, VIA_RUNTIME, USES_ACCELERATOR,
-//              CERTIFIED_FOR, GOVERNED_BY, MEASURES
+//              CERTIFIED_FOR, GOVERNED_BY, MEASURES, DEPLOYED_AT
 //
 // This engine accepts `CREATE INDEX ON :Label(prop)`. It does NOT parse
 // `CREATE CONSTRAINT ... REQUIRE ... IS UNIQUE`; uniqueness of `id` is
@@ -62,6 +62,7 @@ CREATE INDEX ON :Dataset(id);
 CREATE INDEX ON :Certification(id);
 CREATE INDEX ON :Deployment(id);
 CREATE INDEX ON :BenchmarkTask(id);
+CREATE INDEX ON :Site(id);
 
 // --- lookup indexes: each one is filtered on by something ---
 // Traced to the queries that need them; tests/test_schema_indexes.py fails if
