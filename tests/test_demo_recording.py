@@ -171,7 +171,8 @@ def test_the_recording_shows_the_current_real_kernel_count(fresh):
 # landed and the caption moved from "16 of the 17" to "16 of the 18".
 ADDED_AFTER_THE_RECORDING = {"EA17",   # #35, added 2026-09-09
                              "EA18",   # #37, added 2026-09-15
-                             "EA19"}   # #40, added 2026-09-17
+                             "EA19",   # #40, added 2026-09-17
+                             "EA21"}   # #36, added 2026-09-23
 
 
 def test_the_recording_still_covers_every_catalog_query():

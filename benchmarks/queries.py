@@ -13,11 +13,99 @@ Engine notes:
 """
 from __future__ import annotations
 
+from etl.helpers import cypher_literal
+
 # `EA17`'s subject, in one place. The query names it ten times -- twice in each
 # of five legs -- and a retarget that rewrote only some of them would leave one
 # leg answering about a different sensor than the rest, which reads as a real
 # finding rather than an editing mistake.
 EA17_SUBJECT = "sensor:00000"
+
+# `EA20` is deliberately absent here: it is claimed by the `Site` spine PR
+# (#115), which was pushed first. A gap in the numbering costs nothing; two
+# queries sharing an id costs a silent collision in `BY_ID`, where the second
+# would overwrite the first and the catalog would simply be one query short.
+#
+# `EA21`'s alerting set: the sensors paging right now. Written once and
+# interpolated, for the same reason as `EA17_SUBJECT` -- the query names it
+# twice, and a set rewritten in one place and not the other would rank one
+# population against a different one, which reads as a finding rather than an
+# edit. `retargeted_ea21`, just below, is how a caller asks about a
+# different set.
+EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
+
+
+def retargeted_ea21(alert_ids) -> str:
+    """`EA21` asking about `alert_ids` instead of the catalog's set.
+
+    Here rather than in `tests/`, because the catalog is what production reads
+    and a caller with a live alert set is the point of the query -- an MCP
+    tool would call this, not a test helper.
+
+    The set appears twice in the query, once per `IN` list, and both have to
+    move together: a rewrite that caught one would rank one population against
+    another and the ranking would read as a finding. Both are replaced, and
+    the count is asserted rather than assumed.
+    """
+    original = BY_ID["EA21"]["cypher"]
+    catalog_set = _alert_list(EA21_ALERTS)
+    occurrences = original.count(catalog_set)
+    if occurrences != 2:
+        raise ValueError(
+            f"`EA21` names its alert set {occurrences} times, not 2. Either "
+            f"the query changed shape or the set moved; this retarget rewrites "
+            f"every occurrence and cannot do that blind.")
+    return original.replace(catalog_set, _alert_list(alert_ids))
+
+
+def _alert_list(alert_ids) -> str:
+    """The Cypher list literal for an alert set, escaped.
+
+    Every id goes through `etl.helpers.cypher_literal`, which strips the
+    quotes and backslashes that would end the literal early. Without it this
+    function built Cypher out of whatever it was handed, and the docstring
+    above promises an MCP tool will hand it a live alert set -- so the input
+    is external by design. Measured before the fix:
+    `['sensor:x"] OR true //']` produced `["sensor:x"] OR true //"]`, which
+    closes the list, disjoins a true predicate and comments out the rest of
+    the line; the query then returned every sensor in the graph.
+
+    A bare `str` is refused rather than accepted. Python iterates it by
+    character, so `"sensor:00000"` silently became a twelve-element list of
+    single letters that matched nothing -- an empty answer with no error,
+    which is the shape this catalog treats as a finding.
+    """
+    if isinstance(alert_ids, (str, bytes)):
+        raise TypeError(
+            f"alert ids must be a sequence of ids, not {type(alert_ids).__name__}: "
+            f"a bare string iterates by character and would ask about "
+            f"{len(alert_ids)} one-letter ids, returning nothing and raising "
+            f"nothing.")
+    return "[" + ", ".join(_alert_literal(a) for a in alert_ids) + "]"
+
+
+def _alert_literal(alert_id) -> str:
+    """One id as a Cypher literal, refused if escaping would change it.
+
+    `cypher_literal` strips the characters that would end a literal early,
+    which makes injection impossible but introduces a quieter problem:
+    `sensor:x"` and `sensor:x` both render as `"sensor:x"`, so a caller asking
+    about one would be answered about the other. Silently substituting a
+    *different sensor* into an alerting query is worse than refusing, and the
+    ids this repo generates (`sensor:00000`) never contain those characters --
+    so an id that changes under escaping is a sign something is wrong upstream
+    rather than an id to normalise.
+    """
+    text = str(alert_id)
+    literal = cypher_literal(text)
+    if literal != f'"{text}"':
+        raise ValueError(
+            f"alert id {alert_id!r} cannot be asked about safely: escaping it "
+            f"gives {literal}, which names a different sensor. Quotes, "
+            f"backslashes and newlines are stripped to keep the literal from "
+            f"ending early, so an id containing them would silently become "
+            f"another id.")
+    return literal
 
 QUERIES: list[dict] = [
     {
@@ -654,6 +742,120 @@ RETURN certification, body, cert_class, tasks_affected
 ORDER BY tasks_affected DESC
 LIMIT 20
 """.replace("{subject}", f'"{EA17_SUBJECT}"'),
+    },
+    {
+        "id": "EA21",
+        "title": "ROOT CAUSE: twenty alerts, one fault -- which are upstream?",
+        "question": ("These sensors are all alerting at once. Which of them "
+                     "can reach the others through the pipeline, and which "
+                     "are downstream of something else that is alerting?"),
+        "why_graph": (
+            "The failure that makes alerting hated is twenty pages at 3am for "
+            "one fault. Ordering them needs a model of what feeds what, which "
+            "a time-series alerting system does not have -- it holds "
+            "thresholds and history, not dependencies -- and which in SQL is "
+            "a recursive CTE over an edge table. Here it is one reachability "
+            "pattern. "
+            "**The failure model is the one `EA17` uses**, and the ranking "
+            "only means anything under it: a *sensor* degrades, and what it "
+            "feeds is degraded with it. So if `s` fails, every stage "
+            "downstream of where `s` joins carries its bad data -- including "
+            "the stages where another alerting sensor's own data joins, whose "
+            "pipeline output is then bad too. `s` reaching `o` means \"o's "
+            "alert is explained by s's failure\", which is why the count "
+            "orders them. The inverse model -- a *stage* fails and sensors "
+            "alert -- gives the opposite order, and this query does not "
+            "answer it; there the useful answer is the stages common to every "
+            "alerting sensor, an intersection rather than a per-sensor count. "
+            "**It gives a partial order, and often no root at all.** "
+            "`NEXT_STAGE` is the union of every sensor's chain over one "
+            "shared pool of stages, so it contains cycles, and two alerts in "
+            "a cycle have no upstream-of between them. Whether any alert is "
+            "upstream of the rest is a property of the fleet, not of this "
+            "query: on the generated graph it turns on the chain sampling, "
+            "which moves with the upstream ONNX operator catalogue -- at 205 "
+            "operators `sensor:00000` reaches the other two and neither "
+            "reaches it, at 379 all three reach each other. So the catalog "
+            "set is an example of the *shape*, not a worked root-cause. "
+            "`reaches` is what carries the answer: each id appearing in the "
+            "other's list means neither is upstream, and an alert named by "
+            "nobody is a root."),
+        # `OPTIONAL MATCH`, so an alert with nothing downstream still gets a
+        # row. Not a detail: the case that proves this ranks by dependency
+        # rather than by degree is the one where the alerts are independent
+        # and every count is 0. An inner `MATCH` drops those rows, and the
+        # output then reads "no answer" instead of "no root".
+        #
+        # `s` is re-bound in **leading** position, which is not note 1's shape
+        # -- that is a *trailing* bound variable in a second `MATCH`, where the
+        # join is not enforced. Measured rather than argued: in
+        # `tests/test_root_cause.py` a sensor whose chain touches nothing else
+        # scores 0 on a fixture where an unenforced join would score 3.
+        #
+        # **This counts reachability, and the stage graph has cycles**, so
+        # `downstream_alerts` is "alerts I can reach", never "alerts strictly
+        # beneath me". Two ways that happens:
+        #
+        #   - `*0..` includes the zero-length walk, so two sensors feeding the
+        #     *same* stage each count the other;
+        #   - `etl/generate.py` samples each sensor's chain from one shared
+        #     pool of 16 stages, so the union really does contain cycles --
+        #     `tests/test_blast_radius_semantics.py` names one
+        #     (`stage:00012 -> 00009 -> 00010 -> 00012`).
+        #
+        # Whether the shipped fleet has a root at all is **not stable**: the
+        # chain sampling moves with the upstream ONNX operator catalogue. At
+        # 205 operators `sensor:00000` reaches the other two and neither
+        # reaches it; at 379 (a fresh download, 2026-09-24) all three reach
+        # each other and there is no root. `tests/test_root_cause.py` pins
+        # the behaviour on fixtures it builds itself for that reason, and its
+        # full-scale test asserts only what holds on any fleet: the engine
+        # agrees with a Python BFS, and every mutual pair is visible in
+        # `reaches`.
+        #
+        # `reaches` exists to make that visible rather than leave it implied:
+        # if `b` is in `a`'s list and `a` is in `b`'s, neither is upstream of
+        # the other. Two shapes produce that, and the output cannot tell them
+        # apart: a genuine cycle, and two sensors feeding the *same* entry
+        # stage (the `*0..` zero-length walk makes each reach the other).
+        # Both mean the same thing to a caller -- no order between these two
+        # -- which is why one column serves both;
+        # `test_a_shared_entry_stage_reads_as_mutual_too` pins the second.
+        # `tests/test_root_cause.py::test_two_alerts_in_a_cycle_each_reach_the_other`
+        # pins it on a two-stage cycle built for the purpose.
+        #
+        # No `IS NOT NULL` guard: `o.id IN {alerts}` already excludes a
+        # `Sensor` carrying no `id`, which is measured rather than reasoned
+        # about -- a fixture holding one gives the same three rows with the
+        # guard and without it, so the guard was inert and note 8b's `<>`
+        # behaviour never reached it.
+        #
+        # **Cost.** `*0..` over a cyclic graph enumerates paths before
+        # `count(DISTINCT)` reduces them, so the work is bounded by paths and
+        # not by stages. Cheap on this fleet -- 16 stages, 40 `NEXT_STAGE`
+        # edges, 0.1 ms warm at `--scale 1.0` -- and that is a statement about
+        # the fixture, not about the shape: a denser real pipeline could grow
+        # this sharply, and the fix there is a bound on the walk, which costs
+        # the deep chains (`EA07`'s trade, one comment block above). Measure
+        # before assuming it still holds on real topology.
+        #
+        # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts
+        # reaching the same number of others, and their order among
+        # themselves carries no meaning. `LIMIT 20` truncates to the top 20
+        # by design -- the catalog's set is three ids, but the 3am case this
+        # is written for is twenty or more, and the rows past the twentieth
+        # are the ones nobody pages on.
+        "cypher": """
+MATCH (s:Sensor)
+WHERE s.id IN {alerts}
+OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
+WHERE o.id IN {alerts} AND o.id <> s.id
+WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
+     collect(DISTINCT o.id) AS reaches
+RETURN alert, downstream_alerts, reaches
+ORDER BY downstream_alerts DESC
+LIMIT 20
+""".replace("{alerts}", _alert_list(EA21_ALERTS)),
     },
 ]
 

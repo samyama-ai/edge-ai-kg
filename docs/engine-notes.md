@@ -668,7 +668,25 @@ query had to change.
 > `EA07`'s shape** -- a bounded walk returns the zero-length match and no
 > error -- and **loud for `EA17`'s**, where `size(r)` raises a type error. The
 > silent half is the dangerous one; the loud half is why `EA17` is
-> embedded-only.
+> embedded-only. **`EA21` (#36) joins it, and lands on the silent half.** It
+> walks `NEXT_STAGE*0..` and never calls `size(r)`, so the server has nothing
+> to reject.
+>
+> What it would return instead is **inferred from this note, not measured**;
+> nobody has run `EA21` against a 1.7.0 server. By this note the walk matches
+> only the zero-length case, which makes `x` the alerting sensor's own entry
+> stage. The count then reads "other alerts feeding that same stage" rather
+> than "other alerts anywhere downstream" -- not zeros necessarily, but wrong
+> numbers that look like an answer. That is why it is embedded-only rather
+> than server-with-a-caveat.
+>
+> `tests/test_correctness.py`'s `EMBEDDED_ONLY` is a hand-written set,
+> `{"EA17", "EA21"}`. What is derived from the Cypher is the set the test
+> compares it against: every query whose walk is unbounded. So a *new* query
+> with an unbounded walk fails that test until someone adds it here and to
+> the pages, which is the drift it exists to catch. It checks none of the
+> prose above -- what the server actually returns for `EA21` is unmeasured,
+> and no test can settle that without a 1.7.0 server to run it against.
 >
 > **Version labels, because this file carries two vintages.** Notes 1-9 are
 > the **1.7.0 server**; notes 10 and 11 compare it against `samyama` **0.6.1**

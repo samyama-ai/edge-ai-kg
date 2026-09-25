@@ -147,7 +147,7 @@ real/synthetic split is therefore *queryable* (see EA16), not a README claim.
 
 ### The query catalog is the single source of truth
 
-`benchmarks/queries.py` holds 19 entries (`EA01`–`EA19`), each with
+`benchmarks/queries.py` holds 20 entries (`EA01`–`EA19` and `EA21`), each with
 `question` / `why_graph` / `cypher`, exported as `QUERIES` and `BY_ID`. It is
 consumed by `benchmarks/run_benchmark.py`, `demo/questions.py` and
 `tests/test_correctness.py`. Editing a query changes the benchmark, the demo and
@@ -213,13 +213,23 @@ half you get depends on the query. The 1.7.0 server does not *traverse* a
 variable-length relationship the embedded 1.7.1 build walks: it matches only
 the zero-length case, silently, and it *rejects* `size(r)` over such a
 relationship outright. `EA17` asks for `size(r)`, so on the server it **raises**
--- which is why it is embedded-only rather than reshaped. `EA07` walks a
+-- which is why it is embedded-only rather than reshaped. **`EA21` is
+embedded-only for the other half of the same note**: it walks `NEXT_STAGE*0..`
+and never calls `size(r)`, so the server has nothing to reject. What it would
+return instead is **inferred from note 12, not measured** -- nobody has run
+`EA21` against a 1.7.0 server -- and the inference is that the walk matches
+only the zero-length case, making `x` the alerting sensor's own entry stage,
+so the count reads "other alerts feeding that same stage" rather than "other
+alerts downstream": wrong numbers that look like an answer. That is the
+dangerous half, and it is why the set is derived from the Cypher rather than
+from which queries happen to error. `EA07` walks a
 bounded `*0..3` without `size(r)`, so it runs; note 12 measured both builds
 returning byte-identical rows for it, which its `ORDER BY ... LIMIT 10` makes
 true on this graph and nothing enforces. That set is derived rather than asserted:
 `tests/test_correctness.py::test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk`
 fails if a new query carries an unbounded `*0..`, because this sentence,
-`README.md` and note 12 all name `EA17` as the only one. Notes 13 and 13b were measured on embedded
+`README.md` and note 12 all name the same set -- it is what caught `EA21`
+joining it. Notes 13 and 13b were measured on embedded
 1.7.1 while writing `EA18`: a `WHERE` on an `OPTIONAL MATCH` mentioning a
 **`WITH`-introduced** alias drops the unmatched rows, and an expression mixing
 a grouping key with an aggregate in one projection returns `NULL`. Note 13 has

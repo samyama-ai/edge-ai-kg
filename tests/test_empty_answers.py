@@ -20,8 +20,12 @@ note 10 until #105 raised the engine floor to 1.7.1 and removed the marks
 The alerting queries keep their zero-and-one-row pairs beside their other
 fixtures rather than here: `EA18` in `tests/test_latency_budget.py` (over budget
 and within it), `EA19` in `tests/test_certification_alerts.py` (a governed task
-and an ungoverned one). This module covers the catalog queries that have no
-module of their own.
+and an ungoverned one), and `EA21` in `tests/test_root_cause.py`, where the
+pair is a known alert against an unknown id: the first gets a row, the second
+gets none at all rather than a row scoring zero. `EA21` itself always returns
+rows -- the catalog's sensors exist at every scale and its `OPTIONAL MATCH`
+keeps them -- so it is not excused in the sweep. This module covers the
+catalog queries that have no module of their own.
 
 It matters here more than most repos, because the catalog's central question is
 a **negative** -- operators with *no* kernel -- so an empty result is the

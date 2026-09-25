@@ -146,9 +146,9 @@ Two practical notes, both measured:
   signature, and it is exactly the "returns nothing rather than erroring" shape
   `engine-notes.md` catalogues.
 
-**Measured by absence, still true:** of the 19 catalog queries, two (`EA07` and
-`EA17`) use a variable-length path and none uses `shortestPath` or any of the
-algorithms above. They are available and unused.
+**Measured by absence, still true:** of the 20 catalog queries, three
+(`EA07`, `EA17` and `EA21`) use a variable-length path and none uses
+`shortestPath` or any of the algorithms above. They are available and unused.
 
 ### Ecosystem and hiring — they win
 
