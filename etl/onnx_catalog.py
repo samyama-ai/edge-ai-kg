@@ -18,7 +18,29 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ONNX_DIR = DATA_DIR / "onnx"
-OPERATORS_URL = "https://raw.githubusercontent.com/onnx/onnx/main/docs/Operators.md"
+# Pinned to a commit, not to `main`. Upstream edits `docs/Operators.md`
+# continuously -- 20 commits touched it in the three weeks to 2026-09-16 -- and
+# `etl/generate.py` builds `Kernel` rows from the parsed result, so the draw
+# shifts the shared random stream: a catalogue that moves reshapes the fleet at
+# an unchanged seed. Tracking `main` therefore made every published figure in
+# this repo a function of *when* someone last downloaded, which is what
+# `docs/build-manifest.json` had to fingerprint around.
+#
+# This is a pin, not a vendoring: the file still comes from upstream at build
+# time, and which upstream state we track is a reviewed decision rather than an
+# accident of timing.
+#
+# `adda7bc7e8` is the revision every figure currently published in this repo was
+# measured on -- chosen for that reason rather than for being newest, so pinning
+# cost no re-baselining. To move it: change `ONNX_REF`, run
+# `python -m etl.download_data --force`, then `python -m etl.manifest --check`,
+# and update the published figures it names. `main` HEAD on 2026-09-16 parsed to
+# the same 205 operators but differed in 17 operator records, which is exactly
+# the silent kind of move this pin exists to stop.
+ONNX_REF = "adda7bc7e805f376c5c64ade2614133445ee8298"
+OPERATORS_URL = (
+    f"https://raw.githubusercontent.com/onnx/onnx/{ONNX_REF}/docs/Operators.md"
+)
 
 # Operator name -> coarse category. Used to shape which accelerators plausibly
 # implement which operator, and to make the graph readable in a demo.

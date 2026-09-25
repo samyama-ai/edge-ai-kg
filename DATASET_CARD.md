@@ -282,10 +282,18 @@ python -m etl.download_data --seed 20260814 --scale 1.0
 ```
 
 `--seed` and `--scale` determine the **synthetic** layer *given the same ONNX
-operator catalogue* — and that qualification is load-bearing, because the
-catalogue is fetched from upstream rather than pinned. `etl/generate.py` builds
-`Kernel` rows from it, and the draw shifts the shared random stream, so a
-catalogue refresh reshapes the fleet at an unchanged seed.
+operator catalogue* — and that qualification is load-bearing. `etl/generate.py`
+builds `Kernel` rows from the catalogue, and the draw shifts the shared random
+stream, so a catalogue that moves reshapes the fleet at an unchanged seed.
+
+**The catalogue is therefore pinned to a commit** (`etl/onnx_catalog.ONNX_REF`),
+the revision every figure published here was measured on. So the seed *does*
+determine the fleet, as long as the pin holds. It is a pin rather than a
+vendored copy: the file is still fetched from upstream at build time, and which
+upstream state this repo tracks is a reviewed decision rather than whenever
+someone last downloaded. **Moving the pin moves published figures** — the
+procedure is in `etl/onnx_catalog.py`, and `python -m etl.manifest --check`
+names the figures that need updating.
 
 Measured on two catalogues differing by a single operator, at seed `20260814`:
 
@@ -301,8 +309,14 @@ headline figures for the real build are above.)
 
 Node **ids** are stable — `Deployment`, `Board`, `Sensor` and `Model` mint the
 same ids either way — so what moves is counts and property *values*:
-`latency_ms` differed on all 144 deployments. Re-run with the same catalogue
-and the fleet is identical, which is the half of the promise that does hold.
+`latency_ms` differed on all 144 deployments. Re-run against the pinned
+catalogue and the fleet is identical.
+
+That measurement is why the pin exists rather than a warning to read carefully:
+upstream edited `docs/Operators.md` twenty times in the three weeks to
+2026-09-16, and its `main` on that date parsed to the same 205 operators while
+differing in 17 operator records — a move that changes generated values while
+leaving every count someone would check unchanged.
 
 `--scale` multiplies fleet size (`1.0` ≈ 24.1K synthetic nodes). The generator
 guarantees that every `ClinicalTask` has at least one `Model` at any scale.
@@ -310,13 +324,15 @@ guarantees that every `ClinicalTask` has at least one `Model` at any scale.
 Which catalogue a build used is recorded in
 [`docs/build-manifest.json`](docs/build-manifest.json) under
 `inputs.onnx_catalogue`, so a figure can be traced to the input it came from;
-`python -m etl.manifest --check` reports an upstream move as its own case.
+`python -m etl.manifest --check` reports a move as its own case. With the pin in
+place that check should only ever fire after the pin is deliberately moved.
 
 The **real** layer is not scaled or seeded — it is whatever the upstream
 sources say. It is therefore reproducible only up to the upstream state at
-fetch time: `onnx/onnx` and `microsoft/onnxruntime` are fetched from `main` and
-will drift, while `mlcommons/tiny_results_v1.2` is a frozen published round and
-will not. Cached copies live under `data/` so a given build is re-loadable
+fetch time. `onnx/onnx`'s operator catalogue is **pinned to a commit**
+(`etl/onnx_catalog.ONNX_REF`), so it drifts only when the pin is moved;
+`microsoft/onnxruntime` is still fetched from `main` and will drift, while
+`mlcommons/tiny_results_v1.2` is a frozen published round and will not. Cached copies live under `data/` so a given build is re-loadable
 even after upstream moves.
 
 Load the layers independently:
@@ -428,10 +444,16 @@ sort key *and* actually returns sorted rows. See `docs/engine-notes.md`.
 
 **Refresh cadence:** The real and synthetic layers behave differently, and this
 repository has no automated refresh for either:
-- **onnx/onnx** and **microsoft/onnxruntime** are fetched from their `main`
-  branches, which move continuously with every upstream commit -- there is no
-  fixed release cadence to track, and a re-fetch will drift from what is cached
-  here (see "Out-of-scope uses" above: "It moves. Re-fetch before drawing
+- **onnx/onnx**'s operator catalogue is pinned to a commit
+  (`etl/onnx_catalog.ONNX_REF`), so a re-fetch reproduces what is cached here.
+  Upstream still moves — twenty commits touched `docs/Operators.md` in the three
+  weeks to 2026-09-16 — so the pin goes stale rather than the build going
+  unreproducible, and moving it is a reviewed change that updates published
+  figures.
+- **microsoft/onnxruntime** is fetched from its `main` branch, which moves
+  continuously with every upstream commit -- there is no fixed release cadence
+  to track, and a re-fetch will drift from what is cached here (see
+  "Out-of-scope uses" above: "It moves. Re-fetch before drawing
   conclusions.").
 - **mlcommons/tiny_results_v1.2** is a frozen, already-published benchmark round;
   it will not change, though MLCommons periodically publishes new rounds (later

@@ -39,7 +39,8 @@ TESTS = pathlib.Path(__file__).resolve().parent
 # apply". Matched against the reason string; anything else is assumed to be a
 # legitimate body skip, because guessing the other way would fail the suite for
 # the wrong reason.
-ENVIRONMENT = ("engine unavailable", "download_data", "no TOML reader")
+ENVIRONMENT = ("engine unavailable", "download_data", "no TOML reader",
+               "catalogue moved")
 
 
 def _is_fixture(node: ast.FunctionDef) -> bool:

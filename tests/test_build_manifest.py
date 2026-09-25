@@ -93,7 +93,6 @@ def test_the_generated_layer_matches_the_manifest(comparable, recorded):
     Fails with the same per-key diff the CLI prints, so a genuine generator
     change names the published figures that need updating.
     """
-    fresh = comparable
     # `both_layers_total` is excluded as well as `added_by_real_layer`: it is
     # generated + real, so pinning it pins the upstream half by the back door.
     # Verified rather than assumed -- simulating an upstream-only move (four
@@ -101,7 +100,8 @@ def test_the_generated_layer_matches_the_manifest(comparable, recorded):
     upstream = {"added_by_real_layer", "both_layers_total"}
     for section in ("nodes", "edges"):
         mine = {k: v for k, v in recorded[section].items() if k not in upstream}
-        theirs = {k: v for k, v in fresh[section].items() if k not in upstream}
+        theirs = {k: v for k, v in comparable[section].items()
+                  if k not in upstream}
         diff = manifest.differences(mine, theirs, section)
         assert not diff, (
             "the generated layer no longer matches docs/build-manifest.json:\n"
