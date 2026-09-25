@@ -15,10 +15,11 @@
 # probe is a permanent excuse not to fix the thing it probes.
 name: Runner probe
 
+# Manual only. These jobs answered their question already -- the answers are
+# in `ci.yml`'s header -- and several take minutes, so running them on every
+# push would cost more than they now return. Trigger from the Actions tab when
+# the runner changes or CI starts failing in a way nobody can read.
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
