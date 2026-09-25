@@ -379,13 +379,25 @@ def test_ea20_has_no_limit_so_no_affected_site_can_fall_off(operators):
     # the reader that `benchmarks/queries.py` documents the boundary while the
     # entry carried no comment at all -- a test asserting a claim the code does
     # not make. Source text, because a `#` comment is not data.
-    catalog_source = (ROOT / "benchmarks" / "queries.py").read_text(encoding="utf-8")
+    # Found by searching the catalog package rather than by naming one file:
+    # the entries moved out of `benchmarks/queries.py` into
+    # `benchmarks/catalog/` when that file outgrew the reviewable line limit,
+    # and a path hardcoded here would break on the next such move while the
+    # note it checks was still perfectly correct.
+    catalog_files = sorted((ROOT / "benchmarks" / "catalog").glob("*.py"))
+    holding = [f for f in catalog_files
+               if '"id": "EA20"' in f.read_text(encoding="utf-8")]
+    assert len(holding) == 1, (
+        f"expected exactly one catalog module to define EA20, found "
+        f"{[f.name for f in holding]}")
+    source_file = holding[0]
+    catalog_source = source_file.read_text(encoding="utf-8")
     start = catalog_source.index('"id": "EA20"')
     entry = catalog_source[start:catalog_source.index("\n    },", start)]
     for expected in ("No `LIMIT`", str(max(DOCUMENTED_SCALES)),
                      str(DOCUMENTED_SCALES[max(DOCUMENTED_SCALES)])):
         assert expected in entry, (
-            f"`benchmarks/queries.py`'s EA20 entry does not mention "
+            f"{source_file.name}'s EA20 entry does not mention "
             f"{expected!r}. This test points a reader there for why the query "
             f"is unbounded, so the note has to exist and has to move when the "
             f"site density does.")
@@ -399,5 +411,5 @@ def test_ea20_has_no_limit_so_no_affected_site_can_fall_off(operators):
         count = len(built.nodes["Site"])
         assert count == expected, (
             f"--scale {scale} now generates {count} sites, not {expected}. "
-            f"Site density changed, so re-measure this table and the note in "
-            f"`benchmarks/queries.py` with it.")
+            f"Site density changed, so re-measure this table and the note "
+            f"beside EA20 in `benchmarks/catalog/` with it.")
