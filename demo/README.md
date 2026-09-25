@@ -12,8 +12,9 @@ Cypher it becomes, the answer, and why the question is awkward without a graph.
 EA13-EA16 run on the real ONNX Runtime and MLPerf Tiny layers, so their answers
 are checkable against the upstream sources.
 
-**The GIF above records 16 of them.** It was taken on 2026-08-14, before `EA20`
-joined the catalog with #34; re-recording picks it up.
+**The GIF above records 16 of them.** It was taken on 2026-08-14, before
+`EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA20` (#34) joined the catalog;
+re-recording picks all four up.
 `tests/test_demo_recording.py` fails if a query the recording *did* show ever
 goes missing, and it checks both captions that state a count against the
 recording itself: the root [`README.md`](../README.md)'s "N of the M catalog
@@ -53,7 +54,8 @@ vertical image with nothing scrolling off — the convention shared with
 `samyama-graph/case_studies/_lib/record_gif.sh`. 100 columns at font-size 18
 gives the 1105 px width every other case-study and `-kg` GIF uses; the height
 is whatever the run needs: 10,987 px for the 16 questions in the 2026-08-14
-recording, and taller once `EA20` is recorded too.
+recording, and taller once the four queries that post-date it are recorded
+too.
 
 ```bash
 PYTHON=.venv/bin/python SG_URL=http://127.0.0.1:8080 scripts/record_gif.sh

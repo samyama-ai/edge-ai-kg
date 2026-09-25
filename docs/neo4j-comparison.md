@@ -258,7 +258,7 @@ not reproduce** for them.
 | indexes | the same 22 on both, translated from `schema/edge_ai_kg.cypher` (the schema declares 23 since `Site(id)` landed with #34, after this run) |
 | method | 10-pass catalog warm-up, then 10 per-query warm-ups, then median of 15 |
 | runs | two, both published |
-| queries | identical Cypher text; all 16 in the catalog then parse on Neo4j 5 unchanged. `EA20` (#34) landed after this run and has not been measured here |
+| queries | identical Cypher text; `EA01`-`EA16` parse on Neo4j 5 unchanged, which was the whole catalog when this ran. `EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA20` (#34) all post-date it and are unmeasured on Neo4j |
 
 ## What this does not measure
 

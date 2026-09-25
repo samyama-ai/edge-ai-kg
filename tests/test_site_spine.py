@@ -1,17 +1,20 @@
-"""The `Site` spine (#34): the generator's invariants, and `EA20` against truth.
+"""The `Site` spine (#34): the generator's invariants, and the shared helpers.
 
-`EA20` answers "is this a site-wide problem or one device", which is a
-*comparison* of two counts on the same row -- how many deployments a site holds
-against how many of them are on the recalled board. A query that returns
-plausible rows is not evidence either count is right, so both are recomputed
-here from the `Fleet` in Python and compared row by row, the way
-`tests/test_correctness.py` checks the rest of the catalog.
+**`EA20` against ground truth lives in `tests/test_site_queries.py`**, which
+recomputes both of its columns from the `Fleet` and compares them row by row.
+The two were one module until it passed 500 lines and the review harness stops
+reading a file that long; this half is the part that needs no engine.
 
-The generator invariants are checked separately and without an engine, because
-they are what the query rests on: one site per deployment, sites that exist at
-every shipped scale, and more than one campus to group by. A deployment in two
-places, or none, turns `deployments_here` from a count into a sum over an
-unknown multiplicity and nothing in the query would say so.
+What is checked here is what that query rests on: one site per deployment,
+sites at every shipped scale, more than one campus to group by, placement that
+does not move the cost model, and names that stay distinct where the suffix
+list wraps. A deployment in two places, or none, turns `deployments_here` from
+a count into a sum over an unknown multiplicity, and nothing in the query
+would say so.
+
+`COL`, `RECALLED_BOARD`, `deployed_at`, `on_board` and the `loaded` fixture are
+defined here and imported by `tests/test_site_queries.py`; they look unused
+when this file is read alone.
 """
 from __future__ import annotations
 
@@ -220,12 +223,20 @@ def test_a_tiny_scale_still_has_two_places_to_compare():
             f"before the floor is reached, or the floor buys nothing")
 
 
-def _generator_from(ref: str):
+# The commit before `Site` existed. A **fixed** commit, not `origin/main`:
+# once this PR merges, `origin/main` contains `Site` too, and a comparison
+# against it becomes this generator against itself -- passing forever while
+# testing nothing. A branch name also makes the result depend on how recently
+# someone fetched. This commit is an ancestor of `main`, so it stays readable.
+PRE_SITE_COMMIT = "1b0818f"
+
+
+def _generator_from(ref: str, monkeypatch):
     """`etl/generate.py` as of `ref`, importable beside the current one.
 
-    Skips rather than fails when git or the ref is unavailable: the point is
-    to compare this branch against the code before `Site` existed, and a
-    shallow clone or a detached export simply cannot do that.
+    Skips rather than fails when git or the commit is unavailable: the point
+    is to compare against the code before `Site` existed, and a shallow clone
+    or a detached export simply cannot do that.
     """
     import importlib.util
     import subprocess
@@ -246,12 +257,14 @@ def _generator_from(ref: str):
     module = importlib.util.module_from_spec(spec)
     # Registered before execution: the module defines dataclasses, and
     # `@dataclass` resolves `cls.__module__` through `sys.modules`.
-    sys.modules[name] = module
+    # Through `monkeypatch`, so it is removed again when the test ends rather
+    # than left for whatever imports next.
+    monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
     return module
 
 
-def test_placing_sites_did_not_move_any_deployment_metric(operators):
+def test_placing_sites_did_not_move_any_deployment_metric(operators, monkeypatch):
     """The `Site` draw must not consume from the generator's shared stream.
 
     A `rng.choice(sites)` in the deployment loop shifts every later draw, so a
@@ -259,19 +272,22 @@ def test_placing_sites_did_not_move_any_deployment_metric(operators):
     that a seed reproduces the graph byte-for-byte, and
     `docs/data-provenance.md`'s figures rest on it.
 
-    **Compared against the generator before `Site` existed, not against pinned
-    numbers.** This test used to assert `deploy:00000` reads 309.291 / 769.61,
-    recorded from `main`. Those values are a function of the upstream ONNX
-    catalogue, which is not pinned: the catalogue moved to 379 operators, the
-    figures became 59.141 / 6.58, and the test failed on a fresh checkout while
-    every cached checkout stayed green -- a pin that rots on someone else's
-    release schedule, hidden by our own stale `data/`.
+    **Compared against the generator at a fixed pre-`Site` commit, not against
+    pinned numbers and not against a branch.** This test used to assert
+    `deploy:00000` reads 309.291 / 769.61, recorded from `main`. Those values
+    are a function of the upstream ONNX catalogue, which is not pinned: the
+    catalogue moved to 379 operators, the figures became 59.141 / 6.58, and the
+    test failed on a fresh checkout while every cached checkout stayed green --
+    a pin that rots on someone else's release schedule, hidden by our own stale
+    `data/`. The baseline was then `origin/main`, which rots differently: the
+    day this merges, `main` has `Site` and the comparison is this generator
+    against itself.
 
     Both runs here are given the *same* operator list, so the catalogue cancels
     out and what is left is the question actually worth asking: does adding
     `Site` move any deployment metric? Measured over all 1,440, not two.
     """
-    before = _generator_from("origin/main")
+    before = _generator_from(PRE_SITE_COMMIT, monkeypatch)
     old = {row["id"]: (row["latency_ms"], row["power_mw"])
            for row in before.generate(seed=before.DEFAULT_SEED, scale=1.0,
                                       operators=operators).nodes["Deployment"]}

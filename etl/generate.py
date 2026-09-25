@@ -48,10 +48,23 @@ GENERATED_LABELS = ("Accelerator", "Board", "Certification", "ClinicalTask",
 class StaleFleetCache(RuntimeError):
     """`data/fleet/fleet.json` predates a label `etl.loader` now expects.
 
-    Its own type rather than a bare `RuntimeError`: a caller that wants to
-    regenerate instead of failing -- a future `--refresh-stale` -- needs to
-    tell this apart from any other read failure.
+    Its own type rather than a bare `RuntimeError`: a caller that regenerates
+    instead of failing -- `etl.loader` does -- needs to tell this apart from
+    any other read failure.
+
+    It carries the **cache's own** `seed` and `scale`, not the caller's. A
+    regeneration that used the CLI defaults would hand back a different fleet
+    from the one the reader had cached: a `--scale 0.3` cache would silently
+    become a scale-1.0 one, and the run after it would be measuring a
+    different graph than the run before.
     """
+
+    def __init__(self, message: str, *, missing: tuple[str, ...],
+                 seed: int, scale: float):
+        super().__init__(message)
+        self.missing = missing
+        self.seed = seed
+        self.scale = scale
 DEFAULT_SEED = 20260814
 
 # Deployment latency is the cost model's output times a spread, rounded.
@@ -641,8 +654,11 @@ def load(path: Path = FLEET_PATH) -> Fleet:
     than "your cache is old"; `--verify` does not catch it either, because it
     compares the load against this same cache.
 
-    A missing label is therefore an error with the command to fix it, not a
-    warning. Extra labels are ignored: a cache written by a *newer* checkout
+    A missing label is therefore refused here rather than loaded. What to do
+    about it belongs to the caller, not to this function: `etl.loader`
+    regenerates from the cache's own seed and scale, which the exception
+    carries, while a caller reading the fleet directly gets the command in the
+    message. Extra labels are ignored: a cache written by a *newer* checkout
     is not this function's business.
     """
     if not path.exists():
@@ -658,7 +674,8 @@ def load(path: Path = FLEET_PATH) -> Fleet:
             f"{path} was written before {', '.join(missing)} existed, so every "
             f"query over {'it' if len(missing) == 1 else 'them'} would return "
             f"zero rows and look like a real answer. Re-run "
-            f"`python -m etl.download_data` to rebuild it.")
+            f"`python -m etl.download_data` to rebuild it.",
+            missing=tuple(missing), seed=fleet.seed, scale=fleet.scale)
     return fleet
 
 

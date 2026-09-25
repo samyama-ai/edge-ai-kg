@@ -8,10 +8,11 @@ Answers #34. **Reverses the decline recorded in
 > with three reasons, and this page does not pretend they evaporated. Only
 > **one is answered** below; the other **two are accepted as real costs**. The
 > decision is the repo owners' to make. **If the decline stands, the PR
-> carrying this page should be closed rather than merged**, and
-> `alerting-scope.md`'s section reads as written with
-> its "superseded" banner removed. The code is then what the "yes" branch would
-> have cost, made concrete — which is easier to judge than the argument alone.
+> carrying this page should be closed rather than merged**, which also
+> removes the "superseded" banner this PR adds to `alerting-scope.md` and
+> leaves that page reading exactly as it does today. The code is then what the
+> "yes" branch would have cost, made concrete — which is easier to judge than
+> the argument alone.
 
 ## What was decided before, and what changed
 
@@ -32,17 +33,13 @@ and `EA19` (which certifications are implicated) answer the other halves, and
 neither can say *where to send someone* — the first thing an operations team
 asks once it knows what broke.
 
-Both of those are **merged but not yet on `main`**: they landed on
-`test/embedded-engine-fixture-only` after the PR that carried it to `main` had
-closed, and #113 is the open PR that delivers them.
+Both of those are now **on `main`**, delivered by #113. They were merged into
+a base branch whose own PR had already closed, so for two days they existed
+without reaching `main`; that is resolved, and the argument above no longer
+leans on anything pending.
 
-Be clear about what that does to this argument. `EA20` itself depends on
-nothing off-`main` — it walks `Site`, `Deployment` and `Board`, all present
-here — so the code stands on its own. **The argument does lean on work that is
-not on `main` yet**, and if #113 never lands, the reversal is buying the first
-question of an alerting theme this repo does not otherwise have. That is a
-reason to decide #113 and this together, not a reason to pretend the
-dependency is absent.
+`EA20` itself depends on nothing beyond `main` in any case — it walks `Site`,
+`Deployment` and `Board` — so the code stands on its own either way.
 
 ## The three reasons against, taken one at a time
 
@@ -115,7 +112,8 @@ Two counts arrive on one row — the site's deployments, and how many are on the
 recalled board — so the difference between "replace one unit in Ward 3" and
 "this whole floor is affected" is readable rather than inferred. Both columns
 are recomputed from the `Fleet` in Python and compared row by row in
-`tests/test_site_spine.py`.
+`tests/test_site_queries.py::test_ea20_counts_match_ground_truth`; the
+generator invariants it rests on are in `tests/test_site_spine.py`.
 
 **What that demonstrates depends on which run you do, and the difference is
 worth stating on a page arguing to be judged on what was measured.** The
@@ -124,16 +122,16 @@ site holds at least one of the recalled board, so it can show a *partially*
 affected site and nothing else. The contrast case, a site holding **none** of
 them, needs the shipped graph: it is
 `test_ea20_shows_both_affected_and_untouched_sites_at_full_scale`, which is
-**skipped unless `pytest --full-scale` is given**. Measured on that run: of 12
-sites, 6 held none of `board:00003` and 6 held some but not all. So "site-wide
-or one device" is demonstrated at `--scale 1.0` and only half-demonstrated by
-a default run.
+**skipped unless `pytest --full-scale` is given**. Measured on that run, on a
+205-operator catalogue: of 12 sites, 6 held none of `board:00003` and 6 held
+some but not all. So "site-wide or one device" is demonstrated at `--scale
+1.0` and only half-demonstrated by a default run.
 
 **That 6/6 split moves with the upstream ONNX catalogue, not only with the
 seed.** The catalogue decides how many kernels each accelerator registers,
 which decides which boards a variant fits, which decides where deployments
-land; on a 205-operator catalogue the split is 6 and 6, and on the current
-379-operator one it is 5 untouched of 12. The test asserts only that **both
+land. The 6-and-6 above is the 205-operator catalogue; on a 379-operator one
+it is 5 untouched of 12. The test asserts only that **both
 kinds exist**, never the ratio, because a number that moves on someone else's
 release schedule is not a claim this repo can keep.
 

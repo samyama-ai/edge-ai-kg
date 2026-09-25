@@ -307,3 +307,57 @@ def test_a_fleet_cache_written_before_a_label_existed_is_refused(tmp_path):
     # A cache from a *newer* checkout is not this function's business.
     write({**complete, "Warehouse": [{"id": "warehouse:00000"}]})
     gen.load(path)
+
+
+def test_a_stale_cache_is_rebuilt_at_its_own_seed_and_scale(tmp_path, monkeypatch):
+    """`etl.loader`'s answer to a stale cache, which is not `gen.load`'s.
+
+    `gen.load` refuses; the loader regenerates, because it can run the command
+    the reader would otherwise be told to run. What it must *not* do is
+    regenerate at the CLI's defaults: the cache was written by some earlier
+    run, and rebuilding a `--scale 0.25` fleet at the default 1.0 would answer
+    a stale-cache problem by silently swapping the graph underneath the next
+    measurement.
+
+    Driven through the CLI with the engine stubbed out, so it tests the branch
+    rather than a load -- no engine and no `data/` needed.
+    """
+    from click.testing import CliRunner
+
+    from etl import loader
+
+    built = []
+
+    def fake_load():
+        raise gen.StaleFleetCache("cache predates Site", missing=("Site",),
+                                  seed=4242, scale=0.25)
+
+    def fake_generate(seed, scale, **kwargs):
+        built.append((seed, scale))
+        return gen.Fleet(seed=seed, scale=scale)
+
+    monkeypatch.setattr(loader.gen, "load", fake_load)
+    monkeypatch.setattr(loader.gen, "generate", fake_generate)
+    monkeypatch.setattr(loader.gen, "write", lambda fleet: tmp_path / "fleet.json")
+    class FakeClient:
+        """Answers the node-count verification and nothing else."""
+
+        def query(self, statement, graph):
+            import types
+            return types.SimpleNamespace(records=[[0]])
+
+    monkeypatch.setattr(loader, "connect", lambda url: FakeClient())
+    monkeypatch.setattr(loader, "reset_graph", lambda client, graph: None)
+    monkeypatch.setattr(loader, "apply_schema", lambda client, graph: 0)
+    monkeypatch.setattr(loader, "create_nodes", lambda *a, **k: 0)
+    monkeypatch.setattr(loader, "create_edges", lambda *a, **k: 0)
+
+    result = CliRunner().invoke(loader.main, ["--layers", "synthetic", "--no-verify"])
+
+    assert result.exit_code == 0, result.output
+    assert built == [(4242, 0.25)], (
+        f"the loader rebuilt a stale cache at {built}, not at the cache's own "
+        f"(4242, 0.25). Regenerating at the CLI defaults hands back a "
+        f"different fleet than the one that was cached.")
+    assert "predates Site" in result.output, (
+        f"the reader is not told which label went missing:\n{result.output}")

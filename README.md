@@ -93,8 +93,10 @@ carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
 1,513 deployments (73 of them real MLPerf Tiny measurements).
 **Clinical**: 14 biosignal sensors, 16 DSP stages, 18 clinical tasks, 4 MLPerf
 benchmark tasks, 12 datasets, 6 certifications.
-**Places**: 12 sites across 4 campuses, one per generated deployment
-([#34](docs/location-scope.md)); real MLPerf submissions are given none.
+**Places**: 12 sites across 4 campuses; every generated deployment sits at
+exactly one of them (#34 — the shape is argued in
+[`docs/location-scope.md`](docs/location-scope.md)). Real MLPerf submissions
+are given none.
 
 Full detail in [`docs/schema.md`](docs/schema.md).
 
@@ -162,14 +164,16 @@ before the upgrade too. Note 10 made them raise on the old embedded build, but
 only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
 yields nothing, so the failing clause was never reached.
 
-`EA18` and `EA19` are the two entries here **not** from the server run, which
-predates both. Their place in the table is **measured embedded**, against the
+`EA18`, `EA19` and `EA20` are the three entries here **not** from the server
+run, which predates all of them. Their place in the table is **measured embedded**, against the
 real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
 query and compares the result to this table. **Over HTTP it is expected, not
-measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
-`Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
-`EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
-build. The distinction between measured and expected is kept rather than
+measured**: the real layer has no `ClinicalTask`, no `Sensor` and no `Site`
+(it does have `Deployment`s, the MLPerf rows), and `EA18` opens on a
+`ClinicalTask`, `EA19` on a `Sensor` and `EA20` on a `Site`, so none of their
+opening `MATCH`es binds anything on either build. `Site` is generated-layer
+only by construction, which
+`tests/test_site_spine.py::test_the_real_layer_gets_no_sites` pins. The distinction between measured and expected is kept rather than
 smoothed over, because on this page it has mattered before.
 
 **"Identical" is a claim about this table, not about the two builds.** On the
@@ -344,8 +348,10 @@ Two things worth knowing before you quote the number:
 - **The download is slower than the import.** Fetching the 992 KB file took
   1.14 s here — about four times the import it precedes.
 - **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,162 /
-  77,743 a fresh build produces. It was exported from a slightly earlier build,
-  and `data/` is not pinned (see `docs/build-manifest.json`).
+  77,743 a fresh build produces. It predates the `Site` spine, so it is short
+  those 12 `Site` nodes and 1,440 `DEPLOYED_AT` edges as well as the 5 nodes
+  and 12 edges of upstream drift, and `data/` is not pinned (see
+  `docs/build-manifest.json`).
 
 16 of the 17 catalog queries then present were verified to return rows against
 the imported snapshot, not just against a freshly-loaded graph — re-check with
@@ -382,7 +388,7 @@ the question it answers and why it's awkward without a graph. On the
 the sweep of the **17** queries that existed when it was run; `EA18`, `EA19`
 and `EA20` post-date it and are not in that median.
 
-**Over HTTP, that is one fewer — 17 — and it is an inference, not a sweep.**
+**Over HTTP, that is one fewer — 18 — and it is an inference, not a sweep.**
 `EA17` raises on the 1.7.0 server, which *is* measured (engine note 12); the
 count is that measurement subtracted from the embedded result. No full-graph
 HTTP sweep has been run since `EA18` and `EA19` were added. The only recorded

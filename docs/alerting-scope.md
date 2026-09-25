@@ -26,6 +26,15 @@ product (`DATASET_CARD.md`). A `Site` or a `Team` has no upstream to derive
 from. It would be invented wholesale, be 100% synthetic, and look exactly as
 authoritative as the measured half.
 
+**One of the three declines has since been reversed, and the rule is left as
+written rather than softened.** #34 needed `Site`, a label with no upstream,
+and was taken anyway: [`location-scope.md`](location-scope.md) accepts that
+cost rather than refuting it — the sites *are* invented wholesale, and
+`provenance: synthetic` is what keeps them from reading as measured. So the
+rule below still states the test that was applied; what changed is that one
+question was judged worth paying it for. Editing the rule to fit the exception
+would hide the trade this page exists to record.
+
 The rule turns out to split the family cleanly, which is the reason to trust it
 rather than the reason it was chosen. Measured on the shipped graph:
 
@@ -36,7 +45,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** — delivered as beat 7 of `demo.demo` |
-| #34 | where the sensor physically is | `Site` | **declined, then taken** — see [`location-scope.md`](location-scope.md) |
+| #34 | where the sensor physically is | `Site` | **declined, then taken** — delivered as `EA20`; the reversal is [`location-scope.md`](location-scope.md) |
 | #39 | who owns the affected asset | `Team` | **decline** |
 | #38 | alert / rule / threshold state | `Alert` | **decline** |
 
@@ -173,7 +182,7 @@ asks for explicitly.
   argument. This page keeps the original reasoning above, marked superseded.
 - **Not that the two still declined are wrong forever.** #38 and #39 each name
   their join point and their blocker above, so revisiting is a decision rather
-  than a rediscovery -- which is exactly how #34 was revisited.
+  than a rediscovery — which is exactly how #34 was revisited.
 - **Not measured: whether anyone wants the five.** This records what the graph
   *can* answer and what it would have to invent. Demand is not evidence this
   repo holds.
