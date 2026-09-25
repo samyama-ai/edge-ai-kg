@@ -293,16 +293,64 @@ the questions are real.
 python -m etl.download_data --seed 20260814 --scale 1.0
 ```
 
-`--seed` fully determines the **synthetic** layer: same seed and scale reproduce
-the same nodes, edges and ids byte-for-byte. `--scale` multiplies fleet size
-(`1.0` ≈ 24.1K synthetic nodes). The generator guarantees that every
-`ClinicalTask` has at least one `Model` at any scale.
+`--seed` and `--scale` determine the **synthetic** layer *given the same ONNX
+operator catalogue* — and that qualification is load-bearing. `etl/generate.py`
+builds `Kernel` rows from the catalogue, and the draw shifts the shared random
+stream, so a catalogue that moves reshapes the fleet at an unchanged seed.
+
+**The catalogue is therefore pinned to a commit** (`etl/onnx_catalog.ONNX_REF`),
+the revision every figure published here was measured on. So the seed *does*
+determine the fleet, as long as the pin holds. It is a pin rather than a
+vendored copy: the file is still fetched from upstream at build time, and which
+upstream state this repo tracks is a reviewed decision rather than whenever
+someone last downloaded. **Moving the pin moves published figures** — the
+procedure is in `etl/onnx_catalog.py`, and `python -m etl.manifest --check`
+names the figures that need updating.
+
+Measured on two catalogues differing by a single operator, at seed `20260814`:
+
+At `--scale 0.3` the 205-operator catalogue gives 6,150 nodes and 18,176 edges.
+At `--scale 0.3` a catalogue one operator smaller gives 8,028 nodes and 23,787 edges.
+The operator removed is `ai.onnx.preview.training.Momentum`, the last entry the
+parser yields, so the figures above are reproducible: drop it from
+`load_cached()` and generate at seed `20260814`, `--scale 0.3`.
+
+That is a 31% move at an unchanged seed: `Kernel` went 5,559 → 7,438, and
+`deploy:00000.latency_ms` went 31.431 → 27.649. It moves *up* on a smaller
+catalogue, which reads backwards until you see why: the operator list is drawn
+against the shared random stream, so removing one entry reshapes every later
+draw rather than subtracting its own kernels.
+
+(Those are deliberately *not* the shipped graph's counts: they come from a
+reduced scale and a catalogue altered to demonstrate the dependency. The
+headline figures for the real build are above.)
+
+Node **ids** are stable — `Deployment`, `Board`, `Sensor` and `Model` mint the
+same ids either way — so what moves is counts and property *values*:
+`latency_ms` differed on all 144 deployments. Re-run against the pinned
+catalogue and the fleet is identical.
+
+That measurement is why the pin exists rather than a warning to read carefully:
+upstream edited `docs/Operators.md` twenty times in the three weeks to
+2026-09-16, and its `main` on that date parsed to the same 205 operators while
+differing in 17 operator records — a move that changes generated values while
+leaving every count someone would check unchanged.
+
+`--scale` multiplies fleet size (`1.0` ≈ 24.1K synthetic nodes). The generator
+guarantees that every `ClinicalTask` has at least one `Model` at any scale.
+
+Which catalogue a build used is recorded in
+[`docs/build-manifest.json`](docs/build-manifest.json) under
+`inputs.onnx_catalogue`, so a figure can be traced to the input it came from;
+`python -m etl.manifest --check` reports a move as its own case. With the pin in
+place that check should only ever fire after the pin is deliberately moved.
 
 The **real** layer is not scaled or seeded — it is whatever the upstream
 sources say. It is therefore reproducible only up to the upstream state at
-fetch time: `onnx/onnx` and `microsoft/onnxruntime` are fetched from `main` and
-will drift, while `mlcommons/tiny_results_v1.2` is a frozen published round and
-will not. Cached copies live under `data/` so a given build is re-loadable
+fetch time. `onnx/onnx`'s operator catalogue is **pinned to a commit**
+(`etl/onnx_catalog.ONNX_REF`), so it drifts only when the pin is moved;
+`microsoft/onnxruntime` is still fetched from `main` and will drift, while
+`mlcommons/tiny_results_v1.2` is a frozen published round and will not. Cached copies live under `data/` so a given build is re-loadable
 even after upstream moves.
 
 Load the layers independently:
@@ -419,17 +467,26 @@ sort key *and* actually returns sorted rows. See `docs/engine-notes.md`.
 
 **Refresh cadence:** The real and synthetic layers behave differently, and this
 repository has no automated refresh for either:
-- **onnx/onnx** and **microsoft/onnxruntime** are fetched from their `main`
-  branches, which move continuously with every upstream commit -- there is no
-  fixed release cadence to track, and a re-fetch will drift from what is cached
-  here (see "Out-of-scope uses" above: "It moves. Re-fetch before drawing
+- **onnx/onnx**'s operator catalogue is pinned to a commit
+  (`etl/onnx_catalog.ONNX_REF`), so a re-fetch reproduces what is cached here.
+  Upstream still moves — twenty commits touched `docs/Operators.md` in the three
+  weeks to 2026-09-16 — so the pin goes stale rather than the build going
+  unreproducible, and moving it is a reviewed change that updates published
+  figures.
+- **microsoft/onnxruntime** is fetched from its `main` branch, which moves
+  continuously with every upstream commit -- there is no fixed release cadence
+  to track, and a re-fetch will drift from what is cached here (see
+  "Out-of-scope uses" above: "It moves. Re-fetch before drawing
   conclusions.").
 - **mlcommons/tiny_results_v1.2** is a frozen, already-published benchmark round;
   it will not change, though MLCommons periodically publishes new rounds (later
   numbered TinyML results) that this repo does not track.
-- The **synthetic** fleet layer has no upstream to refresh against at all -- it
-  is regenerated deterministically from `--seed`/`--scale`, not refreshed from a
-  live source.
+- The **synthetic** fleet layer is regenerated from `--seed`/`--scale` rather
+  than refreshed from a live source -- but it is not independent of upstream:
+  it is built from the ONNX operator catalogue, so a refresh of that catalogue
+  moves the generated counts and property values (see "Generation" above).
+  `inputs.onnx_catalogue` in `docs/build-manifest.json` records which one a
+  build used.
 
 Rebuilding the real layer requires manually re-running
 `python -m etl.download_data`; there is no scheduled job that does this.

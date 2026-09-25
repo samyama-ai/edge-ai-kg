@@ -25,9 +25,11 @@ updated from the diff rather than from memory.
 The obvious framing -- generated is deterministic from the seed, so a mismatch
 means the generator changed -- is **wrong**, and the manifest was built on it at
 first. `etl/generate.py` creates Kernels from the ONNX operator catalogue, and
-`data/` is gitignored, so that catalogue is re-fetched from upstream rather than
-pinned. A refresh moves `Kernel` and every total derived from it while nothing in
-this repo changed.
+`data/` is gitignored, so each checkout holds whatever it last fetched. The
+catalogue is pinned to `etl.onnx_catalog.ONNX_REF` now, which makes a fresh
+build reproducible -- but a cache predating the pin, or a deliberate move of
+it, still moves `Kernel` and every total derived from it while nothing in this
+repo changed.
 
 So the manifest records the catalogue's **content fingerprint** alongside `seed`
 and `scale`, and `--check` reports an upstream move as its own case rather than
@@ -68,10 +70,12 @@ def catalogue_fingerprint(operators) -> dict:
     """Identify the ONNX operator catalogue this build was derived from.
 
     The generated layer is deterministic from the seed **given the same
-    operators** -- `etl/generate.py` builds Kernels from this catalogue, and
-    `data/` is gitignored, so it is re-fetched from upstream rather than pinned.
-    Without this, a diff cannot tell "our generator changed" from "ONNX
-    published", which is the one distinction this file exists to make.
+    operators** -- `etl/generate.py` builds Kernels from this catalogue. The
+    pin (`etl.onnx_catalog.ONNX_REF`) makes that hold for a fresh build; it
+    does not hold for a `data/` cached before the pin, and it stops holding
+    the moment the pin is moved. Without this, a diff cannot tell "our
+    generator changed" from "the catalogue did", which is the one distinction
+    this file exists to make.
 
     A content fingerprint rather than a version: the cache records
     `license`, `operator_count`, `operators` and `source`, and no version,
@@ -291,12 +295,14 @@ def main(write, check, seed, scale):
                    f"                          -> "
                    f"{new.get('operator_count')} operators "
                    f"({new.get('fingerprint')})", err=True)
-        click.echo("    `data/` is gitignored, so the catalogue is re-fetched "
-                   "rather than pinned.\n"
-                   "    Counts above may have moved for that reason alone. "
-                   "Re-baselining with --write\n"
-                   "    is correct only if you also intend the published "
-                   "figures to follow upstream.", err=True)
+        click.echo("    The catalogue is pinned to `etl.onnx_catalog."
+                   "ONNX_REF`, so the likeliest cause is a\n"
+                   "    `data/` cached before the pin: run `python -m "
+                   "etl.download_data --force` first.\n"
+                   "    If the pin was moved deliberately, re-baselining with "
+                   "--write is correct only\n"
+                   "    if you also intend the published figures to follow "
+                   "it.", err=True)
     else:
         click.echo("  The upstream input is unchanged, so the generator changed.\n"
                    "  Run `python -m etl.manifest --write` and commit the result "

@@ -116,7 +116,20 @@ Nothing writes Cypher directly from source data. Every path funnels through
 statements. Two independent producers fill the same Fleet:
 
 - **`etl/generate.py`** (synthetic): deterministic from `--seed` (default
-  `20260814`); `--scale` multiplies fleet size. Same seed → same graph, always.
+  `20260814`) **given the same ONNX operator catalogue**; `--scale` multiplies
+  fleet size. That qualification is load-bearing, and it is why
+  `etl/onnx_catalog.ONNX_REF` pins the catalogue to a commit: `Kernel` rows are
+  built from it and the draw shifts the shared random stream, so a catalogue
+  that moves reshapes the fleet at an unchanged seed — one operator more or
+  fewer moved a scale-0.3 fleet from 6,150 to 8,028 nodes and changed
+  `latency_ms` on every deployment. Ids are stable; counts and property values
+  are not. With the pin held, same seed → same graph; **moving the pin is a
+  reviewed change that moves published figures**. `python -m etl.manifest
+  --check` reports *that* the catalogue moved and by how much; it deliberately
+  does not advise re-baselining, because for an unintended move the fix is a
+  fresh fetch (`python -m etl.download_data --force`), not a new baseline.
+  `DATASET_CARD.md` has the measurement, and `inputs.onnx_catalogue` in
+  `docs/build-manifest.json` records which catalogue a build used.
   Vendor/board names are deliberately fictional so no generated number can be
   read as a claim about a real product.
 - **`etl/real_layer.py`** (real): stitches `onnx_catalog.py` (ONNX operator
