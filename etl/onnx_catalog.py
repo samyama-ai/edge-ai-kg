@@ -18,7 +18,29 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 ONNX_DIR = DATA_DIR / "onnx"
-OPERATORS_URL = "https://raw.githubusercontent.com/onnx/onnx/main/docs/Operators.md"
+# Pinned to a commit, not to `main`. Upstream edits `docs/Operators.md`
+# continuously -- 20 commits touched it in the three weeks to 2026-09-16 -- and
+# `etl/generate.py` builds `Kernel` rows from the parsed result, so the draw
+# shifts the shared random stream: a catalogue that moves reshapes the fleet at
+# an unchanged seed. Tracking `main` therefore made every published figure in
+# this repo a function of *when* someone last downloaded, which is what
+# `docs/build-manifest.json` had to fingerprint around.
+#
+# This is a pin, not a vendoring: the file still comes from upstream at build
+# time, and which upstream state we track is a reviewed decision rather than an
+# accident of timing.
+#
+# `adda7bc7e8` is the revision every figure currently published in this repo was
+# measured on -- chosen for that reason rather than for being newest, so pinning
+# cost no re-baselining. To move it: change `ONNX_REF`, run
+# `python -m etl.download_data --force`, then `python -m etl.manifest --check`,
+# and update the published figures it names. `main` HEAD on 2026-09-16 parsed to
+# the same 205 operators but differed in 17 operator records, which is exactly
+# the silent kind of move this pin exists to stop.
+ONNX_REF = "adda7bc7e805f376c5c64ade2614133445ee8298"
+OPERATORS_URL = (
+    f"https://raw.githubusercontent.com/onnx/onnx/{ONNX_REF}/docs/Operators.md"
+)
 
 # Operator name -> coarse category. Used to shape which accelerators plausibly
 # implement which operator, and to make the graph readable in a demo.
@@ -120,13 +142,43 @@ def parse_operators(markdown: str) -> list[Operator]:
     return list(ops.values())
 
 
+def cached_source() -> str | None:
+    """The URL the cached catalogue was fetched from, or `None` if unknown.
+
+    `build()` records it in `operators.json`. A checkout made before the pin
+    holds `.../onnx/main/docs/Operators.md`, which is how a cache can hold a
+    revision the pin no longer names.
+    """
+    path = ONNX_DIR / "operators.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("source")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def download(force: bool = False) -> Path:
-    """Fetch Operators.md into data/onnx/, unless already cached."""
+    """Fetch Operators.md into data/onnx/, unless the cache already matches the pin.
+
+    A cache keeps whatever revision it was fetched from, so returning it
+    unconditionally would let an old copy outlive a moved `ONNX_REF` -- the
+    pin would be true of the source and false of every build. When the
+    recorded source is not this `OPERATORS_URL`, the file is re-fetched
+    rather than reused, which is what makes "a re-fetch reproduces what is
+    pinned here" a fact rather than an instruction to remember `--force`.
+
+    An unknown source (no `operators.json` yet, or an unreadable one) is not
+    treated as a mismatch: the raw file alone carries no provenance, and
+    re-fetching on every call would make the cache pointless.
+    """
     import requests
 
     ONNX_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = ONNX_DIR / "Operators.md"
-    if raw_path.exists() and not force:
+    source = cached_source()
+    stale_pin = source is not None and source != OPERATORS_URL
+    if raw_path.exists() and not force and not stale_pin:
         return raw_path
     resp = requests.get(OPERATORS_URL, timeout=120)
     resp.raise_for_status()
