@@ -86,3 +86,42 @@ jobs:
           echo "apt-get : $(command -v apt-get || echo 'none')"
           echo "apk     : $(command -v apk || echo 'none')"
           echo "os      : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
+
+  # Round 2. `setup-python-only` failed in 3s while everything else passed, so
+  # the question becomes whether the image's own Python is good enough to drop
+  # that action. Logs are unreadable here, so each job *asserts* rather than
+  # prints: the job's own pass/fail is the answer.
+  has-python3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 --version
+
+  has-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m pip --version
+
+  has-venv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m venv --help > /dev/null
+
+  # `pyproject.toml` requires >=3.11. A 3.9 image would mean dropping
+  # `setup-python` is not enough on its own.
+  python-is-at-least-3-11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 11) else 1)"
+
+  # bash, explicitly: `bare-run` used the default shell and passed, which
+  # already contradicts the Alpine/no-bash theory `ci.yml` is built on. This
+  # states it outright rather than by inference.
+  has-bash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: bash -c 'echo bash works'
