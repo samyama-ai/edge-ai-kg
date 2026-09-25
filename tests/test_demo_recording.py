@@ -45,6 +45,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CAST = ROOT / "demo" / "edgeai-questions.cast"
 README = ROOT / "README.md"
+DEMO_README = ROOT / "demo" / "README.md"
 
 STALE_REASON = (
     "the recording predates the current build; re-record with "
@@ -172,6 +173,7 @@ def test_the_recording_shows_the_current_real_kernel_count(fresh):
 ADDED_AFTER_THE_RECORDING = {"EA17",   # #35, added 2026-09-09
                              "EA18",   # #37, added 2026-09-15
                              "EA19",   # #40, added 2026-09-17
+                             "EA20",   # #34, added 2026-09-23
                              "EA21"}   # #36, added 2026-09-23
 
 
@@ -245,3 +247,26 @@ def test_the_readme_caption_does_not_overclaim():
             f"be back to 'All {len(BY_ID)} [catalog queries]'. It reads as though "
             f"the recording is still short."
         )
+
+
+def test_the_demo_readme_alt_text_states_the_recorded_count():
+    """`demo/README.md`'s alt text carries a count, so it drifts like a caption.
+
+    It claims to be checked -- the page says this test checks it -- and until
+    now nothing did, which is the worse half of the pair: a reader is told the
+    number is guarded, and a re-record or a new query silently makes it false.
+    Alt text is also the copy a screen reader announces, so it is not decorative
+    prose that can be left to rot.
+    """
+    from benchmarks.queries import BY_ID
+    lines = [line for line in DEMO_README.read_text(encoding="utf-8").splitlines()
+             if line.startswith("![") and "edgeai-questions.gif" in line]
+    assert len(lines) == 1, (
+        f"expected exactly one image line for the recording in demo/README.md, "
+        f"found {len(lines)}. This test reads that line; if it moved, point "
+        f"this at the new one.")
+    shown = len(BY_ID) - len(ADDED_AFTER_THE_RECORDING)
+    assert f"{shown} questions answered" in lines[0], (
+        f"the recording shows {shown} of {len(BY_ID)} catalog queries, so the "
+        f"alt text must say '{shown} questions answered'. It reads:\n"
+        f"  {lines[0]}")

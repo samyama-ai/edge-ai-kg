@@ -1,6 +1,6 @@
 # Edge AI Deployment Knowledge Graph
 
-**25,150 nodes. 76,303 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
+**25,162 nodes. 77,743 edges. Boards, kernels and neural networks in one graph — so you can ask what actually runs on your silicon.**
 
 Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. Every node is stamped `real` or `synthetic`.
 
@@ -11,7 +11,7 @@ Real ONNX + ONNX Runtime + MLPerf Tiny data, plus a generated fleet for scale. E
 
 ![Edge AI KG — the catalog questions answered](demo/edgeai-questions.gif)
 
-*16 of the 20 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (#35), `EA18` (#37), `EA19` (#40) and `EA21` (#36), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
+*16 of the 21 [catalog queries](benchmarks/queries.py) run end to end — each question, the Cypher it becomes, and the answer. The missing ones are `EA17` (#35), `EA18` (#37), `EA19` (#40), `EA20` (#34) and `EA21` (#36), added after this was recorded rather than left out of it. `EA13`-`EA16` run on real ONNX Runtime and MLPerf Tiny data. Long-form: the whole run in one image, nothing scrolled off.*
 
 *Recorded 2026-08-14 at `--scale 1.0`, seed `20260814`. **Some figures in it have since moved** — the node count was corrected in #17 and ONNX Runtime has published since — so read it for the shape of the answers, not the numbers. Re-record with [`scripts/record_gif.sh`](scripts/record_gif.sh); `tests/test_demo_recording.py` compares it to the current build.*
 
@@ -72,10 +72,14 @@ Vendor <- SoC <- Board                        Sensor -> SignalStage -> ... -> Mo
                  TARGETS    PROVIDED_BY                                  ModelVariant
                     +--------- Runtime                                         |
                                                                           Deployment -> Board
+                                                                               |
+                                                                          DEPLOYED_AT
+                                                                               v
+                                                                             Site
 ```
 
-*The diagram is an orientation sketch, not the schema.* It shows 12 of the 16
-node labels and names 3 of the 22 edge types; it **omits** `ClinicalTask`,
+*The diagram is an orientation sketch, not the schema.* It shows 13 of the 17
+node labels and names 4 of the 23 edge types; it **omits** `ClinicalTask`,
 `Certification`, `Dataset` and `BenchmarkTask`, so the clinical spine appears to
 stop at `Model` when it actually continues to a task and its regulatory
 posture. [`docs/schema.md`](docs/schema.md) is the full picture, and
@@ -89,6 +93,10 @@ carrying four further kinds (NPU / CPU / GPU-CUDA / GPU-DirectML), 134 boards,
 1,513 deployments (73 of them real MLPerf Tiny measurements).
 **Clinical**: 14 biosignal sensors, 16 DSP stages, 18 clinical tasks, 4 MLPerf
 benchmark tasks, 12 datasets, 6 certifications.
+**Places**: 12 sites across 4 campuses; every generated deployment sits at
+exactly one of them (#34 — the shape is argued in
+[`docs/location-scope.md`](docs/location-scope.md)). Real MLPerf submissions
+are given none.
 
 Full detail in [`docs/schema.md`](docs/schema.md).
 
@@ -99,9 +107,9 @@ Full detail in [`docs/schema.md`](docs/schema.md).
 | [onnx/onnx](https://github.com/onnx/onnx) | Apache-2.0 | **205 real operators** — names, domains, opset versions |
 | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime) | MIT | **734 real kernel registrations** across CPU / CUDA / DirectML execution providers |
 | [mlcommons/tiny_results_v1.2](https://github.com/mlcommons/tiny_results_v1.2) | Apache-2.0 | **73 measured submissions** — real boards from Qualcomm, Renesas, ST, Syntiant, Bosch, with real throughput, accuracy and energy |
-| generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
+| generated | — | **The fleet**: 120 boards, 85 accelerators, 21,844 kernels, 1,440 deployments, 12 sites. Vendor and board names deliberately fictional (`Corvid Silicon`, `Tessera Labs`, …) |
 
-**1,035 nodes are real; 24,115 are generated.** The split is queryable, not just
+**1,035 nodes are real; 24,127 are generated.** The split is queryable, not just
 documented — every node carries `provenance` and `source`:
 
 ```bash
@@ -117,8 +125,8 @@ of islands sharing a database:
 |---|---:|
 | nodes | 1,240 |
 | edges | 2,478 |
-| labels with nodes | 10 of 16 |
-| edge types present | 11 of 22 |
+| labels with nodes | 10 of 17 |
+| edge types present | 11 of 23 |
 | orphaned nodes | **18**, all `Operator`s no ONNX Runtime kernel registers |
 
 What it lacks is a *half*, not the joins. The real layer is the hardware and
@@ -126,13 +134,13 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 6 of the 20 catalog queries return rows**, 14 come
+**Against the HTTP server, 6 of the 21 catalog queries return rows**, 15 come
 back empty, none error:
 
 | | Queries |
 |---|---|
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
-| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA21` |
+| Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA20`, `EA21` |
 
 **The embedded build still answers three of them differently** on the same
 data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
@@ -156,18 +164,20 @@ before the upgrade too. Note 10 made them raise on the old embedded build, but
 only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
 yields nothing, so the failing clause was never reached.
 
-`EA18`, `EA19` and `EA21` are the three entries here **not** from the server
-run, which predates all of them. Their place in the table is **measured
+`EA18`, `EA19`, `EA20` and `EA21` are the four entries here **not** from the
+server run, which predates all of them. Their place in the table is **measured
 embedded**, against the real layer, by `tests/test_real_layer_shape.py`, which
 executes every catalog query and compares the result to this table. **Over
-HTTP it is expected, not measured**: the real layer has no `ClinicalTask` and
-no `Sensor` (it does have `Deployment`s, the MLPerf rows), and `EA18` opens on
-a `ClinicalTask` and `EA19` on a `Sensor`, so neither's opening `MATCH` binds
-anything on either build. `EA21` opens on a `Sensor` too, and carries a second
-reason it cannot be read off the server run: it walks an unbounded
-`NEXT_STAGE*0..`, which the 1.7.0 server does not traverse (engine note 12).
-It would not *raise* the way `EA17` does — `EA17` asks for `size(r)` and
-`EA21` does not — so by inference, untested here, it would answer from the
+HTTP it is expected, not measured**: the real layer has no `ClinicalTask`, no
+`Sensor` and no `Site` (it does have `Deployment`s, the MLPerf rows), and
+`EA18` opens on a `ClinicalTask`, `EA19` and `EA21` on a `Sensor` and `EA20`
+on a `Site`, so none of their opening `MATCH`es binds anything on either
+build. `Site` is generated-layer only by construction, which
+`tests/test_site_spine.py::test_the_real_layer_gets_no_sites` pins. `EA21`
+carries a second reason it cannot be read off the server run: it walks an
+unbounded `NEXT_STAGE*0..`, which the 1.7.0 server does not traverse (engine
+note 12). It would not *raise* the way `EA17` does — `EA17` asks for `size(r)`
+and `EA21` does not — so by inference, untested here, it would answer from the
 zero-length match alone and report wrong numbers rather than nothing. The
 distinction between measured and expected is kept rather than smoothed over,
 because on this page it has mattered before.
@@ -175,8 +185,8 @@ because on this page it has mattered before.
 **"Identical" is a claim about this table, not about the two builds.** On the
 **full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
 comparing row *content*: row counts match for 16 of the 17 in the catalog on
-that date (`EA17` raises on the server, see below; `EA18` and `EA19` were added
-afterwards and are not in this run), and **seven queries return the same number
+that date (`EA17` raises on the server, see below; `EA18`, `EA19`, `EA20` and
+`EA21` were added afterwards and are not in this run), and **seven queries return the same number
 of different rows** — `EA01`, `EA02`, `EA08`, `EA09`, `EA10`, `EA11`, `EA13`.
 Every one is a tie under `ORDER BY … LIMIT`, where an arbitrary N of many
 equal-ranked rows comes back, except `EA10`, which differs in the sixteenth
@@ -302,7 +312,7 @@ Scale the fleet with `--scale` (`1.0` ≈ 24K nodes) and change the world with
 `--seed`. Same seed, same graph, every time.
 
 After loading, the loader counts edges per type against what it intended and
-reports `verified: N of N intended edges across 22 types`. It exits non-zero if
+reports `verified: N of N intended edges across 23 types`. It exits non-zero if
 the graph holds fewer (an endpoint id did not resolve -- edges are created in
 batches sharing one `MATCH`, so one bad id drops its whole batch) or more (the
 graph was not empty, or two nodes share an `id`). `--no-verify` skips the
@@ -343,13 +353,16 @@ Two things worth knowing before you quote the number:
 
 - **The download is slower than the import.** Fetching the 992 KB file took
   1.14 s here — about four times the import it precedes.
-- **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,150 /
-  76,303 a fresh build produces. It was exported from a slightly earlier build,
-  and `data/` is not pinned (see `docs/build-manifest.json`).
+- **The published snapshot holds 25,145 nodes / 76,291 edges**, not the 25,162 /
+  77,743 a fresh build produces. It predates the `Site` spine, so it is short
+  those 12 `Site` nodes and 1,440 `DEPLOYED_AT` edges as well as the 5 nodes
+  and 12 edges of upstream drift, and `data/` is not pinned (see
+  `docs/build-manifest.json`).
 
 16 of the 17 catalog queries then present were verified to return rows against
 the imported snapshot, not just against a freshly-loaded graph — re-check with
-`--verify-queries` below. `EA18` and `EA19` postdate that run. The exception is
+`--verify-queries` below. `EA18`, `EA19`, `EA20` and `EA21` postdate that
+run. The exception is
 `EA17`, which needs an engine that walks variable-length paths; the 1.7.0 server
 does not (engine note 12), and it raises there rather than quietly answering one
 hop deep.
@@ -363,7 +376,7 @@ python -m benchmarks.snapshot --url http://127.0.0.1:8080 \
 ```
 
 **Import appends, it does not replace.** Running the import twice against one
-server leaves both copies — 76,303 edges became 152,606. The flow above starts
+server leaves both copies — a recorded 76,303 edges became 152,606. The flow above starts
 from a fresh server so it is correct as written; the benchmark refuses to time
 an import into a non-empty graph for the same reason.
 
@@ -377,23 +390,23 @@ curl -X POST -o edge-ai-kg.sgsnap http://127.0.0.1:8080/api/snapshot/export
 
 20 queries in [`benchmarks/queries.py`](benchmarks/queries.py), each recording
 the question it answers and why it's awkward without a graph. On the
-**embedded** build, **19 of the 20 return rows** against the **full** graph at
-`--scale 1.0`, `EA21` among them. The timings —
-median 5.8 ms, slowest `EA17` at 95 ms — are from the sweep of the **17**
-queries that existed when it was run; `EA18`, `EA19` and `EA21` post-date it
-and are not in that median.
+**embedded** build, **20 of the 21 return rows** against the **full** graph at
+`--scale 1.0`, `EA20` and `EA21` among them. The timings — median 5.8 ms,
+slowest `EA17` at 95 ms — are from the sweep of the **17** queries that existed
+when it was run; `EA18`, `EA19`, `EA20` and `EA21` post-date it and are not in
+that median.
 
 **Over HTTP there is no number here that was measured.** No full-graph HTTP
-sweep has been run since `EA18`, `EA19` and `EA21` were added, so what follows
-is arithmetic on the embedded figure, not a sweep result. `EA17` raises on the
-1.7.0 server, which *is* measured (engine note 12), so it returns nothing
-there: that is the one subtraction anybody has checked. `EA21` has never been
-run against a server at all — it walks the same unbounded shape but never
-calls `size(r)`, so by note 12 it would not raise; the inference is that it
-would answer from the zero-length match alone and return wrong rows that look
-like an answer. Subtracting `EA21` as well gives 17, but that second
-subtraction rests on the inference rather than on a run, which is why it and
-`EA17` are both embedded-only.
+sweep has been run since `EA18`, `EA19`, `EA20` and `EA21` were added, so what
+follows is arithmetic on the embedded figure, not a sweep result. `EA17` raises
+on the 1.7.0 server, which *is* measured (engine note 12), so it returns
+nothing there: that is the one subtraction anybody has checked, and it gives
+19. `EA21` has never been run against a server at all — it walks the same
+unbounded shape but never calls `size(r)`, so by note 12 it would not raise;
+the inference is that it would answer from the zero-length match alone and
+return wrong rows that look like an answer. Subtracting `EA21` as well gives
+18, but that second subtraction rests on the inference rather than on a run,
+which is why it and `EA17` are both embedded-only.
 
 Both counts above describe the **full** graph. The only recorded HTTP run is
 over the **real layer**, in the section above, which is where the "6 of the
@@ -410,7 +423,8 @@ the zero and the reason for it.
 (Re-measured at 1.7.1 over 17 queries with
 `python -m benchmarks.run_benchmark`; the previous 14 ms / 73 ms pair was 16
 queries at 0.6.1 and is not comparable — the engine moved and so did the
-catalog. `EA18` and `EA19` postdate that run. Timed separately on 2026-09-21,
+catalog. `EA18`, `EA19`, `EA20` and `EA21` postdate that run. Timed separately
+on 2026-09-21,
 embedded 1.7.1 at `--scale 1.0`, median of five after one warm-up: `EA18` 37.5
 ms (36.9 ms when first recorded), above the median and well under `EA17`, and
 `EA19` 0.1 ms. `EA21` was timed the same way on 2026-09-24: 0.1 ms. These
@@ -548,7 +562,7 @@ returns plausible rows is not evidence that it is right.
 etl/          onnx_catalog.py, ort_kernels.py, mlperf_tiny.py, real_layer.py (real)
               generate.py (synthetic) + loader.py
 schema/       edge_ai_kg.cypher — indexes and documented relationship shapes
-benchmarks/   the 19-query catalog + runner
+benchmarks/   the 21-query catalog + runner
 mcp_server/   7 MCP tools shaped around deployment questions
 demo/         two walkthroughs (question-driven + 6-beat story) + recorded gif
 scripts/      record_gif.sh — long-form demo recording

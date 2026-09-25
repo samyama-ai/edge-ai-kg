@@ -26,6 +26,15 @@ product (`DATASET_CARD.md`). A `Site` or a `Team` has no upstream to derive
 from. It would be invented wholesale, be 100% synthetic, and look exactly as
 authoritative as the measured half.
 
+**One of the three declines has since been reversed, and the rule is left as
+written rather than softened.** #34 needed `Site`, a label with no upstream,
+and was taken anyway: [`location-scope.md`](location-scope.md) accepts that
+cost rather than refuting it — the sites *are* invented wholesale, and
+`provenance: synthetic` is what keeps them from reading as measured. So the
+rule below still states the test that was applied; what changed is that one
+question was judged worth paying it for. Editing the rule to fit the exception
+would hide the trade this page exists to record.
+
 The rule turns out to split the family cleanly, which is the reason to trust it
 rather than the reason it was chosen. Measured on the shipped graph:
 
@@ -36,7 +45,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** — delivered as beat 7 of `demo.demo` |
-| #34 | where the sensor physically is | `Site` | **decline** |
+| #34 | where the sensor physically is | `Site` | **declined, then taken** — delivered as `EA20`; the reversal is [`location-scope.md`](location-scope.md) |
 | #39 | who owns the affected asset | `Team` | **decline** |
 | #38 | alert / rule / threshold state | `Alert` | **decline** |
 
@@ -61,14 +70,12 @@ That is the alerting theme and the hero question meeting in one row.
 
 `#35`, `#37`, `#40` and `#36` are delivered — as `EA17`, `EA18`, `EA19` and
 `EA21`. The page and the queries land together, so wherever this is read they
-are in the catalog beside it. The catalog is `EA01`-`EA21`, with one gap:
-**`EA20` is not in it.** That id is claimed by #115's `Site` query, which is a
-separate PR; two queries sharing an id would silently overwrite one of them in
-`BY_ID`, so the gap is deliberate. If #115 is closed without merging — its own
-body says it should be, if the decision to decline #34 stands — then `EA20` is
-free again, and the next query to be added takes it rather than leaving a hole
-here. Either way this sentence is what tells a reader the gap is not an
-accident.
+are in the catalog beside it. The catalog is `EA01`-`EA21`, with no gap:
+`EA20` is the site query that arrived with this page's own reversal of #34,
+recorded in [`location-scope.md`](location-scope.md). That id was reserved
+while the two changes were separate PRs — two queries sharing an id would
+silently overwrite one of them in `BY_ID` — and both landed, so the reservation
+did its job and the range is continuous.
 
 That is not a promise this page makes about itself.
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
@@ -97,9 +104,21 @@ it. Note 12 is careful about what that does and does not show —
 1.7.0 and 1.7.1 rather than anything HTTP-specific. What is measured is that
 it runs on embedded 1.7.1 and fails on the 1.7.0 server.
 
-## Why the three are declined
+## Why the three were declined (two still are)
 
 ### #34 — location is deployment-time state, not catalog state
+
+> **Superseded on 2026-09-23 — the reversal's date, not the decline's — by
+> [`location-scope.md`](location-scope.md).** Everything below this banner is
+> the original text, unedited: it is the case against, it is still the
+> strongest statement of what a `Site` spine costs, and two of its three
+> reasons are *accepted* there rather than answered. Read both before changing
+> either.
+>
+> One sentence below is now out of date in a way worth flagging rather than
+> editing: **"is this a site-wide failure or one device"** is the question
+> `EA20` answers. Naming the cost that precisely is what made the reversal
+> arguable, so the sentence is left exactly as it was written.
 
 `Sensor` carries `modality`, `sample_rate_hz`, `channels`, `adc_bits`. `Board`
 carries a form factor and a price. **Nothing anywhere carries a place**, and the
@@ -160,10 +179,13 @@ asks for explicitly.
 
 ## What this decision does not claim
 
-- **Not that location is unimportant.** It is the first thing an operations team
-  asks. It is answered somewhere else.
-- **Not that the declined three are wrong forever.** Each names its join point
-  and its blocker above, so revisiting is a decision rather than a rediscovery.
+- **Not that location is unimportant.** It is the first thing an operations
+  team asks, which is why the decline against it did not hold: #34 was
+  revisited and taken, and [`location-scope.md`](location-scope.md) is that
+  argument. This page keeps the original reasoning above, marked superseded.
+- **Not that the two still declined are wrong forever.** #38 and #39 each name
+  their join point and their blocker above, so revisiting is a decision rather
+  than a rediscovery — which is exactly how #34 was revisited.
 - **Not measured: whether anyone wants the five.** This records what the graph
   *can* answer and what it would have to invent. Demand is not evidence this
   repo holds.

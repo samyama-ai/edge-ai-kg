@@ -28,8 +28,8 @@ and what it costs when those two sets do not line up.
 > `"synthetic"`) and a `source`. Read
 > [Real vs. synthetic](#real-vs-synthetic) before using or quoting anything.
 
-**25,150 nodes · 76,303 edges · 16 node labels · 22 edge types**
-**1,035 real nodes from 3 public sources · 24,115 generated**
+**25,162 nodes · 77,743 edges · 17 node labels · 23 edge types**
+**1,035 real nodes from 3 public sources · 24,127 generated**
 
 ---
 
@@ -55,7 +55,7 @@ library's coverage) and **`Deployment`** (one variant landed on one board).
 
 | Task | Description |
 |---|---|
-| Graph query benchmarking | 20-query catalog with recorded questions, timings and expected shapes |
+| Graph query benchmarking | 21-query catalog with recorded questions, timings and expected shapes |
 | Multi-hop retrieval / GraphRAG | Dense, typed, semantically meaningful multi-hop paths over a technical domain |
 | Anti-join / negation evaluation | "Which operator has *no* kernel here" — coverage-gap reasoning |
 | Impact analysis | Blast radius of removing a single node (a dropped kernel) |
@@ -161,6 +161,7 @@ scalar. It is good enough to make *structural* questions behave sensibly. It is
 | `SignalStage` | 16 | id, name, kind, window_ms, cost_kmacs |
 | `Sensor` | 14 | id, name, modality, sample_rate_hz, channels, adc_bits |
 | `Dataset` | 12 | id, name, source, subjects, hours, license |
+| `Site` | 12 | id, name, kind, campus, region |
 | `Vendor` | 15 | id, name, country |
 | `Runtime` | 13 | id, name, version, format |
 | `Certification` | 6 | id, name, body, class |
@@ -179,6 +180,7 @@ Every node has a globally unique `id` of the form `<prefix>:<5-digit>`.
 | `ON_BOARD` | Deployment → Board | 1,513 |
 | `VIA_RUNTIME` | Deployment → Runtime | 1,500 |
 | `USES_ACCELERATOR` | Deployment → Accelerator | 1,451 |
+| `DEPLOYED_AT` | Deployment → Site | 1,440 |
 | `USES_OPERATOR` | Model → Operator `{count}`, SignalStage → Operator | 1,069 |
 | `TARGETS` | Runtime → Accelerator | 429 |
 | `VARIANT_OF` | ModelVariant → Model | 240 |
@@ -255,9 +257,9 @@ and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 **16 of the 17 catalog queries that existed on that date** were verified to
 return rows against the imported snapshot. The seventeenth, `EA17`, raised
 instead: the 1.7.0 server rejects `size(r)` over a variable-length
-relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19` and
-`EA21` post-date this run and were not part of it; the catalog is larger now,
-and this paragraph reports what was verified then. `EA21` would not have
+relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19`, `EA20`
+and `EA21` post-date this run and were not part of it; the catalog is larger
+now, and this paragraph reports what was verified then. `EA21` would not have
 raised the way `EA17` did — it walks an **unbounded** `*0..` without
 `size(r)`, and it is the unbounded walk that makes a query embedded-only, not
 variable length as such (`EA07` is bounded and runs on both). What it would
@@ -265,9 +267,13 @@ return there is **inferred from engine note 12 and untested**: the zero-length
 match alone, so wrong rows rather than an error. Like `EA17` it should be
 treated as answerable only on the embedded build.
 
-Note the published snapshot holds **25,145 nodes / 76,291 edges**, slightly
-below a fresh build's 25,150 / 76,303: it was exported from an earlier build and
-the upstream inputs are not pinned.
+**The published snapshot predates the `Site` spine and does not carry it.**
+That snapshot holds **25,145 nodes / 76,291 edges**, against a fresh build's
+25,162 / 77,743. Almost all of the gap is this feature rather than drift: 12 of
+the 17 missing nodes are `Site`, and 1,440 of the 1,452 missing edges are
+`DEPLOYED_AT`. The remaining 5 nodes and 12 edges are upstream inputs that
+moved between the export and today, and are not pinned. `EA20` returns nothing
+against the snapshot until it is re-exported.
 
 ---
 
@@ -360,10 +366,15 @@ rather than overlooked, with the reasoning in
 [`docs/alerting-scope.md`](docs/alerting-scope.md) and the wider
 can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
-- **No physical location.** Nothing carries a site, zone, room or coordinate.
-  `Vendor.country` is where a vendor is headquartered, not where anything is
-  installed. No upstream source supplies deployment location, so a `Site` spine
-  would be invented wholesale (#34).
+- **Location only for generated deployments.** `Site` carries a campus and a
+  region, and `Deployment -[:DEPLOYED_AT]-> Site` places each of the 1,440
+  generated deployments (#34). It is synthetic throughout, with fictional
+  campus names: **no real node is placed**, because no upstream source publishes
+  where a submission ran. `Vendor.country` is still where a vendor is
+  headquartered, not where anything is installed. Nothing carries a room, a
+  coordinate or a move history — the reasoning, including the two objections
+  accepted rather than answered, is in
+  [`docs/location-scope.md`](docs/location-scope.md).
 - **No ownership.** No team, contact or `OWNS` edge — same reason. Note also
   that `Operator` is already taken here and means an ONNX operator (#39).
 - **No alerting state.** No `Alert`, `Rule` or `Threshold`. Thresholding a
@@ -372,7 +383,7 @@ can-and-cannot in [`docs/alerting.md`](docs/alerting.md):
 
 ### Known limitations
 
-1. **Heavily skewed to `Kernel`** — 22,578 of 25,150 nodes (90%) are kernels, and 3 edge types carry 89% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
+1. **Heavily skewed to `Kernel`** — 22,578 of 25,162 nodes (90%) are kernels, and 3 edge types carry 87% of edges. Realistic (kernel libraries *are* the bulk), but it means whole-graph statistics are dominated by one label.
 2. **The cost model is the ground truth**, so any model trained on it recovers the model, not reality.
 3. **Operator categories are heuristic** — regex over operator names with a short override table; some assignments are debatable.
 4. **Uniform random structure** — real fleets cluster (vendors reuse IP, boards share SoC families). Sampling here is close to uniform, so the graph has less community structure than a real one.

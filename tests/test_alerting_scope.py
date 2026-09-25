@@ -22,6 +22,7 @@ stale the moment the takeable half moved.
 """
 from __future__ import annotations
 
+import collections
 import pathlib
 import re
 
@@ -52,11 +53,13 @@ LOCATION_WORDS = frozenset((
     "coordinate", "coordinates", "postcode", "postal",
 ))
 
+# `Site` is deliberately absent from this dict: #34 was declined and then
+# **taken**, and `docs/location-scope.md` records the reversal with the case
+# against. The rest of the #34 family stays declined, so the reversal is one
+# label wide -- a `Zone` or a `Building` appearing is still a decision nobody
+# wrote down. `test_the_site_spine_is_exactly_what_was_agreed` below pins what
+# `Site` is allowed to be.
 DECLINED_LABELS = {
-    # #34 -- physical location. Labels as well as properties: a `Location` node
-    # carrying only `{id, name}` trips no property hint, so guarding one and not
-    # the other left the decision reversible in silence.
-    "Site": "#34 — physical location",
     "Zone": "#34 — physical location",
     "Location": "#34 — physical location",
     "Room": "#34 — physical location",
@@ -80,8 +83,11 @@ DECLINED_LABELS = {
 # permitted labels needs no new label, so `DECLINED_LABELS` cannot see it --
 # an `OWNS` edge from `Vendor` to `Board` would make `DATASET_CARD.md`'s "no
 # team, contact or `OWNS` edge" false with the suite green.
+# `DEPLOYED_AT` is likewise permitted now, and only from `Deployment`, which
+# the pinning test below checks. `LOCATED_AT` and `INSTALLED_AT` stay declined:
+# they would place a *type* -- a board or a sensor -- which is the shape
+# `docs/location-scope.md` argues against.
 DECLINED_EDGES = {
-    "DEPLOYED_AT": "#34 — physical location",
     "LOCATED_AT": "#34 — physical location",
     "INSTALLED_AT": "#34 — physical location",
     "OWNS": "#39 — ownership",
@@ -192,7 +198,12 @@ def test_the_delivery_claims_match_the_catalog():
 
 
 def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
-    """#34, #38 and #39 were declined. A label appearing means that was reversed."""
+    """#38 and #39 stand declined; #34 was reversed for `Site` alone.
+
+    A label from any of the three families appearing here means a decision
+    moved without anyone writing it down -- which is the thing this file
+    exists to make impossible, not the thing it forbids.
+    """
     # Every declared label, not only the populated ones. A `Site` gated behind a
     # layer or a scale threshold would yield zero rows at this fixture's seed
     # and scale, reversing the #34 decision in the schema while this reported
@@ -201,7 +212,8 @@ def test_no_label_this_repo_decided_not_to_invent_has_appeared(fleet):
     added = {label: why for label, why in DECLINED_LABELS.items() if label in present}
     assert not added, (
         f"labels this repo decided not to add are now in the graph: {added}. "
-        f"That is not a test failure so much as a decision reversal -- update "
+        f"That is not a test failure so much as a decision reversal -- record "
+        f"it the way docs/location-scope.md records #34's, update "
         f"docs/alerting-scope.md and DATASET_CARD.md, or drop the label."
     )
 
@@ -222,10 +234,17 @@ def test_no_edge_type_this_repo_decided_not_to_add_has_appeared(fleet):
     )
 
 
-def test_nothing_carries_a_physical_location(fleet):
-    """The claim `#34` rests on, and the one most likely to go quietly stale."""
+def test_only_the_site_label_carries_a_physical_location(fleet):
+    """#34 was reversed for `Site` alone; everything else still carries no place.
+
+    The original form of this test asserted that *nothing* carries a location,
+    and it is what caught the reversal when `Site` landed. Deleting it would
+    have removed the only guard over the whole family, so it is narrowed
+    instead: `Site` may carry a place, and a `Board.postcode` or a
+    `Deployment.gps_coordinates` still fails here.
+    """
     found = [f"{label}.{prop}"
-             for label, rows in fleet.nodes.items() if rows
+             for label, rows in fleet.nodes.items() if rows and label != "Site"
              for prop in sorted(properties_of(fleet, label))
              if tokens(prop) & LOCATION_WORDS]
     # Edges carry properties too -- the 6th tuple element -- and a
@@ -237,18 +256,96 @@ def test_nothing_carries_a_physical_location(fleet):
                      for prop in (props or {})
                      if tokens(prop) & LOCATION_WORDS})
     assert not found, (
-        f"location-like properties appeared: {found}. docs/alerting-scope.md "
-        f"says nothing carries a place, and DATASET_CARD.md repeats it. Revisit "
-        f"the decision rather than editing the sentence."
+        f"location-like properties appeared outside `Site`: {found}. "
+        f"docs/location-scope.md reverses #34 for `Site` and for nothing else, "
+        f"and DATASET_CARD.md repeats that. Revisit the decision rather than "
+        f"editing the sentence."
     )
+
+
+def test_the_site_spine_is_exactly_what_was_agreed(fleet):
+    """The reversal, bounded: one label, one edge, and only from `Deployment`.
+
+    `docs/location-scope.md` argues for placing an *instance* and against
+    placing a *type*. Without this, `Board -[:DEPLOYED_AT]-> Site` would satisfy
+    every other test on this page while being the shape that page rejects.
+    """
+    # `.get(...)`, not `in`: the key survives an empty row list, so
+    # `"Site" in fleet.nodes` is true for a generator that declares the label
+    # and emits nothing -- the reversal reverted in everything but name.
+    assert fleet.nodes.get("Site"), (
+        "`Site` holds no rows, but docs/location-scope.md says #34 was taken. "
+        "Either the reversal was reverted -- in which case restore `Site` to "
+        "DECLINED_LABELS above and say so in alerting-scope.md -- or the "
+        "generator stopped emitting it."
+    )
+    sources = {src_label for src_label, _s, rel, _tl, _t, _p in fleet.edges
+               if rel == "DEPLOYED_AT"}
+    assert sources == {"Deployment"}, (
+        f"DEPLOYED_AT runs from {sorted(sources)}. docs/location-scope.md "
+        f"places one installed instance, and a Board or a Sensor is a type -- "
+        f"the objection that decision turns on."
+    )
+    targets = {tgt_label for _sl, _s, rel, tgt_label, _t, _p in fleet.edges
+               if rel == "DEPLOYED_AT"}
+    assert targets == {"Site"}, f"DEPLOYED_AT points at {sorted(targets)}, not Site"
+
+    # Cardinality in both directions. `docs/location-scope.md` rests on "one
+    # installed instance, in exactly one place": two sites turn EA20's per-site
+    # count into a set union, and *no* site drops a deployment out of the
+    # answer entirely. A `Counter` over the edges sees only the first of those
+    # -- a deployment with no `DEPLOYED_AT` edge contributes no key at all --
+    # so the generated deployments are enumerated and checked against it.
+    placements = collections.Counter(
+        src for _sl, src, rel, _tl, _t, _p in fleet.edges if rel == "DEPLOYED_AT")
+    multi = {did: k for did, k in placements.items() if k > 1}
+    assert not multi, (
+        f"deployments placed more than once: {sorted(multi)[:3]}. "
+        f"docs/location-scope.md commits to one site per deployment.")
+    # Real deployments are MLPerf submissions with no known location and are
+    # given none on purpose, so the floor is the generated half.
+    generated = {d["id"] for d in fleet.nodes.get("Deployment", [])
+                 if d.get("provenance") != "real"}
+    assert generated, "no generated deployments; this check is measuring nothing"
+    unplaced = sorted(generated - set(placements))
+    assert not unplaced, (
+        f"{len(unplaced)} generated deployments sit at no site "
+        f"({unplaced[:3]}). EA20 counts `deployments_here` per site, so an "
+        f"unplaced deployment is missing from the answer rather than reported "
+        f"as homeless -- and docs/location-scope.md commits to exactly one "
+        f"place per installed instance.")
+
+
+def test_the_site_label_carries_only_what_the_decision_allows(fleet):
+    """The reversal is bounded by *shape* too, not only by label name.
+
+    #34 was taken as "where a deployment sits", explicitly not as an asset
+    register: `docs/location-scope.md` says there is no move history, no
+    commissioning date, no asset tag and no person. Those would arrive as
+    properties on `Site` rather than as a new label, so `DECLINED_LABELS`
+    above cannot see them coming.
+    """
+    allowed = {"id", "name", "kind", "campus", "region", "provenance", "source"}
+    present = properties_of(fleet, "Site")
+    extra = sorted(present - allowed)
+    assert not extra, (
+        f"`Site` grew {extra}. docs/location-scope.md commits to a place and "
+        f"nothing else -- a commissioning date or an owner is the CMDB "
+        f"duplication that decision accepts as its cost. Widen the decision "
+        f"first, then this list."
+    )
+    assert "id" in present and "campus" in present, (
+        f"`Site` lost {sorted(allowed - present)}; EA20 groups by campus")
 
 
 def test_vendor_country_is_the_only_near_miss_and_is_empty_where_it_is_real(fleet):
     """Named in the document so nobody mistakes it for a deployment location.
 
-    Two claims, because the earlier version of this test made neither. It was
-    called `..._is_still_the_only_near_miss` and never checked uniqueness, and
-    its value assertion passed if a single vendor out of fifteen carried one.
+    Two claims, and the name promises both: that `country` is the *only*
+    property a reader could mistake for a location, and that it is empty on
+    every real-layer vendor. A uniqueness check that never enumerates the
+    other labels, or a value check satisfied by one vendor out of fifteen,
+    would leave the document's "one near-miss" claim unenforced.
     """
     assert "country" in properties_of(fleet, "Vendor"), (
         "`Vendor.country` is gone. docs/alerting-scope.md calls it out as the "
@@ -333,3 +430,58 @@ def test_the_operator_name_clash_still_exists(fleet):
         "`Operator` no longer looks like an ONNX operator, so the name-clash "
         "warning in docs/alerting-scope.md may no longer apply."
     )
+
+
+def test_every_quote_from_the_decline_is_verbatim():
+    """`location-scope.md` argues against a page it quotes; the quotes must hold.
+
+    The reversal's whole method is "here is what the decline said, and here is
+    what changed". A quote that has drifted from its source -- even by a
+    dropped `**` -- makes the argument look like it is answering something
+    nobody wrote, and this is the one kind of error a reader cannot catch
+    without opening both files.
+
+    Only block-quoted, italicised strings are checked, which is how that page
+    marks a quotation from another document. Whitespace and the `> ` prefix
+    are normalised, because line wrapping is not part of the quote.
+
+    Every `*"` opening in a block must yield a quote, and that guard is
+    load-bearing rather than tidy. `*"..."*` closes on the first `"` followed
+    by `*`, so a quotation holding an *italicised* inner quote ends early --
+    and the truncated text is a **prefix** of the source, which passes the
+    verbatim check below while leaving the rest of the sentence unchecked.
+    Measured: quoting `the question that prompted this -- *"a company keeps a
+    sensor in some place"* -- cannot be expressed` captures 75 of its 100
+    characters and the tail goes unverified. Counting the openings turns that
+    silence into a failure.
+    """
+    import re
+
+    reversal = (ROOT / "docs" / "location-scope.md").read_text(encoding="utf-8")
+    decline = (ROOT / "docs" / "alerting-scope.md").read_text(encoding="utf-8")
+
+    def flatten(text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"^> ?", "", text, flags=re.MULTILINE)).strip()
+
+    source = flatten(decline)
+    quotes, openings = [], 0
+    for block in re.findall(r"(?:^> .*\n)+", reversal, re.MULTILINE):
+        flat = flatten(block)
+        openings += flat.count('*"')
+        quotes += re.findall(r'\*"(.+?)"\*', flat, re.DOTALL)
+    assert len(quotes) == openings, (
+        f"{openings} quotation openings in docs/location-scope.md and "
+        f"{len(quotes)} quotes parsed from them. A quote holding an "
+        f"italicised inner quote closes early, and the truncated prefix still "
+        f"matches the source -- so the rest of that sentence would go "
+        f"unchecked. Re-mark the inner quotation, or quote it in two pieces.")
+    assert quotes, (
+        "no quotations found in docs/location-scope.md. Either the page stopped "
+        "quoting the decline -- in which case its argument needs re-reading -- "
+        "or the `> *\"...\"*` convention changed and this test with it.")
+    missing = [q for q in quotes if q not in source]
+    assert not missing, (
+        f"docs/location-scope.md quotes {missing} as coming from "
+        f"docs/alerting-scope.md, and that text is not in it. Copy the "
+        f"sentence again rather than paraphrasing it: the reversal's argument "
+        f"rests on answering what the decline actually said.")

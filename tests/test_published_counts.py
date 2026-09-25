@@ -159,6 +159,17 @@ PUBLISHED_ELSEWHERE: dict[tuple[str, int, str], str] = {
     ("README.md", 76_291, "edges"): "snapshot",
     ("DATASET_CARD.md", 25_145, "nodes"): "snapshot",
     ("DATASET_CARD.md", 76_291, "edges"): "snapshot",
+    # Counts of a graph that was *measured*, before `Site` and its 1,440
+    # `DEPLOYED_AT` edges landed with #34. Re-stating them at today's totals
+    # would claim a run nobody made -- the duplicate-import incident really did
+    # double 76,303 edges, and the 12-query and 16-query benchmark runs really
+    # were taken on the graphs named beside them. Each line says "recorded",
+    # which is what the marker binds the exemption to.
+    ("README.md", 76_303, "edges"): "recorded",
+    ("benchmarks/README.md", 24_115, "nodes"): "recorded",
+    ("benchmarks/README.md", 73_825, "edges"): "recorded",
+    ("benchmarks/README.md", 25_150, "nodes"): "recorded",
+    ("benchmarks/README.md", 76_303, "edges"): "recorded",
 }
 
 
@@ -310,3 +321,155 @@ def test_the_docs_agree_with_each_other_on_the_headline(counts):
         f"documents not quoting the current both-layer edge count {edges:,}: "
         f"{disagreeing_edges}"
     )
+
+
+# Every shape the docs use to state how big the catalog is. Found by grepping
+# for the phrasings actually in the tree, not invented: a new spelling is a new
+# entry here, and `test_at_least_one_document_states_the_catalog_size` fails if
+# every one of them disappears.
+CATALOG_SIZE_PATTERNS = (
+    r"(\d+)-query catalog",
+    r"catalog is (\d+) Cypher queries",
+    r"`benchmarks/queries\.py` holds (\d+) entries",
+    r"Walks all (\d+) queries",
+)
+CATALOG_SIZE_DOCS = ("README.md", "CLAUDE.md", "DATASET_CARD.md",
+                     "demo/README.md", "docs/why-this-engine.md")
+
+
+def catalog_size_claims() -> list[tuple[str, int, str]]:
+    """Every published claim about the catalog's size, as (doc, number, phrase)."""
+    found = []
+    for doc in CATALOG_SIZE_DOCS:
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        for pattern in CATALOG_SIZE_PATTERNS:
+            found.extend((doc, int(m.group(1)), m.group(0))
+                         for m in re.finditer(pattern, text))
+    return found
+
+
+def test_every_document_states_the_catalog_size_correctly():
+    """One catalog, five documents, one number.
+
+    `EA20` landed in three places that quote this figure and was updated in
+    one of them, leaving `docs/why-this-engine.md` saying 16 in two spots and
+    `DATASET_CARD.md` in a third. Nothing failed, because nothing compared a
+    published count to `BY_ID` -- the sibling checks above do exactly that for
+    node and edge counts, and this closes the same gap for the catalog.
+
+    The number is derived, never restated here: adding a query and forgetting a
+    document fails with the document named.
+    """
+    from benchmarks.queries import BY_ID
+
+    actual = len(BY_ID)
+    wrong = [(doc, phrase, stated) for doc, stated, phrase in catalog_size_claims()
+             if stated != actual]
+    assert not wrong, (
+        f"the catalog holds {actual} queries; these documents say otherwise: "
+        + "; ".join(f"{doc} — {phrase!r}" for doc, phrase, _ in wrong)
+        + ". A published count that is silently wrong is worse than one that "
+          "fails loudly."
+    )
+
+
+def test_at_least_one_document_states_the_catalog_size():
+    """The check above passes vacuously if every phrasing is reworded away."""
+    claims = catalog_size_claims()
+    assert len(claims) >= 4, (
+        f"only {len(claims)} catalog-size claims found in {list(CATALOG_SIZE_DOCS)}. "
+        f"Either the docs stopped publishing the figure -- unlikely -- or the "
+        f"phrasing changed and CATALOG_SIZE_PATTERNS needs the new spelling, "
+        f"or this test is checking nothing."
+    )
+
+
+# The schema's two totals, and every published phrasing that states one. Same
+# treatment as the catalog size above and for the same reason: `Site` and
+# `DEPLOYED_AT` moved both totals, and the count went stale in four places in
+# `README.md` alone -- the loader summary, two rows of the real-layer table,
+# and the inventory paragraph -- because nothing compared any of them to the
+# schema. Every pattern here was found by grepping the tree, not invented.
+#
+# Deliberately narrow. `DATASET_CARD.md` also says "3 edge types carry 87% of
+# edges", which is a share and not a total; a looser `(\d+) edge types` would
+# match it and demand it equal 23.
+# Each pattern captures exactly one group: the **total**. An earlier version
+# wrote `(\d+) of the (?:\d+) edge types`, which captured the subset -- on
+# "names 4 of the 23 edge types" it took 4 and would have demanded the schema
+# hold four edge types. One group per pattern, and the group is the total.
+LABEL_TOTAL_PATTERNS = (
+    r"(\d+) node labels",
+    r"\| labels with nodes \| \d+ of (\d+) \|",
+    r"shows \d+ of the (\d+)\s+node labels",
+)
+EDGE_TYPE_TOTAL_PATTERNS = (
+    r"· (\d+) edge types",
+    r"labels, (\d+) edge types",
+    r"names \d+ of the (\d+) edge types",
+    r"\| edge types present \| \d+ of (\d+) \|",
+    # Anchored to the loader's own sentence. Bare `across (\d+) types` matched
+    # any prose that happened to say "across N types" and demanded it equal the
+    # schema's total.
+    r"intended edges across (\d+) types",
+)
+SCHEMA_TOTAL_DOCS = ("README.md", "DATASET_CARD.md", "docs/schema.md")
+
+
+def schema_total_claims(patterns) -> list[tuple[str, int, str]]:
+    """Every published total, with the doc and the phrase that stated it.
+
+    Whitespace is flattened first: these phrases wrap across lines in prose
+    -- `README.md`'s diagram caption says "12 of the 17\nnode labels" -- and a
+    pattern matched against the raw text simply misses them, which is the
+    silent half of this whole class of drift.
+    """
+    found = []
+    for doc in SCHEMA_TOTAL_DOCS:
+        text = re.sub(r"\s+", " ", (ROOT / doc).read_text(encoding="utf-8"))
+        for pattern in patterns:
+            found.extend((doc, int(m.group(1)), m.group(0))
+                         for m in re.finditer(pattern, text))
+    return found
+
+
+def test_every_document_states_the_schema_totals_correctly():
+    """One schema, three documents, two numbers -- derived, never restated.
+
+    `etl.loader.NODE_LABELS` and `schema/edge_ai_kg.cypher` are the sources;
+    a spine that adds a label and forgets a document fails here with the
+    document and the phrase named, rather than in review three rounds later.
+    """
+    from etl.loader import NODE_LABELS
+    from tests.test_schema_docs import declared_in_schema
+
+    labels, edges = len(NODE_LABELS), len(set(declared_in_schema("Edge types")))
+    wrong = [(doc, phrase, stated, labels)
+             for doc, stated, phrase in schema_total_claims(LABEL_TOTAL_PATTERNS)
+             if stated != labels]
+    wrong += [(doc, phrase, stated, edges)
+              for doc, stated, phrase in schema_total_claims(EDGE_TYPE_TOTAL_PATTERNS)
+              if stated != edges]
+    assert not wrong, (
+        "published schema totals that disagree with the schema "
+        f"({labels} labels, {edges} edge types): "
+        + "; ".join(f"{doc} — {phrase!r} (should be {want})"
+                    for doc, phrase, _got, want in wrong))
+
+
+def test_every_schema_total_pattern_still_matches_something():
+    """Per pattern, not per family -- a floor on the total hides a dead one.
+
+    `len(edges) >= 3` stayed satisfied while any one phrasing was reworded
+    away, so a pattern could stop matching and the document it guarded would
+    drift unchecked behind the other four. Each is asserted on its own.
+    """
+    for label, patterns in (("label", LABEL_TOTAL_PATTERNS),
+                            ("edge-type", EDGE_TYPE_TOTAL_PATTERNS)):
+        for pattern in patterns:
+            assert schema_total_claims((pattern,)), (
+                f"the {label} pattern {pattern!r} matches nothing in "
+                f"{list(SCHEMA_TOTAL_DOCS)}. Either that phrasing was reworded "
+                f"-- update the pattern -- or the document stopped publishing "
+                f"the total, in which case drop the pattern deliberately "
+                f"rather than leaving a dead one that guards nothing.")

@@ -10,8 +10,8 @@ WITH k.provenance AS provenance, k.source AS source, count(k.id) AS kernels
 RETURN provenance, source, kernels ORDER BY kernels DESC
 ```
 
-At `--scale 1.0` the graph is **25,150 nodes / 76,303 edges**, of which
-**1,035 nodes are real** and 24,115 generated.
+At `--scale 1.0` the graph is **25,162 nodes / 77,743 edges**, of which
+**1,035 nodes are real** and 24,127 generated.
 
 ## Real
 

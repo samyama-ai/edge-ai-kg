@@ -249,3 +249,115 @@ def test_every_model_ea18_can_reach_has_operators(both_layers):
         f"operator leg is an inner MATCH, so a breached deployment on one of "
         f"these is dropped from the result rather than reported with zero "
         f"fallback operators. Make that leg OPTIONAL before relaxing this.")
+
+
+def test_generated_labels_matches_what_the_generator_emits(fleet):
+    """`GENERATED_LABELS` is what `load()` refuses a cache for; keep it honest.
+
+    A hand-maintained list beside the code it describes drifts the moment
+    someone adds a label and forgets it -- which is the same failure it exists
+    to catch, one level up.
+
+    Through the module's `fleet` fixture rather than generating inline: its
+    skip happens in **setup**, where `--no-skips` can convert it, and a skip
+    written in a test body cannot be (`tests/test_environment_skips.py`). The
+    label *set* does not depend on the fixture's scale, only the row counts do.
+    """
+    emitted = set(fleet.nodes)
+    assert emitted == set(gen.GENERATED_LABELS), (
+        f"the generator emits {sorted(emitted - set(gen.GENERATED_LABELS))} that "
+        f"GENERATED_LABELS omits, and lists "
+        f"{sorted(set(gen.GENERATED_LABELS) - emitted)} it does not emit. "
+        f"`etl.generate.load()` refuses a cached fleet missing any of these, "
+        f"so a stale entry here either rejects every cache or lets a stale one "
+        f"through.")
+
+
+def test_a_fleet_cache_written_before_a_label_existed_is_refused(tmp_path):
+    """The stale-cache case, on a throwaway file rather than the shared `data/`.
+
+    `data/` is gitignored, so a fresh clone is always current. An existing
+    checkout is where this bites: `git pull` brings a new label, `fleet.json`
+    keeps the old shape, and the catalog query over that label returns zero
+    rows -- indistinguishable from "the answer is none". `--verify` cannot
+    catch it either, because it compares the load against this same cache.
+    """
+    import json
+
+    from etl import generate as gen
+
+    complete = {label: [{"id": f"{label.lower()}:00000"}]
+                for label in gen.GENERATED_LABELS}
+    path = tmp_path / "fleet.json"
+
+    def write(nodes):
+        path.write_text(json.dumps(
+            {"seed": gen.DEFAULT_SEED, "scale": 1.0, "node_count": len(nodes),
+             "edge_count": 0, "nodes": nodes, "edges": []}), encoding="utf-8")
+
+    write(complete)
+    assert set(gen.load(path).nodes) == set(gen.GENERATED_LABELS), (
+        "a complete cache must load; otherwise this guard rejects everything")
+
+    stale = {k: v for k, v in complete.items() if k != "Site"}
+    write(stale)
+    with pytest.raises(gen.StaleFleetCache, match="Site"):
+        gen.load(path)
+
+    # A cache from a *newer* checkout is not this function's business.
+    write({**complete, "Warehouse": [{"id": "warehouse:00000"}]})
+    gen.load(path)
+
+
+def test_a_stale_cache_is_rebuilt_at_its_own_seed_and_scale(tmp_path, monkeypatch):
+    """`etl.loader`'s answer to a stale cache, which is not `gen.load`'s.
+
+    `gen.load` refuses; the loader regenerates, because it can run the command
+    the reader would otherwise be told to run. What it must *not* do is
+    regenerate at the CLI's defaults: the cache was written by some earlier
+    run, and rebuilding a `--scale 0.25` fleet at the default 1.0 would answer
+    a stale-cache problem by silently swapping the graph underneath the next
+    measurement.
+
+    Driven through the CLI with the engine stubbed out, so it tests the branch
+    rather than a load -- no engine and no `data/` needed.
+    """
+    from click.testing import CliRunner
+
+    from etl import loader
+
+    built = []
+
+    def fake_load():
+        raise gen.StaleFleetCache("cache predates Site", missing=("Site",),
+                                  seed=4242, scale=0.25)
+
+    def fake_generate(seed, scale, **kwargs):
+        built.append((seed, scale))
+        return gen.Fleet(seed=seed, scale=scale)
+
+    monkeypatch.setattr(loader.gen, "load", fake_load)
+    monkeypatch.setattr(loader.gen, "generate", fake_generate)
+    monkeypatch.setattr(loader.gen, "write", lambda fleet: tmp_path / "fleet.json")
+    class FakeClient:
+        """Answers the node-count verification and nothing else."""
+
+        def query(self, statement, graph):
+            import types
+            return types.SimpleNamespace(records=[[0]])
+
+    monkeypatch.setattr(loader, "connect", lambda url: FakeClient())
+    monkeypatch.setattr(loader, "reset_graph", lambda client, graph: None)
+    monkeypatch.setattr(loader, "apply_schema", lambda client, graph: 0)
+    monkeypatch.setattr(loader, "create_nodes", lambda *a, **k: 0)
+    monkeypatch.setattr(loader, "create_edges", lambda *a, **k: 0)
+
+    result = CliRunner().invoke(loader.main, ["--layers", "synthetic", "--no-verify"])
+
+    assert result.exit_code == 0, result.output
+    assert built == [(4242, 0.25)], (
+        f"the loader rebuilt a stale cache at {built}, not at the cache's own "
+        f"(4242, 0.25). Regenerating at the CLI defaults hands back a "
+        f"different fleet than the one that was cached.")
+    assert "predates Site" in result.output, (
+        f"the reader is not told which label went missing:\n{result.output}")

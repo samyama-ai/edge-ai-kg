@@ -31,7 +31,7 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "edge_ai_kg.cy
 NODE_LABELS = [
     "Vendor", "SoC", "Accelerator", "Board", "Runtime", "Operator", "Kernel",
     "Model", "ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
-    "BenchmarkTask", "Dataset", "Certification", "Deployment",
+    "BenchmarkTask", "Dataset", "Certification", "Deployment", "Site",
 ]
 
 
@@ -129,18 +129,41 @@ def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
 def main(url, graph, seed, scale, limit, regenerate, reset, layers, verify):
     started = time.time()
 
+    def build(why: str, build_seed: int, build_scale: float):
+        """Generate and cache a fleet, saying why and at which seed and scale.
+
+        One helper for all three callers -- `--regenerate`, no cache, stale
+        cache -- because they differ only in the reason and in *whose* seed
+        and scale they use, and that difference is the part worth reading.
+        """
+        click.echo(f"[1/4] {why} (seed={build_seed}, scale={build_scale}) ...")
+        built = gen.generate(seed=build_seed, scale=build_scale)
+        gen.write(built)
+        return built
+
     if regenerate:
-        click.echo(f"[1/4] generating fleet (seed={seed}, scale={scale}) ...")
-        fleet = gen.generate(seed=seed, scale=scale)
-        gen.write(fleet)
+        fleet = build("generating fleet", seed, scale)
     else:
         try:
             fleet = gen.load()
             click.echo(f"[1/4] loaded cached fleet (seed={fleet.seed}, scale={fleet.scale})")
         except FileNotFoundError:
-            click.echo(f"[1/4] no cached fleet; generating (seed={seed}, scale={scale}) ...")
-            fleet = gen.generate(seed=seed, scale=scale)
-            gen.write(fleet)
+            fleet = build("no cached fleet; generating", seed, scale)
+        except gen.StaleFleetCache as exc:
+            # Regenerated here, though `gen.load` refuses: `data/` is
+            # gitignored, so this is the existing-checkout case -- `git pull`
+            # brought a label the cache predates, and refusing would leave the
+            # reader to run a command this can run itself. The alternative to
+            # both is worse: a load that succeeds while every query over the
+            # new label returns zero rows, which reads as "the answer is none".
+            #
+            # At the **cache's** seed and scale, not the CLI's. The cache was
+            # written by some earlier run whose options are not these ones, and
+            # rebuilding it at `--scale 1.0` because that is the default would
+            # answer a stale-cache problem by silently swapping the graph.
+            click.echo(f"[1/4] cached fleet predates {', '.join(exc.missing)}; "
+                       f"rebuilding it as it was")
+            fleet = build("regenerating", exc.seed, exc.scale)
 
     if layers == "synthetic":
         click.echo("      layers: synthetic only")

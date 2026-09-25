@@ -9,10 +9,10 @@ Measured (see the README section this pins): **it is connected** -- 1,240 nodes,
 kernel registers. It is not 1,030 orphans.
 
 What it is missing is a *half*, not the joins. The real layer carries the
-hardware and kernel spine and none of the clinical one, so six labels and eleven
-edge types are empty -- including `USES_OPERATOR`, which is the edge the hero
-question traverses. That is why most of the catalog queries come back empty
-against it.
+hardware and kernel spine and none of the clinical one, so seven labels and
+twelve edge types are empty -- including `USES_OPERATOR`, which is the edge the
+hero question traverses. That is why most of the catalog queries come back
+empty against it; `EA20` is one of them, since `Site` is generated-only.
 
 These assertions are about **shape, not counts**. The counts move whenever ONNX
 Runtime publishes new kernel registrations -- 734 became 738 during one week --
@@ -51,9 +51,20 @@ GRAPH = "default"
 # The hardware and kernel spine, plus the MLPerf submissions.
 LABELS_PRESENT = {"Vendor", "SoC", "Accelerator", "Board", "Runtime",
                   "Operator", "Kernel", "Model", "BenchmarkTask", "Deployment"}
-# The clinical spine, entirely generated.
+# Everything the real layer does not build: the clinical spine, entirely
+# generated, plus `Site`.
 LABELS_ABSENT = {"ModelVariant", "Sensor", "SignalStage", "ClinicalTask",
-                 "Dataset", "Certification"}
+                 "Dataset", "Certification",
+                 # `Site` is not clinical -- it is here because the real layer
+                 # gets no sites by decision (#34, docs/location-scope.md): an
+                 # MLPerf submission has no known location, and inventing one
+                 # would put a synthetic property on a node stamped
+                 # `provenance: "real"`. Listing it keeps the completeness
+                 # check below satisfied and records the classification; that
+                 # the label stays empty is caught by the equality above, and
+                 # the *reason* it stays empty is pinned by
+                 # `tests/test_site_spine.py::test_the_real_layer_gets_no_sites`.
+                 "Site"}
 
 EDGES_PRESENT = {"HAS_SOC", "IMPLEMENTS", "MADE_BY", "MEASURES", "ON_BOARD",
                  "PROVIDED_BY", "RUNS_ON", "SOLVES", "TARGETS",
@@ -125,7 +136,22 @@ def test_which_labels_the_real_layer_carries(real_only):
         f"lost {sorted(LABELS_PRESENT - present)}. The README documents which "
         f"catalog queries work against `--layers real`; update it too."
     )
-    assert not (present & LABELS_ABSENT), "a clinical-spine label gained real nodes"
+    # Every declared label is in exactly one of the two sets. Without this,
+    # `LABELS_ABSENT` bought nothing: the equality above already fails when an
+    # absent label gains rows, so the old `present & LABELS_ABSENT` check could
+    # never fire on its own. What was genuinely unchecked is a label in
+    # *neither* set -- the next spine adds one to `NODE_LABELS`, nothing here
+    # classifies it, and the real layer stops being described by this file
+    # without any test saying so. `Site` is the label that made that concrete.
+    unclassified = set(NODE_LABELS) - LABELS_PRESENT - LABELS_ABSENT
+    assert not unclassified, (
+        f"{sorted(unclassified)} is declared in `etl.loader.NODE_LABELS` and "
+        f"listed neither as carried by the real layer nor as absent from it. "
+        f"Decide which, here -- this file is what documents the real layer's "
+        f"shape, and an unlisted label is simply unmeasured."
+    )
+    overlap = LABELS_PRESENT & LABELS_ABSENT
+    assert not overlap, f"{sorted(overlap)} is listed as both present and absent"
 
 
 def test_which_edge_types_the_real_layer_carries(real_only):
