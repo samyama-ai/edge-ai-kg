@@ -217,7 +217,8 @@ ORDER BY on_recalled_board DESC
         # edges, 0.1 ms warm at `--scale 1.0` -- and that is a statement about
         # the fixture, not about the shape: a denser real pipeline could grow
         # this sharply, and the fix there is a bound on the walk, which costs
-        # the deep chains (`EA07`'s trade, one comment block above). Measure
+        # the deep chains (`EA07` makes that trade, in
+        # `benchmarks/catalog/core.py`). Measure
         # before assuming it still holds on real topology.
         #
         # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts
