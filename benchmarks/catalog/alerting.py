@@ -1,8 +1,13 @@
 """`EA17`-`EA18`: what has broken, and what is breaking quietly.
 
 The blast radius of a failing sensor, and the deployments that miss a
-clinical task's latency budget while nothing is down at all. Both are
-embedded-only for the reasons `docs/engine-notes.md` note 12 records.
+clinical task's latency budget while nothing is down at all.
+
+Only `EA17` is embedded-only: it walks `NEXT_STAGE*0..` unbounded and calls
+`size(r)` on the result, which the 1.7.0 server rejects
+(`docs/engine-notes.md` note 12). `EA18`'s walk is bounded, so it runs on
+both builds, and `tests/test_correctness.py::EMBEDDED_ONLY` -- derived from
+the Cypher rather than from prose -- holds `EA17` and `EA21`, not `EA18`.
 """
 from __future__ import annotations
 
@@ -231,8 +236,9 @@ RETURN kind, affected, only_via_me, nearest
         #
         # The trailing re-bind of `a` is note 1's shape and is validated at
         # `--scale 1.0` by
-        # `tests/test_latency_budget.py::test_ea18_matches_ground_truth_at_full
-        # _scale_with_an_injected_breach`, which raises one deployment's latency
+        # `tests/test_latency_budget.py`'s
+        # `test_ea18_matches_ground_truth_at_full_scale_with_an_injected_breach`,
+        # which raises one deployment's latency
         # over its task's budget so the query has rows at that cardinality and
         # compares them against Python. Removing the join fails it.
         #

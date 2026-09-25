@@ -6,7 +6,7 @@ simultaneous alerts is upstream of the others.
 """
 from __future__ import annotations
 
-from benchmarks.catalog.subjects import EA17_SUBJECT, EA21_ALERTS, _alert_list
+from benchmarks.catalog.subjects import EA17_SUBJECT, EA21_ALERTS, alert_list
 
 TRIAGE: list[dict] = [
     {
@@ -236,6 +236,6 @@ WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
 RETURN alert, downstream_alerts, reaches
 ORDER BY downstream_alerts DESC
 LIMIT 20
-""".replace("{alerts}", _alert_list(EA21_ALERTS)),
+""".replace("{alerts}", alert_list(EA21_ALERTS)),
     },
 ]

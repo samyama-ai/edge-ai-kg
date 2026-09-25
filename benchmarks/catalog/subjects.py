@@ -18,29 +18,23 @@ from etl.helpers import cypher_literal
 # finding rather than an editing mistake.
 EA17_SUBJECT = "sensor:00000"
 
-# `EA20` was reserved rather than taken while the `Site` spine (#115) was in
-# review holding that id, and both have since merged -- the catalog is
-# `EA01`-`EA21` with no gap. The reservation is worth recording: two queries
-# sharing an id costs a silent collision in `BY_ID`, where the second
-# overwrites the first and the catalog is simply one query short.
-#
 # `EA21`'s alerting set: the sensors paging right now. Written once and
 # interpolated, for the same reason as `EA17_SUBJECT` -- the query names it
 # twice, and a set rewritten in one place and not the other would rank one
 # population against a different one, which reads as a finding rather than an
-# edit. `retargeted_ea21`, just below, is how a caller asks about a
-# different set.
+# edit. `retargeted_ea21`, in this package's `__init__` and re-exported
+# from `benchmarks.queries`, is how a caller asks about a different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
 
-def _alert_list(alert_ids) -> str:
+def alert_list(alert_ids) -> str:
     """The Cypher list literal for an alert set, escaped.
 
     Every id goes through `etl.helpers.cypher_literal`, which strips the
     quotes and backslashes that would end the literal early. Without it this
     function built Cypher out of whatever it was handed, and the docstring
-    above promises an MCP tool will hand it a live alert set -- so the input
-    is external by design. Measured before the fix:
+    `retargeted_ea21` promises an MCP tool will hand it a live alert set --
+    so the input is external by design. Measured before the fix:
     `['sensor:x"] OR true //']` produced `["sensor:x"] OR true //"]`, which
     closes the list, disjoins a true predicate and comments out the rest of
     the line; the query then returned every sensor in the graph.
