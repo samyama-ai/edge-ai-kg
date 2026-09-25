@@ -146,9 +146,9 @@ Two practical notes, both measured:
   signature, and it is exactly the "returns nothing rather than erroring" shape
   `engine-notes.md` catalogues.
 
-**Measured by absence, still true:** of the 20 catalog queries, two (`EA07` and
-`EA17`) use a variable-length path and none uses `shortestPath` or any of the
-algorithms above. They are available and unused.
+**Measured by absence, still true:** of the 21 catalog queries, three
+(`EA07`, `EA17` and `EA21`) use a variable-length path and none uses
+`shortestPath` or any of the algorithms above. They are available and unused.
 
 ### Ecosystem and hiring — they win
 
@@ -246,7 +246,7 @@ this repo now allows.
 only vector code here is `benchmarks/vector_probe.py`, which exists to probe
 the feature for this page. An earlier version of this sentence said a `grep`
 for vector/embedding/hnsw returned nothing, which stopped being true the day
-that probe was written; the catalog is 20 Cypher queries. So the claim today is
+that probe was written; the catalog is 21 Cypher queries. So the claim today is
 "the engine can, this KG does not" — #48 is the issue that closes that gap, and
 until it lands the convergence differentiator is real in the engine and
 undemonstrated here. #49 asks the same of the MCP surface.
@@ -351,7 +351,7 @@ existed, and the contract test was written to permit exactly that phrasing.
 | ~48K nodes/s, ~3.0K edges/s ingest | **Measured** | `python -m benchmarks.ingest` |
 | `id` indexes are load-critical — **6.4x** on 1.7.1 | **Measured** | `python -m benchmarks.ingest --no-indexes`, against a normal run |
 | | | 3,033 edges/s indexed against 475 without. #18 measured **10.6x** on `samyama` 0.6.1; the gap narrowed with the engine, not with the claim. |
-| 20-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` for EA01-EA16; `pytest tests/test_site_spine.py` for EA20; `pytest tests/test_blast_radius.py` for EA17, `pytest tests/test_latency_budget.py` for EA18 and `pytest tests/test_certification_alerts.py` for EA19, each of which needs its own oracle |
+| 21-query catalog, ground-truthed in Python | **Measured** | `pytest tests/test_correctness.py` for EA01-EA16; `pytest tests/test_site_spine.py` for EA20; `pytest tests/test_blast_radius.py` for EA17, `pytest tests/test_latency_budget.py` for EA18 and `pytest tests/test_certification_alerts.py` for EA19, each of which needs its own oracle |
 | Snapshot import: **0.31 s** median, 5 runs, fresh server | **Measured** — needs a server and a snapshot file, neither in this repo | `python -m benchmarks.snapshot --help` prints the full invocation; see #45 |
 | Footprint on a shared machine | **Unmeasured** | #46 |
 | Faster than Neo4j on the hero query | **Measured — no. Neo4j is 4.3-4.7x faster on `EA01`** | `python -m benchmarks.compare_neo4j --repeats 15 --natural`; needs a Neo4j and `NEO4J_PASSWORD`. Results in [`neo4j-comparison.md`](neo4j-comparison.md), #47 |

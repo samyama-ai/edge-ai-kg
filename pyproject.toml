@@ -91,8 +91,11 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "ISC", "PERF", "FURB", "RUF", "BLE",
 # the argument list is literal and the script is a constant in that file.
 "tests/test_blast_radius_semantics.py" = ["S603"]
 
-# S603/S607: `tests/test_site_spine.py` runs `git show origin/main:etl/generate.py`
-# to compare this branch's fleet against the generator before `Site` existed.
+# S603/S607: `tests/test_site_spine.py` runs
+# `git show <PRE_SITE_COMMIT>:etl/generate.py` -- a fixed commit named in that
+# file, not a moving ref -- to compare this branch's fleet against the
+# generator before `Site` existed. A moving ref would compare against whatever
+# `main` happens to be, which is the comparison rotting rather than holding.
 # The argument list is literal, the only variable is a ref this file names, and
 # `git` is resolved from PATH because a test that hardcoded /usr/bin/git would
 # skip on half the machines it runs on. It is the alternative to pinning

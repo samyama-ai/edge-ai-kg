@@ -41,7 +41,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
 | #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #113) |
-| #36 | root cause versus symptom | no | **take** |
+| #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** — delivered as beat 7 of `demo.demo` |
@@ -68,11 +68,14 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35`, `#37` and `#40` are delivered — as `EA17`, `EA18` and `EA19`. The page
-and the queries land together, so wherever this is read the three are in the
-catalog beside it. The catalog is `EA01`-`EA20` — `EA20` is the site query
-that arrived with this page's own reversal of #34, recorded in
-[`location-scope.md`](location-scope.md).
+`#35`, `#37`, `#40` and `#36` are delivered — as `EA17`, `EA18`, `EA19` and
+`EA21`. The page and the queries land together, so wherever this is read they
+are in the catalog beside it. The catalog is `EA01`-`EA21`, with no gap:
+`EA20` is the site query that arrived with this page's own reversal of #34,
+recorded in [`location-scope.md`](location-scope.md). That id was reserved
+while the two changes were separate PRs — two queries sharing an id would
+silently overwrite one of them in `BY_ID` — and both landed, so the reservation
+did its job and the range is continuous.
 
 That is not a promise this page makes about itself.
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`

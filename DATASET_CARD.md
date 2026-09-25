@@ -55,7 +55,7 @@ library's coverage) and **`Deployment`** (one variant landed on one board).
 
 | Task | Description |
 |---|---|
-| Graph query benchmarking | 20-query catalog with recorded questions, timings and expected shapes |
+| Graph query benchmarking | 21-query catalog with recorded questions, timings and expected shapes |
 | Multi-hop retrieval / GraphRAG | Dense, typed, semantically meaningful multi-hop paths over a technical domain |
 | Anti-join / negation evaluation | "Which operator has *no* kernel here" — coverage-gap reasoning |
 | Impact analysis | Blast radius of removing a single node (a dropped kernel) |
@@ -257,9 +257,15 @@ and **imports in 0.31 s** — median of 5 runs against a fresh server, measured
 **16 of the 17 catalog queries that existed on that date** were verified to
 return rows against the imported snapshot. The seventeenth, `EA17`, raised
 instead: the 1.7.0 server rejects `size(r)` over a variable-length
-relationship ([engine note 12](docs/engine-notes.md)). `EA18` and `EA19`
-post-date this run, as does `EA20`, and none was part of it; the catalog is larger now, and
-this paragraph reports what was verified then.
+relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19`, `EA20`
+and `EA21` post-date this run and were not part of it; the catalog is larger
+now, and this paragraph reports what was verified then. `EA21` would not have
+raised the way `EA17` did — it walks an **unbounded** `*0..` without
+`size(r)`, and it is the unbounded walk that makes a query embedded-only, not
+variable length as such (`EA07` is bounded and runs on both). What it would
+return there is **inferred from engine note 12 and untested**: the zero-length
+match alone, so wrong rows rather than an error. Like `EA17` it should be
+treated as answerable only on the embedded build.
 
 **The published snapshot predates the `Site` spine and does not carry it.**
 That snapshot holds **25,145 nodes / 76,291 edges**, against a fresh build's
