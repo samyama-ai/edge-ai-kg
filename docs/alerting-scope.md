@@ -32,7 +32,7 @@ rather than the reason it was chosen. Measured on the shipped graph:
 | # | question | needs a new label? | verdict |
 |---|---|---|---|
 | #35 | blast radius: what stops with this sensor | no | **take** — delivered as `EA17` (#96, reaching `main` with #113) |
-| #36 | root cause versus symptom | no | **take** |
+| #36 | root cause versus symptom | no | **take** — delivered as `EA21` |
 | #37 | silent degradation against a latency budget | no | **take** — delivered as `EA18` |
 | #40 | which certifications a failure implicates | no | **take** — delivered as `EA19` |
 | #42 | a worked demo beat | no | **take** — delivered as beat 7 of `demo.demo` |
@@ -59,9 +59,16 @@ operators on the CPU and misses its task's latency budget — and the graph can
 already see it, because the fallback count and the budget are two hops apart.
 That is the alerting theme and the hero question meeting in one row.
 
-`#35`, `#37` and `#40` are delivered — as `EA17`, `EA18` and `EA19`. The page
-and the queries land together, so wherever this is read the three are in the
-catalog beside it. The catalog is `EA01`-`EA19`.
+`#35`, `#37`, `#40` and `#36` are delivered — as `EA17`, `EA18`, `EA19` and
+`EA21`. The page and the queries land together, so wherever this is read they
+are in the catalog beside it. The catalog is `EA01`-`EA21`, with one gap:
+**`EA20` is not in it.** That id is claimed by #115's `Site` query, which is a
+separate PR; two queries sharing an id would silently overwrite one of them in
+`BY_ID`, so the gap is deliberate. If #115 is closed without merging — its own
+body says it should be, if the decision to decline #34 stands — then `EA20` is
+free again, and the next query to be added takes it rather than leaving a hole
+here. Either way this sentence is what tells a reader the gap is not an
+accident.
 
 That is not a promise this page makes about itself.
 `tests/test_alerting_scope.py::test_the_delivery_claims_match_the_catalog`
