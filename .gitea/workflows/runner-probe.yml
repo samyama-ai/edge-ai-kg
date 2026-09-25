@@ -1,0 +1,88 @@
+# One question per job, because a job is the smallest thing this repo can read.
+#
+# CI has failed on every run since the first (#1, 2026-09-07) -- 214 runs, all
+# `failure`, almost all in 7-14s. Job logs need repository-owner rights, which
+# the token used here does not have, and `/actions/runs/<n>/jobs` returns an
+# empty list. What *is* readable is `/actions/tasks`: one row per **job**, with
+# its name, status and duration.
+#
+# So the instrument is the job list itself. Each job below tests one thing and
+# nothing else, they are independent (no `needs:`), and the name says what a
+# failure would mean. Reading which names failed is the closest thing to a log
+# this repo currently has.
+#
+# Delete this file once CI is green and the cause is written down. A permanent
+# probe is a permanent excuse not to fix the thing it probes.
+name: Runner probe
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # 1. Does a job start at all, with no `uses:` and no shell override?
+  #    If this fails, nothing below tells you anything new: the runner is not
+  #    executing steps, and the cause is outside this repository.
+  bare-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "bare-run reached the shell"
+
+  # 2. The same step under `sh`. `ci.yml` sets `shell: sh` repo-wide on the
+  #    theory that the image is Alpine-based and ships no bash. If `bare-run`
+  #    fails and this passes, that theory is right and `ci.yml` needs it; if
+  #    both fail, it never was the shell.
+  bare-run-sh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: sh
+    steps:
+      - run: echo "bare-run-sh reached the shell"
+
+  # 3. Do `uses:` steps work? The earlier diagnosis in `ci.yml` rests on
+  #    "every `uses:` step succeeded while the first `run:` failed", which is
+  #    what pointed at the shell rather than the container. That is worth
+  #    re-testing rather than inheriting: it was measured in September and the
+  #    runner may have been replaced since.
+  checkout-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+  # 4. `actions/setup-python@v5` downloads a build and populates a tool cache.
+  #    On a self-hosted act_runner that is a common failure, and it sits second
+  #    in `ci.yml` -- early enough to explain a 7-14s death.
+  setup-python-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+  # 5. What the image actually is. Deliberately last and deliberately
+  #    `continue-on-error`: its value is the output, not the verdict, and a red
+  #    cross here would say nothing that jobs 1-4 have not already said.
+  environment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: What is this runner
+        shell: sh
+        run: |
+          echo "shell   : $0"
+          echo "user    : $(id -un 2>/dev/null || echo '?') (uid $(id -u 2>/dev/null || echo '?'))"
+          echo "bash    : $(command -v bash || echo 'none')"
+          echo "sh      : $(command -v sh || echo 'none')"
+          echo "python3 : $(command -v python3 || echo 'none')"
+          echo "node    : $(command -v node || echo 'none')"
+          echo "apt-get : $(command -v apt-get || echo 'none')"
+          echo "apk     : $(command -v apk || echo 'none')"
+          echo "os      : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
