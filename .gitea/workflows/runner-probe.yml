@@ -204,3 +204,55 @@ jobs:
           from etl import onnx_catalog as oc
           ops = oc.load_cached()
           raise SystemExit(0 if len(ops) > 100 else 1)"
+
+  # Round 5. stage-install (57s) and stage-dataset (91s) both pass, so the
+  # engine builds and the sources are reachable; `test` still fails at 583s,
+  # inside the suite. CI downloads a **fresh** catalogue on every run while
+  # this machine has a cached one, so the suspects are the tests that compare
+  # published figures against whatever upstream shipped today.
+  #
+  # Two jobs, splitting the suite at that line. If `suite-drift-sensitive`
+  # fails while `suite-rest` passes, CI cannot be green until the catalogue is
+  # pinned -- which is #120, already in review -- and this PR's job is to have
+  # made that legible rather than to fix it here.
+  suite-drift-sensitive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m etl.download_data
+          .venv/bin/pytest -q --no-skips \
+            tests/test_build_manifest.py \
+            tests/test_published_counts.py \
+            tests/test_onnx_catalog.py \
+            tests/test_provenance.py
+
+  suite-rest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m etl.download_data
+          .venv/bin/pytest -q --no-skips \
+            --ignore=tests/test_build_manifest.py \
+            --ignore=tests/test_published_counts.py \
+            --ignore=tests/test_onnx_catalog.py \
+            --ignore=tests/test_provenance.py
