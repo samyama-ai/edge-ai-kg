@@ -157,20 +157,20 @@ only once their opening `MATCH` yielded rows; with no `USES_OPERATOR` edges it
 yields nothing, so the failing clause was never reached.
 
 `EA18`, `EA19` and `EA21` are the three entries here **not** from the server
-run, which predates all of them. Their place in the table is **measured embedded**, against the
-real layer, by `tests/test_real_layer_shape.py`, which executes every catalog
-query and compares the result to this table. **Over HTTP it is expected, not
-measured**: the real layer has no `ClinicalTask` and no `Sensor` (it does have
-`Deployment`s, the MLPerf rows), and `EA18` opens on a `ClinicalTask` and
-`EA19` on a `Sensor`, so neither's opening `MATCH` binds anything on either
-build. `EA21` opens on a `Sensor` too, and carries a second reason it cannot
-be read off the server run: it walks an unbounded `NEXT_STAGE*0..`, which the
-1.7.0 server does not traverse (engine note 12). It would not *raise* the way
-`EA17` does -- `EA17` asks for `size(r)` and `EA21` does not -- so by
-inference, untested here, it would answer from the zero-length match alone and
-report wrong numbers rather than nothing. The distinction between measured and expected
-is kept rather than smoothed over, because on this page it has mattered
-before.
+run, which predates all of them. Their place in the table is **measured
+embedded**, against the real layer, by `tests/test_real_layer_shape.py`, which
+executes every catalog query and compares the result to this table. **Over
+HTTP it is expected, not measured**: the real layer has no `ClinicalTask` and
+no `Sensor` (it does have `Deployment`s, the MLPerf rows), and `EA18` opens on
+a `ClinicalTask` and `EA19` on a `Sensor`, so neither's opening `MATCH` binds
+anything on either build. `EA21` opens on a `Sensor` too, and carries a second
+reason it cannot be read off the server run: it walks an unbounded
+`NEXT_STAGE*0..`, which the 1.7.0 server does not traverse (engine note 12).
+It would not *raise* the way `EA17` does — `EA17` asks for `size(r)` and
+`EA21` does not — so by inference, untested here, it would answer from the
+zero-length match alone and report wrong numbers rather than nothing. The
+distinction between measured and expected is kept rather than smoothed over,
+because on this page it has mattered before.
 
 **"Identical" is a claim about this table, not about the two builds.** On the
 **full** graph, measured 2026-09-10 by loading one scale-1.0 fleet into both and
@@ -383,16 +383,17 @@ median 5.8 ms, slowest `EA17` at 95 ms — are from the sweep of the **17**
 queries that existed when it was run; `EA18`, `EA19` and `EA21` post-date it
 and are not in that median.
 
-**Over HTTP the honest number is 17 measured-equivalent, and 18 only if you
-count a query whose rows would be wrong.** `EA17` raises on the 1.7.0 server,
-which *is* measured (engine note 12), so it returns nothing there: that is the
-one subtraction anybody has checked. `EA21` has never been run against a
-server at all — it walks the same unbounded shape but never calls `size(r)`,
-so by note 12 it would not raise; it would answer from the zero-length match
-alone and return **wrong rows that look like an answer**. Counting it as one
-of the 18 is counting an inference, which is why it and `EA17` are both
-embedded-only. No full-graph HTTP sweep has been run since `EA18`, `EA19` and
-`EA21` were added, so none of this is a sweep result.
+**Over HTTP there is no number here that was measured.** No full-graph HTTP
+sweep has been run since `EA18`, `EA19` and `EA21` were added, so what follows
+is arithmetic on the embedded figure, not a sweep result. `EA17` raises on the
+1.7.0 server, which *is* measured (engine note 12), so it returns nothing
+there: that is the one subtraction anybody has checked. `EA21` has never been
+run against a server at all — it walks the same unbounded shape but never
+calls `size(r)`, so by note 12 it would not raise; the inference is that it
+would answer from the zero-length match alone and return wrong rows that look
+like an answer. Subtracting `EA21` as well gives 17, but that second
+subtraction rests on the inference rather than on a run, which is why it and
+`EA17` are both embedded-only.
 
 Both counts above describe the **full** graph. The only recorded HTTP run is
 over the **real layer**, in the section above, which is where the "6 of the

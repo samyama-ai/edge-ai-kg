@@ -561,8 +561,14 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # `README.md` all state which queries these are -- until this test existed
 # that was prose, so a new query with an unbounded walk would have made three
 # pages wrong at once and nothing would have said so. `EA21` is the second
-# member, and this guard is what caught it: it walks `NEXT_STAGE*0..` for the
-# same reason `EA17` does, so the server cannot answer it either.
+# member, and this guard is what caught it -- but it is here for a different
+# failure from `EA17`'s. `EA17` calls `size(r)` on the walk and the server
+# raises, which is measured. `EA21` never calls `size(r)`, so nothing raises:
+# by note 12 the walk would match only the zero-length case and the ranking
+# would count alerts on the sensor's own entry stage instead of alerts
+# downstream -- wrong numbers that look like an answer. That second half is
+# **inferred from note 12, not measured**: nobody has run `EA21` against a
+# 1.7.0 server. Both are embedded-only; only one of them announces itself.
 EMBEDDED_ONLY = {"EA17", "EA21"}
 
 
