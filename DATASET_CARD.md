@@ -305,9 +305,15 @@ Measured on two catalogues differing by a single operator, at seed `20260814`:
 
 At `--scale 0.3` the 205-operator catalogue gives 6,150 nodes and 18,176 edges.
 At `--scale 0.3` a catalogue one operator smaller gives 8,028 nodes and 23,787 edges.
+The operator removed is `ai.onnx.preview.training.Momentum`, the last entry the
+parser yields, so the figures above are reproducible: drop it from
+`load_cached()` and generate at seed `20260814`, `--scale 0.3`.
 
 That is a 31% move at an unchanged seed: `Kernel` went 5,559 → 7,438, and
-`deploy:00000.latency_ms` went 31.431 → 27.649.
+`deploy:00000.latency_ms` went 31.431 → 27.649. It moves *up* on a smaller
+catalogue, which reads backwards until you see why: the operator list is drawn
+against the shared random stream, so removing one entry reshapes every later
+draw rather than subtracting its own kernels.
 
 (Those are deliberately *not* the shipped graph's counts: they come from a
 reduced scale and a catalogue altered to demonstrate the dependency. The

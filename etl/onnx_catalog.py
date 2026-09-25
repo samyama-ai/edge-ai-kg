@@ -142,13 +142,43 @@ def parse_operators(markdown: str) -> list[Operator]:
     return list(ops.values())
 
 
+def cached_source() -> str | None:
+    """The URL the cached catalogue was fetched from, or `None` if unknown.
+
+    `build()` records it in `operators.json`. A checkout made before the pin
+    holds `.../onnx/main/docs/Operators.md`, which is how a cache can hold a
+    revision the pin no longer names.
+    """
+    path = ONNX_DIR / "operators.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("source")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def download(force: bool = False) -> Path:
-    """Fetch Operators.md into data/onnx/, unless already cached."""
+    """Fetch Operators.md into data/onnx/, unless the cache already matches the pin.
+
+    A cache keeps whatever revision it was fetched from, so returning it
+    unconditionally would let an old copy outlive a moved `ONNX_REF` -- the
+    pin would be true of the source and false of every build. When the
+    recorded source is not this `OPERATORS_URL`, the file is re-fetched
+    rather than reused, which is what makes "a re-fetch reproduces what is
+    pinned here" a fact rather than an instruction to remember `--force`.
+
+    An unknown source (no `operators.json` yet, or an unreadable one) is not
+    treated as a mismatch: the raw file alone carries no provenance, and
+    re-fetching on every call would make the cache pointless.
+    """
     import requests
 
     ONNX_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = ONNX_DIR / "Operators.md"
-    if raw_path.exists() and not force:
+    source = cached_source()
+    stale_pin = source is not None and source != OPERATORS_URL
+    if raw_path.exists() and not force and not stale_pin:
         return raw_path
     resp = requests.get(OPERATORS_URL, timeout=120)
     resp.raise_for_status()

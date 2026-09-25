@@ -68,8 +68,10 @@ def comparable(fresh, recorded):
         pytest.skip(
             f"the ONNX operator catalogue moved since the manifest was written "
             f"({mine} -> {theirs}), so the generated layer is not comparable. "
-            f"Run `python -m etl.manifest --check` for the full report, and "
-            f"--write only if the published figures should follow upstream."
+            f"If `data/` predates the pin, `python -m etl.download_data "
+            f"--force` is the fix. Run `python -m etl.manifest --check` for "
+            f"the full report, and --write only if the pin moved deliberately "
+            f"and the published figures should follow it."
         )
     return fresh
 
@@ -178,9 +180,10 @@ def test_the_totals_agree_with_the_per_key_counts(recorded):
 def test_the_manifest_records_the_input_it_was_derived_from(recorded):
     """Without this the diff cannot say which side moved (#29, Tarun's review).
 
-    The generated counts depend on the ONNX operator catalogue, which is
-    re-fetched rather than pinned. A manifest recording only `seed` and `scale`
-    claims a determinism it does not have.
+    The generated counts depend on the ONNX operator catalogue. It is pinned
+    now, but `data/` is gitignored, so a checkout can still hold a cache from
+    another revision -- and the pin itself can be moved. A manifest recording
+    only `seed` and `scale` claims a determinism it does not have.
     """
     catalogue = (recorded.get("inputs") or {}).get("onnx_catalogue")
     assert catalogue, (
@@ -273,19 +276,15 @@ def test_the_drift_skip_is_raised_in_setup_so_no_skips_can_convert_it():
     `data/` had moved -- which is how a stale catalogue produced green suites
     while proving nothing.
 
-    Asserted structurally because the behavioural version costs a scale-1.0
-    rebuild in a subprocess for a property two lines of source already fix: the
-    test takes the gating fixture, and raises no skip of its own.
+    Asserted structurally, and narrowly. An earlier version also grepped the
+    test's source for `pytest.skip`, which a docstring mentioning the name
+    would have failed for no real reason; `tests/test_environment_skips.py`
+    covers the behaviour through its `ENVIRONMENT` markers, of which
+    "catalogue moved" is one. What remains here is the part that file cannot
+    see: that this particular test is gated on the fixture at all.
     """
     import inspect
 
-    source = inspect.getsource(test_the_generated_layer_matches_the_manifest)
-    assert "pytest.skip" not in source, (
-        "the catalogue-drift skip has moved back into the test body. "
-        "`--no-skips` converts setup-phase skips only, so a body skip leaves "
-        "CI green on a drifted catalogue -- raise it from the `comparable` "
-        "fixture instead."
-    )
     assert "comparable" in inspect.signature(
         test_the_generated_layer_matches_the_manifest).parameters, (
         "the test no longer requests `comparable`, the fixture that gates it "

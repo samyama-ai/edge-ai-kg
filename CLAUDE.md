@@ -124,8 +124,10 @@ statements. Two independent producers fill the same Fleet:
   fewer moved a scale-0.3 fleet from 6,150 to 8,028 nodes and changed
   `latency_ms` on every deployment. Ids are stable; counts and property values
   are not. With the pin held, same seed → same graph; **moving the pin is a
-  reviewed change that moves published figures**, and
-  `python -m etl.manifest --check` names the ones to update.
+  reviewed change that moves published figures**. `python -m etl.manifest
+  --check` reports *that* the catalogue moved and by how much; it deliberately
+  does not advise re-baselining, because for an unintended move the fix is a
+  fresh fetch (`python -m etl.download_data --force`), not a new baseline.
   `DATASET_CARD.md` has the measurement, and `inputs.onnx_catalogue` in
   `docs/build-manifest.json` records which catalogue a build used.
   Vendor/board names are deliberately fictional so no generated number can be
