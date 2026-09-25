@@ -125,3 +125,34 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: bash -c 'echo bash works'
+
+  # Round 3. `has-pip` failed while `has-python3`, `has-venv` and
+  # `python-is-at-least-3-11` passed: the image ships a usable Python with no
+  # pip. Three ways to get one, each its own job, because the fix in `ci.yml`
+  # should be whichever of these is measured to work rather than whichever is
+  # conventional.
+  venv-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          python3 -m venv /tmp/probe-venv
+          /tmp/probe-venv/bin/python -m pip --version
+
+  ensurepip-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          python3 -m ensurepip --upgrade
+          python3 -m pip --version
+
+  apt-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: |
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends python3-pip
+          python3 -m pip --version
