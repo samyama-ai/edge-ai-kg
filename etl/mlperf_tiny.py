@@ -110,12 +110,30 @@ def parse_summary(text: str) -> list[TinyResult]:
     return results
 
 
+def _cached_from_pin() -> bool:
+    """Whether the cached parse came from the pinned revision.
+
+    The same guard `etl.ort_kernels` and `etl.onnx_catalog` carry, and it is
+    needed here for the same reason: a cache written before `TINY_REF` existed
+    records the old `main` URL, and skipping the fetch on file existence alone
+    would let it outlive the pin. Unknown or unreadable counts as stale, since
+    re-fetching is the cheap answer and serving unpinned rows is not.
+    """
+    recorded = TINY_DIR / "results.json"
+    if not recorded.exists():
+        return False
+    try:
+        return json.loads(recorded.read_text(encoding="utf-8")).get("source") == SUMMARY_URL
+    except (OSError, ValueError):
+        return False
+
+
 def download(force: bool = False) -> Path:
     import requests
 
     TINY_DIR.mkdir(parents=True, exist_ok=True)
     path = TINY_DIR / "summary.csv"
-    if path.exists() and not force:
+    if path.exists() and not force and _cached_from_pin():
         return path
     resp = requests.get(SUMMARY_URL, timeout=180)
     resp.raise_for_status()
