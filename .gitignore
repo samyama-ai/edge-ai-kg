@@ -5,3 +5,7 @@ data/
 site/
 .DS_Store
 .env
+
+# pytest writes a .py assertion-rewrite cache here, which `ruff check .`
+# then reads and fails on after any test run.
+.pytest_cache/
