@@ -25,8 +25,16 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TINY_DIR = DATA_DIR / "mlperf-tiny"
 ROUND = "v1.2"
+# Pinned like the other two upstreams (`etl.onnx_catalog.ONNX_REF`,
+# `etl.ort_kernels.ORT_REF`). This one has drifted the least -- the round's
+# results repository has a single commit, from 2024-04-16, because a closed
+# MLPerf round is an archive rather than a moving branch. It is pinned anyway:
+# `main` is a branch name, and a branch that has not moved yet is not the same
+# thing as a revision that cannot. The cost of being wrong here is another
+# 25,162-versus-25,170 afternoon.
+TINY_REF = "b448c5c7110903f4c0d8a24682f95b4903cdfd02"
 SUMMARY_URL = (f"https://raw.githubusercontent.com/mlcommons/tiny_results_{ROUND}/"
-               "main/summary.csv")
+               f"{TINY_REF}/summary.csv")
 
 TASKS = {
     "ad":  ("Anomaly Detection", "ToyADMOS / DCASE2020", "AUC", 0.85),
