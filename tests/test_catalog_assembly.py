@@ -21,6 +21,8 @@ helper, and it arrived with no tests of its own.
 """
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from benchmarks.catalog import _assembled, retargeted_ea21
@@ -50,7 +52,7 @@ def test_a_duplicate_id_is_refused_rather_than_silently_dropped():
 
 def test_the_duplicate_message_says_how_many_queries_would_vanish():
     """A count, because "a duplicate" and "three queries gone" read differently."""
-    with pytest.raises(ValueError, match="1 quer"):
+    with pytest.raises(ValueError, match=r"1 quer\(y/ies\) unreachable"):
         _assembled([_q("EA01"), _q("EA01"), _q("EA02")])
 
 
@@ -77,7 +79,7 @@ def test_retargeting_refuses_an_id_that_escaping_would_change():
     Answering about a different sensor is worse than failing, for a query
     someone is paged on.
     """
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="names a different sensor"):
         retargeted_ea21(['sensor:x") OR true //'])
 
 
@@ -87,23 +89,57 @@ def test_retargeting_refuses_a_bare_string():
         retargeted_ea21("sensor:00042")
 
 
-def test_the_package_builds_BY_ID_through_the_guard(monkeypatch):
+@pytest.fixture
+def restored_catalog_modules():
+    """Reload `benchmarks.catalog` and `benchmarks.queries` however the test ends.
+
+    The test below deliberately breaks the package at import time, and the
+    cleanup has to run on failure as well as on success: a reload left holding
+    a duplicated catalog would fail every later test in the session for a
+    reason that has nothing to do with them, and the first such test would get
+    the blame. Teardown rather than trailing statements is the difference.
+
+    Both modules are reloaded, in that order. `benchmarks.queries` re-exports
+    the package's `BY_ID`, so reloading only the package leaves the two
+    holding different dicts -- which is a subtler version of exactly the
+    problem this file is about, and the assertion below pins that they are the
+    same object again.
+    """
+    import benchmarks.catalog as catalog
+    import benchmarks.catalog.core as core
+    import benchmarks.queries as queries
+
+    try:
+        yield catalog, core
+    finally:
+        importlib.reload(core)
+        importlib.reload(catalog)
+        importlib.reload(queries)
+
+
+def test_the_package_builds_BY_ID_through_the_guard(
+        monkeypatch, restored_catalog_modules):
     """The guard has to be on the path the import actually takes.
 
     Testing `_assembled` directly proves the function works and nothing about
     whether anything calls it: reverting `BY_ID = _assembled(QUERIES)` to a
-    plain dict comprehension left every test above passing. This reloads the
-    package with a duplicate planted in one of the four modules, which is how
-    a real collision would arrive -- two modules edited by two PRs.
+    plain dict comprehension left every direct test above passing. This plants
+    a duplicate in one of the four modules -- how a real collision would
+    arrive, two modules edited by two PRs -- and reloads the package.
     """
-    import importlib
+    import benchmarks.queries as queries
 
-    import benchmarks.catalog as catalog
-    import benchmarks.catalog.core as core
-
+    catalog, core = restored_catalog_modules
     monkeypatch.setattr(core, "CORE", [*core.CORE, _q(core.CORE[0]["id"])])
-    with pytest.raises(ValueError, match="more than once"):
+
+    with pytest.raises(ValueError, match=r"\['EA01'\] more than once"):
         importlib.reload(catalog)
+
     importlib.reload(core)
-    importlib.reload(catalog)          # leave the module as we found it
+    importlib.reload(catalog)
+    importlib.reload(queries)
     assert len(catalog.BY_ID) == 21
+    assert queries.BY_ID is catalog.BY_ID, (
+        "`benchmarks.queries` re-exports the package's `BY_ID`; after a reload "
+        "they must be the same object, or a caller importing one would see a "
+        "catalog the other does not have")
