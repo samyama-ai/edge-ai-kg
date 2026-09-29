@@ -168,16 +168,25 @@ def download(force: bool = False) -> Path:
     rather than reused, which is what makes "a re-fetch reproduces what is
     pinned here" a fact rather than an instruction to remember `--force`.
 
-    An unknown source (no `operators.json` yet, or an unreadable one) is not
-    treated as a mismatch: the raw file alone carries no provenance, and
-    re-fetching on every call would make the cache pointless.
+    An unknown source -- no `operators.json` yet, or an unreadable one -- is
+    treated as stale too, which is a change: it used to be reused. The raw
+    file alone carries no provenance, so "it is probably the pinned one" was
+    the only reason to keep it, and that is the assumption every pin in this
+    repo exists to remove. It costs one fetch rather than one per call:
+    `build()` writes the source back immediately after, so the next call
+    reads a cache it can vouch for. The two cases it catches are an
+    interrupted build and a checkout cached before `ONNX_REF` existed.
+
+    `etl.ort_kernels` and `etl.mlperf_tiny` do exactly the same, and the
+    three agreeing is the point -- a reader who learns the rule once should
+    not find one source quietly kinder than the others.
     """
     import requests
 
     ONNX_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = ONNX_DIR / "Operators.md"
     source = cached_source()
-    stale_pin = source is not None and source != OPERATORS_URL
+    stale_pin = source != OPERATORS_URL
     if raw_path.exists() and not force and not stale_pin:
         return raw_path
     resp = requests.get(OPERATORS_URL, timeout=120)

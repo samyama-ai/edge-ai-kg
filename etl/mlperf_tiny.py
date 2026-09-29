@@ -25,8 +25,16 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TINY_DIR = DATA_DIR / "mlperf-tiny"
 ROUND = "v1.2"
+# Pinned like the other two upstreams (`etl.onnx_catalog.ONNX_REF`,
+# `etl.ort_kernels.ORT_REF`). This one has drifted the least -- the round's
+# results repository has a single commit, from 2024-04-16, because a closed
+# MLPerf round is an archive rather than a moving branch. It is pinned anyway:
+# `main` is a branch name, and a branch that has not moved yet is not the same
+# thing as a revision that cannot. The cost of being wrong here is another
+# 25,162-versus-25,170 afternoon.
+TINY_REF = "b448c5c7110903f4c0d8a24682f95b4903cdfd02"
 SUMMARY_URL = (f"https://raw.githubusercontent.com/mlcommons/tiny_results_{ROUND}/"
-               "main/summary.csv")
+               f"{TINY_REF}/summary.csv")
 
 TASKS = {
     "ad":  ("Anomaly Detection", "ToyADMOS / DCASE2020", "AUC", 0.85),
@@ -102,12 +110,30 @@ def parse_summary(text: str) -> list[TinyResult]:
     return results
 
 
+def _cached_from_pin() -> bool:
+    """Whether the cached parse came from the pinned revision.
+
+    The same guard `etl.onnx_catalog` and `etl.ort_kernels` carry, and it is needed here
+    for the same reason: a cache written before `TINY_REF` existed
+    records the old `main` URL, and skipping the fetch on file existence alone
+    would let it outlive the pin. Unknown or unreadable counts as stale, since
+    re-fetching is the cheap answer and serving unpinned rows is not.
+    """
+    recorded = TINY_DIR / "results.json"
+    if not recorded.exists():
+        return False
+    try:
+        return json.loads(recorded.read_text(encoding="utf-8")).get("source") == SUMMARY_URL
+    except (OSError, ValueError):
+        return False
+
+
 def download(force: bool = False) -> Path:
     import requests
 
     TINY_DIR.mkdir(parents=True, exist_ok=True)
     path = TINY_DIR / "summary.csv"
-    if path.exists() and not force:
+    if path.exists() and not force and _cached_from_pin():
         return path
     resp = requests.get(SUMMARY_URL, timeout=180)
     resp.raise_for_status()

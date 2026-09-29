@@ -8,7 +8,30 @@ dependencies = [
     # (a second WITH's alias, and sum(CASE) typing) and panics the HNSW index on
     # near-duplicate vectors. 1.7.1 matches the 1.7.0 server the notes were
     # measured against. See #56.
-    "samyama>=1.7.1",
+    #
+    # <1.8 is a ceiling, and a stopgap rather than a preference. **`EA17` and
+    # `EA21` do not run on 1.8.0 or 1.9.0.** The planner refuses an unbounded
+    # variable-length pattern that produces more than a million paths:
+    #
+    #   Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning
+    #   error: variable-length pattern produced more than 1000000 paths; bound
+    #   it with an upper hop limit or a more selective start
+    #
+    # Both queries walk `NEXT_STAGE*0..` with no bound, over a stage graph that
+    # contains cycles (`tests/test_blast_radius_semantics.py` names one), so the
+    # path count explodes exactly as that message describes. Measured on each
+    # release rather than inferred from the newest: 11 tests fail on 1.8.0,
+    # 11 on 1.9.0, none on 1.7.1. The first ceiling written here was `<1.9`,
+    # which still admitted the broken 1.8.0 -- the guard has to exclude the
+    # release the behaviour *arrived* in, not the one it was noticed in.
+
+    #
+    # The ceiling buys reproducibility, not a fix. The fix is to bound those
+    # walks, which changes what they answer (`EA17`'s depth *is* the answer), so
+    # it is a query-design decision rather than a version bump. Until that is
+    # taken, raising this ceiling means shipping a catalog with two queries that
+    # cannot run.
+    "samyama>=1.7.1,<1.8",
     "requests>=2.31",
     "rich>=13.0",
     "click>=8.0",
@@ -27,6 +50,11 @@ dev = [
     # reproducing a CI failure got a hard error about `etl.download_data`
     # instead of the thing they were chasing.
     "tomli; python_version < '3.11'",
+    # Read by `tests/test_engine_version.py` to ask which releases the
+    # `samyama` spec admits. It arrives via pytest today; declared anyway,
+    # because this project pins its other tool dependencies rather than
+    # relying on another package's transitive one.
+    "packaging>=23.0",
 ]
 
 [tool.setuptools.packages.find]
