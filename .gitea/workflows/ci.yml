@@ -5,6 +5,33 @@
 # workflow that omitted the download step would pass while testing almost
 # nothing. `--no-skips` (see conftest.py) turns a *fixture* skip into a
 # failure, so this job cannot go green without a real graph behind it.
+#
+# ## Why there is no `actions/setup-python` here
+#
+# Every run of this workflow failed, from the first (#1, 2026-09-07) to #218,
+# almost all of them in 7-14s. Job logs need repository-owner rights, so the
+# cause was found by splitting the question across jobs and reading their
+# statuses -- see `runner-probe.yml`, which is kept until this is green and
+# then deleted. Measured on this runner:
+#
+#   bare-run (default shell)  success    setup-python-only        FAILURE
+#   has-bash                  success    has-pip                  FAILURE
+#   checkout-only             success    ensurepip-gives-pip      FAILURE
+#   has-python3               success    venv-gives-pip           FAILURE
+#   has-venv                  success
+#   python-is-at-least-3-11   success    apt-gives-pip            success
+#
+# The image ships a Python new enough for this project and **no pip**, which is
+# the ordinary Debian split: `ensurepip` is stripped, so `python3 -m venv`
+# cannot bootstrap one either, and `actions/setup-python@v5` dies at 3s before
+# anything else runs. `apt-get install python3-pip python3-venv` is what
+# works, so that is what this does.
+#
+# Two things the previous version of this file believed, both now disproved:
+# the runner is not Alpine (apt-get works), and bash is present (`bare-run`
+# under the default shell and `has-bash` both pass). The `shell: sh` default it
+# carried was reasoning from a 0s failure that had a different cause, so it is
+# gone.
 name: CI
 
 on:
@@ -17,67 +44,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    defaults:
-      run:
-        # `sh`, not the default `bash`. Evidence: every `uses:` step succeeded
-        # while the *first* `run:` step failed in 0s -- first `apt-get`, then,
-        # once a plain-`echo` probe was put ahead of it, the probe itself. A
-        # step that only echoes cannot fail in zero seconds unless the shell
-        # never starts, and `uses:` working means the container and node are
-        # fine. Alpine-based images ship `sh` and no `bash`, which fits exactly.
-        #
-        # Everything below is POSIX: no arrays, no [[ ]], no pipefail.
-        shell: sh
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # Printed before anything can fail, so a future red run says *where* it
-      # is running rather than only that it stopped. The first failure of this
-      # workflow was a 0s step with no output, and this is what would have
-      # identified it in one look.
-      - name: Runner environment
-        run: |
-          echo "shell  : $0"
-          echo "user   : $(id -un 2>/dev/null || echo '?') (uid $(id -u))"
-          echo "sudo   : $(command -v sudo || echo 'none')"
-          echo "apt-get: $(command -v apt-get || echo 'none')"
-          echo "apk    : $(command -v apk || echo 'none')"
-          echo "bash   : $(command -v bash || echo 'none')"
-          echo "python : $(python3 --version 2>&1 || echo 'none')"
-          echo "os     : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
-
-      # Kept as a fallback, not because it is needed today. Since #56 raised
-      # the floor to `samyama` 1.7.1 -- which publishes
-      # `samyama-1.7.1-cp38-abi3-manylinux_2_38_x86_64.whl` -- pip takes the
-      # wheel on this runner and builds nothing. It matters again if pip ever
-      # resolves the sdist (a non-x86_64 runner, or glibc older than 2.38):
-      # 0.6.1 shipped only a macOS wheel, and a bare runner then fails twice,
-      # first on a missing linker, then on zstd-sys bindgen not finding
-      # stddef.h. clang supplies the builtin headers; see CLAUDE.md.
+      # `python3-pip` and `python3-venv` because the image has neither, and the
+      # rest because `samyama` publishes no manylinux wheel for every host: on
+      # a miss, pip builds the Rust extension from source, which fails first on
+      # a missing linker and then on zstd-sys bindgen not finding stddef.h.
+      # clang supplies the builtin headers; see CLAUDE.md.
       - name: Install build prerequisites
         run: |
           set -eu
           # `sudo` is not a given -- act_runner images usually run as root and
-          # ship none -- and neither is the package manager. The probe above
-          # prints which of these exist, so a failure here is legible.
+          # ship none. `apt-gives-pip` in the probe passed with this same
+          # branch, so one of the two paths works here.
           if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
-          if command -v apt-get >/dev/null; then
-            $SUDO apt-get update -qq
-            $SUDO apt-get install -y --no-install-recommends \
-              build-essential python3-dev clang libclang-dev
-          elif command -v apk >/dev/null; then
-            $SUDO apk add --no-cache build-base python3-dev clang clang-dev
-          else
-            echo "no apt-get and no apk; see the Runner environment step above" >&2
-            exit 1
-          fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
 
-      # The cargo build is the slowest step by far (~3 min cold).
+      # A virtualenv rather than the system Python: Debian marks its own
+      # interpreter externally managed (PEP 668), so `pip install -e .` against
+      # it is refused. Everything below runs the venv's binaries explicitly, so
+      # there is no `activate` to forget.
+      - name: Create the virtualenv
+        run: |
+          set -eu
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+
+      # The cargo build is the slowest step by far (~3 min cold), and only
+      # happens at all when pip finds no wheel for this host.
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -88,22 +85,20 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+        run: .venv/bin/python -m pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check .
+        run: .venv/bin/ruff check .
 
       # Fetches three public sources and generates the fleet into ./data.
       # Nothing else works until this has run.
       - name: Build the dataset
-        run: python -m etl.download_data
+        run: .venv/bin/python -m etl.download_data
 
       # Fail if the fixtures skipped: a suite that skips is a suite that did
       # not run, and this job exists to notice that.
       - name: Test
-        run: pytest -q --no-skips
+        run: .venv/bin/pytest -q --no-skips
 
       # Belt and braces. If --no-skips ever regresses, a suite that collected
       # far fewer tests than expected still fails here rather than passing
@@ -111,7 +106,7 @@ jobs:
       # does not need editing for every added test.
       - name: Assert the suite actually ran
         run: |
-          COUNT=$(pytest -q --collect-only 2>/dev/null | tail -1 | grep -oE '^[0-9]+')
+          COUNT=$(.venv/bin/pytest -q --collect-only 2>/dev/null | tail -1 | grep -oE '^[0-9]+')
           echo "collected ${COUNT} tests"
           if [ "${COUNT:-0}" -lt 100 ]; then
             echo "::error::only ${COUNT} tests collected; expected 100+"

@@ -1,0 +1,259 @@
+# One question per job, because a job is the smallest thing this repo can read.
+#
+# CI has failed on every run since the first (#1, 2026-09-07) -- 214 runs, all
+# `failure`, almost all in 7-14s. Job logs need repository-owner rights, which
+# the token used here does not have, and `/actions/runs/<n>/jobs` returns an
+# empty list. What *is* readable is `/actions/tasks`: one row per **job**, with
+# its name, status and duration.
+#
+# So the instrument is the job list itself. Each job below tests one thing and
+# nothing else, they are independent (no `needs:`), and the name says what a
+# failure would mean. Reading which names failed is the closest thing to a log
+# this repo currently has.
+#
+# Delete this file once CI is green and the cause is written down. A permanent
+# probe is a permanent excuse not to fix the thing it probes.
+name: Runner probe
+
+# Manual only. These jobs answered their question already -- the answers are
+# in `ci.yml`'s header -- and several take minutes, so running them on every
+# push would cost more than they now return. Trigger from the Actions tab when
+# the runner changes or CI starts failing in a way nobody can read.
+on:
+  workflow_dispatch:
+
+jobs:
+  # 1. Does a job start at all, with no `uses:` and no shell override?
+  #    If this fails, nothing below tells you anything new: the runner is not
+  #    executing steps, and the cause is outside this repository.
+  bare-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "bare-run reached the shell"
+
+  # 2. The same step under `sh`. `ci.yml` sets `shell: sh` repo-wide on the
+  #    theory that the image is Alpine-based and ships no bash. If `bare-run`
+  #    fails and this passes, that theory is right and `ci.yml` needs it; if
+  #    both fail, it never was the shell.
+  bare-run-sh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: sh
+    steps:
+      - run: echo "bare-run-sh reached the shell"
+
+  # 3. Do `uses:` steps work? The earlier diagnosis in `ci.yml` rests on
+  #    "every `uses:` step succeeded while the first `run:` failed", which is
+  #    what pointed at the shell rather than the container. That is worth
+  #    re-testing rather than inheriting: it was measured in September and the
+  #    runner may have been replaced since.
+  checkout-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+  # 4. `actions/setup-python@v5` downloads a build and populates a tool cache.
+  #    On a self-hosted act_runner that is a common failure, and it sits second
+  #    in `ci.yml` -- early enough to explain a 7-14s death.
+  setup-python-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+  # 5. What the image actually is. Deliberately last and deliberately
+  #    `continue-on-error`: its value is the output, not the verdict, and a red
+  #    cross here would say nothing that jobs 1-4 have not already said.
+  environment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: What is this runner
+        shell: sh
+        run: |
+          echo "shell   : $0"
+          echo "user    : $(id -un 2>/dev/null || echo '?') (uid $(id -u 2>/dev/null || echo '?'))"
+          echo "bash    : $(command -v bash || echo 'none')"
+          echo "sh      : $(command -v sh || echo 'none')"
+          echo "python3 : $(command -v python3 || echo 'none')"
+          echo "node    : $(command -v node || echo 'none')"
+          echo "apt-get : $(command -v apt-get || echo 'none')"
+          echo "apk     : $(command -v apk || echo 'none')"
+          echo "os      : $(head -1 /etc/os-release 2>/dev/null || uname -a)"
+
+  # Round 2. `setup-python-only` failed in 3s while everything else passed, so
+  # the question becomes whether the image's own Python is good enough to drop
+  # that action. Logs are unreadable here, so each job *asserts* rather than
+  # prints: the job's own pass/fail is the answer.
+  has-python3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 --version
+
+  has-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m pip --version
+
+  has-venv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m venv --help > /dev/null
+
+  # `pyproject.toml` requires >=3.11. A 3.9 image would mean dropping
+  # `setup-python` is not enough on its own.
+  python-is-at-least-3-11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 11) else 1)"
+
+  # bash, explicitly: `bare-run` used the default shell and passed, which
+  # already contradicts the Alpine/no-bash theory `ci.yml` is built on. This
+  # states it outright rather than by inference.
+  has-bash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: bash -c 'echo bash works'
+
+  # Round 3. `has-pip` failed while `has-python3`, `has-venv` and
+  # `python-is-at-least-3-11` passed: the image ships a usable Python with no
+  # pip. Three ways to get one, each its own job, because the fix in `ci.yml`
+  # should be whichever of these is measured to work rather than whichever is
+  # conventional.
+  venv-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          python3 -m venv /tmp/probe-venv
+          /tmp/probe-venv/bin/python -m pip --version
+
+  ensurepip-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          python3 -m ensurepip --upgrade
+          python3 -m pip --version
+
+  apt-gives-pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: |
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends python3-pip
+          python3 -m pip --version
+
+  # Round 4. With setup-python gone, `test` went from 9s to 412s and still
+  # failed -- so it now reaches the expensive part and dies somewhere inside
+  # it. Locally the suite passes with the same `--no-skips` flag (415 passed,
+  # 10 skipped), so the cause is environmental rather than a failing test.
+  #
+  # These two jobs cut the pipeline where it can break: if `stage-install`
+  # fails the engine does not build here, if it passes and `stage-dataset`
+  # fails the runner cannot reach the upstream sources, and if both pass the
+  # failure is in the suite itself.
+  stage-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          # Asserted, not printed: the engine has to import, not merely resolve.
+          .venv/bin/python -c "import samyama; samyama.SamyamaClient.embedded()"
+          .venv/bin/ruff --version
+
+  stage-dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m etl.download_data
+          # The three public sources, each asserted by reading it back.
+          .venv/bin/python -c "
+          from etl import onnx_catalog as oc
+          ops = oc.load_cached()
+          raise SystemExit(0 if len(ops) > 100 else 1)"
+
+  # Round 5. stage-install (57s) and stage-dataset (91s) both pass, so the
+  # engine builds and the sources are reachable; `test` still fails at 583s,
+  # inside the suite. CI downloads a **fresh** catalogue on every run while
+  # this machine has a cached one, so the suspects are the tests that compare
+  # published figures against whatever upstream shipped today.
+  #
+  # Two jobs, splitting the suite at that line. If `suite-drift-sensitive`
+  # fails while `suite-rest` passes, CI cannot be green until the catalogue is
+  # pinned -- which is #120, already in review -- and this PR's job is to have
+  # made that legible rather than to fix it here.
+  suite-drift-sensitive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m etl.download_data
+          .venv/bin/pytest -q --no-skips \
+            tests/test_build_manifest.py \
+            tests/test_published_counts.py \
+            tests/test_onnx_catalog.py \
+            tests/test_provenance.py
+
+  suite-rest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y --no-install-recommends \
+            python3-pip python3-venv python3-dev build-essential clang libclang-dev
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m etl.download_data
+          .venv/bin/pytest -q --no-skips \
+            --ignore=tests/test_build_manifest.py \
+            --ignore=tests/test_published_counts.py \
+            --ignore=tests/test_onnx_catalog.py \
+            --ignore=tests/test_provenance.py
