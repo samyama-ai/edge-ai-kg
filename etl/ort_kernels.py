@@ -143,8 +143,10 @@ def parse_kernels(markdown: str) -> list[OrtKernel]:
 def _cached_from_pin() -> bool:
     """Whether the cached parse came from the pinned revision.
 
-    A pin the cache outlives is not a pin. `kernels.json` records the URL it
-    was built from, so a checkout cached before `ORT_REF` was introduced --
+    A pin the cache outlives is not a pin. `etl.onnx_catalog` and
+    `etl.mlperf_tiny` apply the identical rule, including for an unknown
+    source. `kernels.json` records the URL it was built from, so a checkout
+    cached before `ORT_REF` was introduced --
     or from a different revision after it moved -- re-fetches instead of
     quietly serving rows the pin does not describe. An unreadable or
     source-less cache counts as unknown, and re-fetching is the safe answer.
