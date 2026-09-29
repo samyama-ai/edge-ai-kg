@@ -24,7 +24,40 @@ from benchmarks.catalog.triage import TRIAGE
 
 QUERIES: list[dict] = [*CORE, *REAL_LAYER, *ALERTING, *TRIAGE]
 
-BY_ID = {q["id"]: q for q in QUERIES}
+
+def _assembled(queries: list[dict]) -> dict[str, dict]:
+    """`BY_ID`, refusing the two ways assembling from modules can lose a query.
+
+    A dict comprehension keeps the *last* entry for a repeated id, so two
+    modules both defining `EA20` would leave a catalog one query short with
+    nothing raised -- the exact failure the `EA20` reservation above was
+    written to avoid, and one the split made newly possible by putting the ids
+    in four files instead of one list.
+
+    Order is checked here rather than asserted in the docstring: each module
+    holds a contiguous range, and nothing sorts `QUERIES`, so a module
+    imported in the wrong position would silently reorder what
+    `run_benchmark` sweeps and what the demo walks.
+    """
+    ids = [q["id"] for q in queries]
+    repeated = sorted({i for i in ids if ids.count(i) > 1})
+    if repeated:
+        raise ValueError(
+            f"the catalog defines {repeated} more than once. `BY_ID` would "
+            f"keep the last and drop the rest, leaving "
+            f"{len(queries) - len(set(ids))} quer(y/ies) unreachable while "
+            f"every count still looked right.")
+    if ids != sorted(ids):
+        out_of_place = [i for i, j in zip(ids, sorted(ids)) if i != j]
+        raise ValueError(
+            f"the catalog is out of order at {out_of_place[:3]}. Modules are "
+            f"assembled in id order and nothing sorts them, so this changes "
+            f"the order `run_benchmark` sweeps and the demo walks.")
+    return {q["id"]: q for q in queries}
+
+
+BY_ID = _assembled(QUERIES)
+
 
 def retargeted_ea21(alert_ids) -> str:
     """`EA21` asking about `alert_ids` instead of the catalog's set.
