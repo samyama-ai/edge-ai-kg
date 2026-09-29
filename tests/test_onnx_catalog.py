@@ -83,7 +83,9 @@ def _cache(tmp_path, source: str | None):
 @pytest.mark.parametrize(
     ("source", "refetch", "why"),
     [
-        (None, False, "no recorded source means unknown provenance, not a mismatch"),
+        (None, True, ("unknown provenance is not evidence of a match: a raw "
+                      "file with no recorded source could be any revision, "
+                      "and one fetch is cheaper than trusting it")),
         ("PINNED", False, "the cache already holds what the pin names"),
         ("https://raw.githubusercontent.com/onnx/onnx/main/docs/Operators.md", True,
          "a cache fetched before the pin holds a revision ONNX_REF no longer names"),

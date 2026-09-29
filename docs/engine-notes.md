@@ -865,6 +865,57 @@ does for `over_by_ms`.
 
 ---
 
+## 14. From 1.8.0, an unbounded variable-length walk is refused outright
+
+> **Measured on 2026-09-29, embedded, on each release rather than inferred
+> from the newest: 1.7.1 runs these queries, 1.8.0 and 1.9.0 refuse them.**
+> This is the only note here about a *newer* engine being stricter, and the
+> only one the repo currently works around with a version ceiling rather than
+> with Cypher.
+
+`EA17` and `EA21` both walk `NEXT_STAGE*0..` with no upper hop bound. From
+1.8.0 the planner refuses that outright:
+
+```
+Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning error:
+variable-length pattern produced more than 1000000 paths; bound it with an
+upper hop limit or a more selective start
+```
+
+**Reproduction:** install `samyama==1.8.0` and run any query with an
+unbounded `*0..` over the shipped fleet — `python -m pytest -q
+tests/test_correctness.py -k EA17` is enough. **11 tests fail on 1.8.0, 11 on
+1.9.0, none on 1.7.1.**
+
+**Why it bites here specifically.** The stage graph contains cycles — chains
+are sampled from a shared pool, and `tests/test_blast_radius_semantics.py`
+names one. An unbounded walk over a cyclic graph enumerates paths rather than
+nodes, so the count passes a million on a 24,000-node fleet. Note 12 is the
+mirror image of this: the 1.7.0 *server* returns only the zero-length match
+for the same pattern, where 1.8.0 refuses it and 1.7.1 embedded walks it.
+Three builds, three behaviours, one pattern.
+
+**Workaround used here: none, and that is the point.** `pyproject.toml`
+declares `samyama>=1.7.1,<1.8`, which buys reproducibility and fixes nothing.
+Bounding the walks changes what they answer — `EA17` reports how *deep* the
+blast radius goes, and a cap silently truncates that — so it is a
+query-design decision, not a version bump. Until it is taken, raising the
+ceiling means shipping two queries that cannot run on the engine a new user
+installs.
+`tests/test_engine_version.py::test_the_declared_spec_excludes_the_releases_that_refuse_our_queries`
+fails if the ceiling disappears, or is widened to admit 1.8.0 again.
+
+**One gap worth knowing about.** The pin is enforced in each source
+module's `download()`, so no *build* reuses a cache from another
+revision. `load_cached()` does not check: a checkout that already holds
+`kernels.json` from before the pin keeps serving those rows until
+`python -m etl.download_data` is re-run. That is not hypothetical --
+the cache on the machine this note was written on records the old
+unpinned `.../onnxruntime/main/...` URL. Re-run the download after
+taking this branch.
+
+---
+
 ## What works well
 
 Everything the catalog depends on, other than the above:
