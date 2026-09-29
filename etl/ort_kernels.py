@@ -143,13 +143,21 @@ def parse_kernels(markdown: str) -> list[OrtKernel]:
 def _cached_from_pin() -> bool:
     """Whether the cached parse came from the pinned revision.
 
-    A pin the cache outlives is not a pin. `etl.onnx_catalog` and
+    A pin that a *build* outlives is not a pin. `etl.onnx_catalog` and
     `etl.mlperf_tiny` apply the identical rule, including for an unknown
     source. `kernels.json` records the URL it was built from, so a checkout
     cached before `ORT_REF` was introduced --
     or from a different revision after it moved -- re-fetches instead of
     quietly serving rows the pin does not describe. An unreadable or
     source-less cache counts as unknown, and re-fetching is the safe answer.
+
+    The scope is `download()`, which is what `build()` calls. `load_cached()`
+    deliberately does not check: it is on the read path the tests, the demo
+    and the loader take, and failing there would turn a stale cache into a
+    hard error in every one of them. So the guarantee is "no build reuses a
+    pre-pin cache", not "no caller ever reads one" -- a checkout cached
+    before the pin keeps serving those rows until `python -m etl.download_data`
+    is re-run. Engine note 14 says so, with the evidence.
     """
     recorded = ORT_DIR / "kernels.json"
     if not recorded.exists():

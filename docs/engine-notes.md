@@ -901,8 +901,18 @@ Bounding the walks changes what they answer — `EA17` reports how *deep* the
 blast radius goes, and a cap silently truncates that — so it is a
 query-design decision, not a version bump. Until it is taken, raising the
 ceiling means shipping two queries that cannot run on the engine a new user
-installs. `tests/test_pinned_sources.py::test_the_engine_declares_a_ceiling_as_well_as_a_floor`
-fails if the ceiling disappears.
+installs.
+`tests/test_engine_version.py::test_the_declared_spec_excludes_the_releases_that_refuse_our_queries`
+fails if the ceiling disappears, or is widened to admit 1.8.0 again.
+
+**One gap worth knowing about.** The pin is enforced in each source
+module's `download()`, so no *build* reuses a cache from another
+revision. `load_cached()` does not check: a checkout that already holds
+`kernels.json` from before the pin keeps serving those rows until
+`python -m etl.download_data` is re-run. That is not hypothetical --
+the cache on the machine this note was written on records the old
+unpinned `.../onnxruntime/main/...` URL. Re-run the download after
+taking this branch.
 
 ---
 

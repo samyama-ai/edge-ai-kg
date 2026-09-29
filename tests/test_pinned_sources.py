@@ -65,10 +65,10 @@ class _Recorded:
 
 
 @pytest.mark.parametrize(
-    ("module", "dir_name", "raw_name", "parsed_name", "url_name"),
+    ("module", "dir_name", "raw_name", "parsed_name", "url_name", "ref_name"),
     [
-        (ok, "ORT_DIR", "OperatorKernels.md", "kernels.json", "KERNELS_URL"),
-        (mt, "TINY_DIR", "summary.csv", "results.json", "SUMMARY_URL"),
+        (ok, "ORT_DIR", "OperatorKernels.md", "kernels.json", "KERNELS_URL", "ORT_REF"),
+        (mt, "TINY_DIR", "summary.csv", "results.json", "SUMMARY_URL", "TINY_REF"),
     ],
     ids=["onnxruntime-kernels", "mlperf-tiny"],
 )
@@ -82,7 +82,7 @@ class _Recorded:
 )
 def test_a_cache_from_another_revision_does_not_outlive_the_pin(
         tmp_path, monkeypatch, module, dir_name, raw_name, parsed_name,
-        url_name, recorded, refetch, why):
+        url_name, ref_name, recorded, refetch, why):
     """The pin has to govern what a build *reads*, not only what it would fetch.
 
     `download()` returning any existing file is what lets a pinned source and
@@ -93,7 +93,7 @@ def test_a_cache_from_another_revision_does_not_outlive_the_pin(
     (tmp_path / raw_name).write_text("cached-content", encoding="utf-8")
     if recorded is not None:
         source = url if recorded == "PINNED" else url.replace(
-            getattr(module, {"ORT_DIR": "ORT_REF", "TINY_DIR": "TINY_REF"}[dir_name]), "main")
+            getattr(module, ref_name), "main")
         (tmp_path / parsed_name).write_text(
             json.dumps({"source": source}), encoding="utf-8")
 
