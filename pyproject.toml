@@ -9,8 +9,8 @@ dependencies = [
     # near-duplicate vectors. 1.7.1 matches the 1.7.0 server the notes were
     # measured against. See #56.
     #
-    # <1.9 is a ceiling, and a stopgap rather than a preference. **`EA17` and
-    # `EA21` do not run on 1.9.0.** Its planner refuses an unbounded
+    # <1.8 is a ceiling, and a stopgap rather than a preference. **`EA17` and
+    # `EA21` do not run on 1.8.0 or 1.9.0.** The planner refuses an unbounded
     # variable-length pattern that produces more than a million paths:
     #
     #   Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning
@@ -19,16 +19,18 @@ dependencies = [
     #
     # Both queries walk `NEXT_STAGE*0..` with no bound, over a stage graph that
     # contains cycles (`tests/test_blast_radius_semantics.py` names one), so the
-    # path count explodes exactly as that message describes. Measured: 11 tests
-    # fail on 1.9.0 and none on 1.7.1, which is why CI failed while every
-    # developer's machine passed -- CI installs what PyPI has today.
+    # path count explodes exactly as that message describes. Measured on each
+    # release rather than inferred from the newest: 11 tests fail on 1.8.0,
+    # 11 on 1.9.0, none on 1.7.1. The first ceiling written here was `<1.9`,
+    # which still admitted the broken 1.8.0 -- the guard has to exclude the
+    # release the behaviour *arrived* in, not the one it was noticed in.
     #
     # The ceiling buys reproducibility, not a fix. The fix is to bound those
     # walks, which changes what they answer (`EA17`'s depth *is* the answer), so
     # it is a query-design decision rather than a version bump. Until that is
     # taken, raising this ceiling means shipping a catalog with two queries that
     # cannot run.
-    "samyama>=1.7.1,<1.9",
+    "samyama>=1.7.1,<1.8",
     "requests>=2.31",
     "rich>=13.0",
     "click>=8.0",

@@ -201,8 +201,13 @@ are gone — #56's finding being that the "embedded versus server" disagreement
 was version skew (0.6.1 against a 1.7.0 server) rather than a difference
 between the two builds.
 
-`pyproject.toml` declares `samyama>=1.7.1` since #104, so the build these
-pages describe is the build you get.
+`pyproject.toml` declares `samyama>=1.7.1,<1.8`, so the build these pages
+describe is the build you get. The ceiling is [engine note
+14](docs/engine-notes.md): from 1.8.0 the planner refuses the unbounded
+`NEXT_STAGE*0..` walks in `EA17` and `EA21`, so those two queries do not run
+on a newer engine. It buys reproducibility and fixes nothing — bounding the
+walks changes what they answer, which is a query-design decision rather than
+a version bump.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.

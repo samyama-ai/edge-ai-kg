@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A knowledge graph of edge-AI deployment — boards, SoCs, accelerators, runtimes,
 ONNX operators, kernels, quantized model variants and biosignal pipelines — built
-on the **Samyama Graph** engine (server 1.7.0; embedded `samyama>=1.7.1`). The
+on the **Samyama Graph** engine (server 1.7.0; embedded
+`samyama>=1.7.1,<1.8` — the ceiling is engine note 14, not a preference). The
 repo holds the loader, the synthetic generator and the query catalog; the
 engine itself lives in `samyama-ai/samyama-graph`.
 
@@ -186,7 +187,9 @@ a `WHERE` on it (note 11). They are neither. They are one pip install against
 another: `pyproject.toml` then asked for `samyama>=0.6.0` (the old floor), pip
 resolved 0.6.1, and the notes were measured against a 1.7.0 server.
 
-`pyproject.toml` now floors the engine at `samyama>=1.7.1`, on which neither
+`pyproject.toml` floors the engine at `samyama>=1.7.1` and caps it below 1.8
+(engine note 14: from 1.8.0 the planner refuses `EA17`'s and `EA21`'s
+unbounded walks, so they do not run at all). On 1.7.1 neither
 reproduces embedded -- the same caveat as above: nothing here re-probed the
 server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 `run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.
