@@ -7,7 +7,10 @@ is an unreviewed one.
 This half is the seam: it computes what the answer *should* be from the
 generator's own edges, and touches no engine, no fixture and no pytest. The
 tests that compare a query against it stay next door. `test_blast_radius.py`
-re-exports `Truth` and `DOWNSTREAM`, so no import anywhere changed.
+imports `Truth` from here for its own tests; no sibling module imports either
+name, so nothing else changed. (An earlier draft re-exported both, and the
+comment saying so outlived the re-export by one commit -- which is the kind
+of sentence this split exists to make findable.)
 
 Deliberately not named `test_*`: pytest collects by that prefix, and a module
 of pure computation with no assertions has nothing to collect.
