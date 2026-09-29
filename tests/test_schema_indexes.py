@@ -99,7 +99,14 @@ CYPHER_SOURCES = (
     # The Neo4j loader half of the comparison: `UNWIND ... CREATE` plus endpoint
     # lookups that filter on `id`, which every label already indexes.
     "benchmarks/neo4j_client.py",
-    "benchmarks/queries.py",
+    # The catalog itself, one module per theme since it outgrew the 500 lines
+    # the review harness reads. Listed because they hold Cypher, and skipped
+    # below for the same reason `benchmarks/queries.py` is: their statements
+    # are already covered structurally, through `QUERIES`.
+    "benchmarks/catalog/core.py",
+    "benchmarks/catalog/real_layer.py",
+    "benchmarks/catalog/alerting.py",
+    "benchmarks/catalog/triage.py",
     # Its Cypher is two count queries used to decide whether the graph is empty.
     # They do name a property -- `count(n.id)` -- but only in a `RETURN`, never
     # in a `WHERE`, so they justify no index under this file's rule that only a
@@ -178,7 +185,7 @@ def query_units() -> dict[str, str]:
     units = {q["id"]: q["cypher"] for q in QUERIES}
     units.update({f"mcp {name}": body for name, body in mcp_tools().items()})
     for rel in CYPHER_SOURCES:
-        if rel in ("benchmarks/queries.py", "mcp_server/server.py"):
+        if rel.startswith("benchmarks/catalog/") or rel == "mcp_server/server.py":
             continue                      # already covered, structurally
         text = (ROOT / rel).read_text(encoding="utf-8")
         for i, m in enumerate(TRIPLE_QUOTED.finditer(text)):

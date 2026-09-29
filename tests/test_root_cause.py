@@ -457,7 +457,7 @@ def test_a_quoted_alert_id_is_refused_rather_than_normalised(known_root):
     """An id carrying a quote is refused, not silently turned into another.
 
     `retargeted_ea21`'s docstring says an MCP tool will call it with a live
-    alert set, which makes the ids external input. Before `_alert_list`
+    alert set, which makes the ids external input. Before `alert_list`
     escaped them, `['sensor:x"] OR true //']` produced
     `IN ["sensor:x"] OR true //"]` -- the list closed early, a true predicate
     was disjoined onto the `WHERE`, and the rest of the line was commented
