@@ -6,6 +6,6 @@ site/
 .DS_Store
 .env
 
-# pytest writes a .py assertion-rewrite cache here; `ruff check .` then reads
-# it and fails. #123 adds this too -- whichever lands first, the other drops it.
+# pytest writes a .py assertion-rewrite cache here, which `ruff check .`
+# then reads and fails on after any test run.
 .pytest_cache/
