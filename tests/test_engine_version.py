@@ -393,3 +393,34 @@ def test_note_11_does_not_reproduce_on_the_running_engine(engine):
         )
     finally:
         _reset(engine)
+
+
+def test_the_declared_spec_excludes_the_releases_that_refuse_our_queries():
+    """A ceiling as well as a floor, and the ceiling has to exclude 1.8.0.
+
+    From 1.8.0 the planner refuses an unbounded variable-length walk (engine
+    note 14), so `EA17` and `EA21` do not run: 11 tests fail on 1.8.0, 11 on
+    1.9.0, none on 1.7.1.
+
+    Asserted by membership rather than by looking for a `<`, because the first
+    ceiling written here was `<1.9` -- which has a `<`, reads as careful, and
+    still admits the broken 1.8.0. The property that matters is which releases
+    the spec lets `pip` install.
+
+    Lives here rather than beside the source pins because this file already
+    parses `pyproject.toml` and already carries the `tomllib`/`tomli` fallback
+    that 3.10 needs; `pyproject.toml` declares `requires-python = ">=3.10"`.
+    """
+    from packaging.specifiers import SpecifierSet
+
+    with (ROOT / "pyproject.toml").open("rb") as fh:
+        deps = tomllib.load(fh)["project"]["dependencies"]
+    spec = next(d for d in deps if d.replace(" ", "").startswith("samyama"))
+    allowed = SpecifierSet(spec.split("samyama", 1)[1])
+
+    assert "1.7.1" in allowed, f"{spec!r} excludes the only engine the suite passes on"
+    assert "1.8.0" not in allowed, (
+        f"{spec!r} admits 1.8.0, where EA17 and EA21 do not run at all "
+        f"(engine note 14). If those walks are now bounded, raise the ceiling "
+        f"deliberately and say so in the note.")
+    assert "1.9.0" not in allowed, f"{spec!r} admits 1.9.0, which refuses the same walks"

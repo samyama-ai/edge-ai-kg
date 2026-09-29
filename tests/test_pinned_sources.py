@@ -14,7 +14,6 @@ every published figure a function of when someone last downloaded.
 from __future__ import annotations
 
 import json
-import pathlib
 import re
 
 import pytest
@@ -109,36 +108,3 @@ def test_a_cache_from_another_revision_does_not_outlive_the_pin(
         "fresh-content" if refetch else "cached-content")
     if refetch:
         assert get.urls == [url], "a re-fetch must use the pinned URL"
-
-
-def test_the_engine_declares_a_ceiling_as_well_as_a_floor():
-    """The engine is an upstream too, and it was the last one left unbounded.
-
-    `samyama>=1.7.1` let CI install whatever PyPI had that morning while every
-    developer kept 1.7.1. On 2026-09-29 that was 1.9.0, whose planner refuses
-    an unbounded variable-length pattern producing over a million paths:
-
-        Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning
-        error: variable-length pattern produced more than 1000000 paths
-
-    `EA17` and `EA21` both walk `NEXT_STAGE*0..` unbounded over a stage graph
-    with cycles, so they do not run at all. Measured: 11 tests fail on 1.9.0
-    and none on 1.7.1 -- a green machine and a red CI, from the same commit.
-
-    The ceiling is a stopgap for reproducibility, not a fix; bounding those
-    walks changes what they answer. This test exists so removing it is a
-    decision someone makes on purpose, with the two queries in hand.
-    """
-    import tomllib
-
-    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
-    with pyproject.open("rb") as handle:
-        deps = tomllib.load(handle)["project"]["dependencies"]
-    spec = next((d for d in deps if d.replace(" ", "").startswith("samyama")), None)
-
-    assert spec, "samyama is no longer a declared dependency"
-    assert "<" in spec, (
-        f"{spec!r} has no upper bound, so a fresh install takes whatever PyPI "
-        f"serves today. That is how CI came to test a different engine than "
-        f"anyone had locally. If the walks in EA17/EA21 are now bounded, raise "
-        f"the ceiling deliberately and say so here.")

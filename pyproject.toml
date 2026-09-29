@@ -21,7 +21,7 @@ dependencies = [
     # contains cycles (`tests/test_blast_radius_semantics.py` names one), so the
     # path count explodes exactly as that message describes. Measured on each
     # release rather than inferred from the newest: 11 tests fail on 1.8.0,
-    # 11 on 1.9.0, none on 1.7.1. The first ceiling written here was `<1.9`,
+    # 11 on 1.9.0, none on 1.7.1. The first ceiling written here was `<1.8`,
     # which still admitted the broken 1.8.0 -- the guard has to exclude the
     # release the behaviour *arrived* in, not the one it was noticed in.
     #
