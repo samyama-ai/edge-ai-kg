@@ -79,17 +79,16 @@ import pytest
 from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl.helpers import create_edges, create_nodes, cypher_literal
 
-# Re-exported, not moved away: `tests/test_blast_radius_semantics.py`,
-# `tests/test_root_cause.py` and `tests/test_alerting_demo.py` import the
-# fixtures and helpers below from here, and `Truth` belongs to the same
-# surface. `tests/blast_radius_truth.py` holds it because nothing in it
-# touches an engine, which is the seam this file was split on.
-from tests.blast_radius_truth import DOWNSTREAM, Truth  # noqa: F401
+# `tests/blast_radius_truth.py` holds `Truth` because nothing in it touches an
+# engine, which is the seam this file was split on. Imported because the tests
+# below use it -- not re-exported: the three sibling modules that import from
+# this file (`test_blast_radius_semantics.py`, `test_root_cause.py`,
+# `test_alerting_demo.py`) take fixtures and helpers, never `Truth`.
+from tests.blast_radius_truth import Truth
 
 GRAPH = "default"
 SEED = 4242
 SCALE = 0.3
-
 
 
 @pytest.fixture(scope="module")
