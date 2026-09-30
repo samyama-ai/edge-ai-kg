@@ -871,13 +871,16 @@ does for `over_by_ms`.
 ## 14. From 1.8.0, an unbounded variable-length walk is refused outright
 
 > **Measured on 2026-09-29, embedded, on each release rather than inferred
-> from the newest: 1.7.1 runs these queries, 1.8.0 and 1.9.0 refuse them.**
-> This is the only note here about a *newer* engine being stricter, and the
-> only one the repo currently works around with a version ceiling rather than
-> with Cypher.
+> from the newest: 1.7.1 ran these queries as they were then written, and
+> 1.8.0 and 1.9.0 refused them.** Both queries carry an upper bound now (the
+> workaround below), so "refuse" describes the shape they had, not the shape
+> they have: on 1.9.0 the bounded `EA21` runs and the bounded `EA17` times
+> out instead. 1.8.0 has not been re-tried since the bound. This is the only
+> note here about a *newer* engine being stricter, and the only one the repo
+> works around with a version ceiling rather than with Cypher.
 
-`EA17` and `EA21` both walk `NEXT_STAGE*0..` with no upper hop bound. From
-1.8.0 the planner refuses that outright:
+`EA17` and `EA21` both walked `NEXT_STAGE*0..` with no upper hop bound when
+this note was written. From 1.8.0 the planner refuses that outright:
 
 ```
 Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning error:
@@ -922,14 +925,18 @@ It does **not** fix `EA17`:
 
 Five hops is the minimum for a complete answer and three is the most that
 completes in time, so on 1.9.0 `EA17` cannot be both correct and fast. The
-cost is its shape, not the walk length: `EA17` is five `UNION ALL` legs, and
-**four of them carry two walks each** — one in the main pattern and one in
-its `OPTIONAL MATCH` — over chains that then run up to four further fixed
-hops (`PRECEDES`, `VARIANT_OF`, `OF_VARIANT`, `ON_BOARD`). The fifth,
+**candidate** explanation is its shape rather than the walk length, and it
+is a candidate because nothing here isolated it: `EA17` is five `UNION ALL`
+legs, and **four of them carry two walks each** — one in the main pattern and
+one in its `OPTIONAL MATCH` — over chains that then run up to four further
+fixed hops (`PRECEDES`, `VARIANT_OF`, `OF_VARIANT`, `ON_BOARD`); the fifth,
 `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`, has no walk at all. Eight
-bounded walks in one statement is what times out, which makes this a
-query-shape problem rather than a bound to tune. **The `samyama>=1.7.1,<1.8` ceiling therefore
-stays**, and reshaping `EA17` is what would lift it.
+bounded walks in one statement is consistent with the timeout, and no leg was
+run on its own to confirm it — the engine exposes no `EXPLAIN` (see
+`docs/volume.md`, which reaches the same unconfirmed conclusion about the
+same query at `--scale 2.0`). **The `samyama>=1.7.1,<1.8` ceiling therefore
+stays**, and reshaping `EA17` is what would lift it — starting by running one
+leg at a time, which is the measurement neither page has.
 
 The bound is still worth carrying at 1.7.1, where nothing refuses the
 unbounded form: it is what any future engine upgrade needs, it is measured

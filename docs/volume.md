@@ -79,6 +79,24 @@ while `EA08` stays in seconds.
 
 ### `EA17` is the most expensive query in this table, and grows faster than `EA11`
 
+> **Everything in this section predates the bound.** `EA17`'s walks carried
+> no upper hop limit when these were taken; they carry `MAX_STAGE_HOPS` now
+> (engine note 14, #126) and have not been re-timed. That covers the table
+> below, the ×4.5 per-doubling rate, and everything derived from it — the
+> "passes a second just under scale 3" and "reaches `EA11`'s figure near
+> scale 6" extrapolations, and `EA17`'s share of the catalog total.
+>
+> What the bound does to these numbers is **not** measured. The argument that
+> it can only remove paths — the deepest chain any sensor reaches is 4 hops at
+> `--scale 2.0` and 5 at 1.0, both inside a bound of 8, and `--scale` does not
+> grow the stage graph (16 stages, 14 sensors at every scale measured) — says
+> the *answers* do not change, which
+> `tests/test_bounded_walks.py::test_bounding_changes_no_answer` measures. It
+> does not say what the planner does with a bounded pattern, and a planner
+> that takes a different strategy when given an upper limit would make these
+> figures wrong in either direction. Re-running
+> `python -m benchmarks.run_benchmark` at both scales is what would settle it.
+
 Added with `EA17` (issue #35, PR #96) and measured separately, because the run
 above predates it. Same machine, **embedded**, schema applied, catalog warmed,
 median of 5, 2026-09-10.
@@ -113,14 +131,6 @@ doubling above and ×2.97 here, `EA08` ×1.83 and ×2.06. Both tables agree that
 | `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
 | catalog total (the 17 queries that existed then, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear, but see below |
 
-**Every `EA17` figure on this page was measured before its walks carried
-`MAX_STAGE_HOPS`** (engine note 14, #126). They have not been re-run. The
-bound sits above the deepest chain either fleet has, so it can only remove
-paths the query was already enumerating and never add one — these numbers are
-therefore an upper bound on the bounded cost rather than a stale measurement,
-but they are not a measurement *of* the query as it ships today. Re-running
-`python -m benchmarks.run_benchmark` at both scales is what would replace
-them.
 
 The graph doubles between those columns — 76,303 edges at 1.0 against 152,717
 at 2.0, and 25,150 nodes against 48,907 — so ×2 is the linear line. Everything

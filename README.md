@@ -205,11 +205,13 @@ between the two builds.
 describe is the build you get. The ceiling is [engine note
 14](docs/engine-notes.md): from 1.8.0 the planner refused the then-unbounded
 `NEXT_STAGE*0..` walks in `EA17` and `EA21` outright. Both carry an explicit
-bound now (`MAX_STAGE_HOPS`, #126). **Measured on 1.9.0, not on 1.8.0** —
-each release was installed and run, and 1.9.0 is the newer of the two that
-refuse the unbounded form: the bound is enough for `EA21` there, while `EA17`
-times out at every bound deep enough to answer completely and truncates at
-every bound fast enough to finish. So the ceiling stays, and the remaining
+bound now (`MAX_STAGE_HOPS`, #126). **What the bound buys was measured on
+1.9.0 only**: 1.8.0 was installed and run at the time the refusal was found,
+but the bounded queries have been tried on 1.9.0 alone, so what follows is
+1.9.0's behaviour and 1.8.0's is inferred from the two releases refusing the
+unbounded form identically. On 1.9.0 the bound is enough for `EA21`, while
+`EA17` times out at every bound deep enough to answer completely and
+truncates at every bound fast enough to finish. So the ceiling stays, and the remaining
 work on `EA17` is reshaping the query rather than raising it.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
@@ -507,9 +509,12 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
   bounded or not — it matches only the zero-length case, silently — and it
   *rejects* `size(r)` over one, where the embedded 1.7.1 build walks it
   ([note 12](docs/engine-notes.md)). `EA17` asks for `size(r)`, so it **raises**
-  on the server and is embedded-only; `EA07` walks a bounded `*0..3` without
-  `size(r)`, and note 12 measured both builds returning byte-identical rows for
-  it — true of this graph and this `LIMIT`, not enforced. `EA17` needs the
+  on the server; `EA21` walks the same relationship without `size(r)`, so
+  nothing raises and it would answer from the zero-length match alone — wrong
+  numbers that look like an answer. Both are embedded-only, for those two
+  different failures. `EA07` walks a bounded `*0..3` without `size(r)` and is
+  *not*: note 12 measured both builds returning byte-identical rows for it —
+  true of this graph and this `LIMIT`, not enforced. `EA17` needs the
   `samyama>=1.7.1` floor (written in #105, reaching `main` inside #104);
 - an `OPTIONAL MATCH` whose `WHERE` mentions a `WITH`-introduced alias drops
   the unmatched rows, turning it into an inner join
@@ -520,9 +525,12 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
 
 Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
-workaround either, and one is not possible: there is no way to write "walk a
-chain of unknown length" that the 1.7.0 server executes, so `EA17` and `EA21`
-are embedded-only rather than reshaped.
+workaround either, and bounding the walks did not become one: the server
+matches only the zero-length case for **every** form of a variable-length
+pattern, bounded or not, so `*0..8` is no more executable there than `*0..`
+was. `EA17` and `EA21` stay embedded-only. What a bound did change is which
+*newer* engines accept the pattern at all — a different problem, engine note
+14.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised
