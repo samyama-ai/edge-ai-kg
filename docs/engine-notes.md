@@ -22,7 +22,10 @@ rest. The banner below gives what has been re-measured since, and when.
 >   would return 90,000 rows instead of 300. The sub-behaviours the rules
 >   below depend on -- 3b (only the first `ORDER BY` key), 4b (an int
 >   property against a float literal) and 8b (`<>` matching nulls) -- are
->   separate probes and are gone too.
+>   separate probes and are gone too. **8b with one correction, added
+>   2026-09-30: it is gone on the embedded build and still live on the 1.7.0
+>   server.** The probe runs embedded; `--url` is a documented path, so the
+>   rule under 8b still has to be followed. See the note itself.
 >
 > **Newer than the re-measurement above, and not part of it:** notes 12, 13
 > and 13b, section **3c** (`ORDER BY` after `UNION ALL`) and the
@@ -406,10 +409,42 @@ node's property *schema*. Changing values is fine; removing a property is not.
 
 ### 8b. `<>` against a null property matches
 
+> **Live on the 1.7.0 server, fixed on embedded 1.7.1.** The banner at the top
+> of this file lists 8b among the sub-behaviours that "are gone too". That is
+> true of the embedded build and **not** of the server, measured 2026-09-30
+> while closing #114. `--url` is a documented first-class path, so the rule
+> below still has to be followed.
+
 `WHERE s._chain <> ""` returns rows where `s._chain` is null. Standard Cypher
 would treat `null <> ""` as null and filter the row out. Use an explicit
 `IS NULL` / `IS NOT NULL` check instead of inequality when a property may be
 absent.
+
+**Measured on both builds**, three nodes — `{id: "has", v: 1}`,
+`{id: "other", v: 2}` and `{id: "missing"}` with no `v`:
+
+| `MATCH (n:P) WHERE …` | embedded 1.7.1 | server 1.7.0 |
+|---|---|---|
+| `n.v = 1` | `has` | `has` |
+| `n.v <> 1` | `other` | **`missing`, `other`** |
+| `n.v <> 2` | `has` | **`has`, `missing`** |
+| `n.v IS NOT NULL AND n.v <> 1` | `other` | `other` |
+| `NOT n.v = 1` | `other` | **`Type error: NOT requires boolean`** |
+
+Three things worth separating. The `=` half is correct on both, which is why
+#114 closed the way it did — a query filtering `d.fits = 1` returns nothing on
+either build when `fits` is absent. The **workaround works on both**, so the
+`o.id IS NOT NULL AND o.id <> ...` guard in `EA17` and `EA21` is not
+decoration; it is what makes those queries portable. And `NOT x = y` is not a
+substitute on the server, which rejects it outright rather than treating the
+null as false — the server's `NOT` requires a boolean, and `null` is not one.
+
+```python
+c.query('CREATE (:P {id: "missing"})', "default")
+c.query("MATCH (n:P) WHERE n.v <> 1 RETURN n.id", "default")
+# server 1.7.0:   [["missing"]]
+# embedded 1.7.1: []
+```
 
 ---
 

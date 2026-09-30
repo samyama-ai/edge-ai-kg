@@ -15,18 +15,32 @@ submission rows, do not carry it. The filter cannot match, on any engine, and
 So they are **generated-layer queries**: the same kind of absence the README
 already documents for the six clinical-spine labels, not a divergence.
 
-That leaves two things this module can still settle, and one it cannot:
+**The server half is measured too, and there is no divergence.** On
+2026-09-30 the real layer was loaded into `ghcr.io/samyama-ai/samyama-graph:1`
+(the 1.7.0 image the notes describe) and every catalog query run against it.
+It returns exactly what embedded 1.7.1 returns -- the same six queries with
+rows, the same row counts, and `EA08` row-for-row identical. So #114's
+premise was a measurement error: nothing on the real layer disagrees between
+the builds.
 
-- `EA08`'s embedded answer is checked against a ground truth computed in
-  Python from the same source files. It matches, so the embedded build is not
-  the one that is wrong there;
-- embedded 1.7.1's own semantics for a comparison against a missing property
-  are pinned, because that is the half of the open question that does not
-  need a server;
-- what the 1.7.0 **server** returned is still unmeasured. If it matched
-  `d.fits = 1` against absent properties, that is an engine note with a
-  three-line reproduction; if it did not, the README paragraph was a
-  measurement error. Nothing here can decide it, and nothing here pretends to.
+That measurement cannot live in this suite, because it needs a container. It
+lives in `docs/engine-notes.md` with its reproduction, the way every other
+server measurement here does. What this module pins is the half that runs
+everywhere:
+
+- no real `Deployment` carries a cost-model field, and a generated one
+  carries all four (the anti-vacuity half);
+- `fits` alone is what empties `EA10` and `EA12`, derived by stripping the
+  predicate from every query that mentions it rather than claimed in prose;
+- `EA08`'s answer matches a ground truth computed in Python from the same
+  source files;
+- embedded 1.7.1's semantics for a comparison against a missing property.
+
+That last one is not decoration. The server **agrees** on `= 1` and
+**disagrees** on `<> 1`, which is engine note 8b still being live there after
+the embedded build fixed it -- found by running this probe against both. The
+`= 1` half is why #114 closed as a measurement error rather than as an engine
+defect.
 """
 from __future__ import annotations
 
@@ -40,12 +54,19 @@ from tests.test_real_layer_shape import (
     real_only,  # noqa: F401 -- shared fixture
 )
 
-# The five properties `EA10` reads, all of them produced by the cost model in
-# `etl/generate.py`. Named from the query rather than from the generator: if
-# the generator renames one, the query breaks and this list is where the
-# rename is noticed.
+# The four properties `EA10` reads off a `Deployment`, all of them produced by
+# the cost model in `etl/generate.py`. Named from the query rather than from
+# the generator: if the generator renames one, the query breaks and this list
+# is where the rename is noticed. (`EA10` returns five columns; the fifth,
+# `count(d)`, reads no property.)
 COST_MODEL_FIELDS = {"fits", "accelerator_kind", "fallback_fraction",
                      "latency_ms"}
+
+# Every textual form of a `fits` predicate in the catalog. Stripping all of
+# them is deliberately cruder than stripping only the `WHERE`-level ones: the
+# question the test below asks is "would this query return rows if `fits` were
+# not mentioned at all", and a `CASE` arm mentioning it counts.
+FITS_PREDICATES = ("WHERE d.fits = 1\n", " AND d.fits = 1", " AND d.fits = 0")
 
 
 @pytest.fixture(scope="module")
@@ -92,6 +113,55 @@ def test_no_real_deployment_carries_a_cost_model_field(
         f"nothing -- it is comparing against property names no layer uses.")
 
 
+def test_the_fits_filter_is_the_sole_reason_only_ea10_and_ea12_are_empty(
+        real_only):  # noqa: F811 -- the imported fixture
+    """Derived from the catalog, not claimed: which queries `fits` alone empties.
+
+    An earlier version of this module said `EA10` and `EA12` were "the
+    catalog's only entries that filter `WHERE d.fits = 1`". That is false --
+    `EA03`, `EA06` and `EA07` filter on it too, and `EA04` reads it inside a
+    `CASE`. Six queries mention it. In a change whose whole case is "measured,
+    not assumed", an unchecked "only" is the wrong kind of sentence, so the
+    set is measured here instead of written down.
+
+    The measurement: take every query that mentions `fits`, remove the
+    predicate, and see which then return rows. Those are the queries `fits`
+    alone empties. The other four stay empty because their opening patterns
+    bind nothing on the real layer -- no `ClinicalTask`, no `ModelVariant`,
+    no `Sensor` -- which is the absence the README already documents and has
+    nothing to do with the cost model's properties.
+    """
+    client, _fleet = real_only
+
+    mentions_fits = {qid for qid, spec in BY_ID.items()
+                     if "fits" in spec["cypher"]}
+    assert len(mentions_fits) > 2, (
+        f"only {sorted(mentions_fits)} mention `fits`, so this test is no "
+        f"longer distinguishing between queries and the 'only' it replaced "
+        f"would have been true after all")
+
+    emptied_by_fits = set()
+    for qid in mentions_fits:
+        cypher = BY_ID[qid]["cypher"]
+        stripped = cypher
+        for predicate in FITS_PREDICATES:
+            stripped = stripped.replace(predicate, "")
+        assert stripped != cypher, (
+            f"{qid} mentions `fits` in a form FITS_PREDICATES does not know "
+            f"how to remove, so it would be silently classified as 'not "
+            f"emptied by fits'. Add the form.")
+        assert not client.query(cypher, GRAPH).records, (
+            f"{qid} returns rows from the real layer while filtering on "
+            f"`fits`, which no real Deployment carries")
+        if client.query(stripped, GRAPH).records:
+            emptied_by_fits.add(qid)
+
+    assert emptied_by_fits == {"EA10", "EA12"}, (
+        f"`fits` alone empties {sorted(emptied_by_fits)} on the real layer, "
+        f"not EA10 and EA12. The README, CLAUDE.md and #114 all name that "
+        f"pair; whichever changed, they need the same edit.")
+
+
 def test_ea10_and_ea12_are_empty_because_the_cost_model_is_generated(
         real_only):  # noqa: F811 -- the imported fixture
     """Not just *that* they are empty -- which half of each query is missing.
@@ -105,10 +175,14 @@ def test_ea10_and_ea12_are_empty_because_the_cost_model_is_generated(
 
     - `EA12` then returns rows, so its `ON_BOARD -> HAS_SOC -> MADE_BY` join
       traverses the real layer perfectly well and only the filter empties it;
-    - `EA10` returns a single row whose grouping key and every aggregate are
-      `NULL`, because it reads four more properties the real layer lacks.
+    - `EA10` returns a single row whose grouping key and every *aggregate over
+      a property* are `NULL`. Only `count(d)` is not, because counting rows
+      needs no property -- which is the shape that says the deployments are
+      there and their cost-model columns are not.
 
-    Neither depends on which engine runs it.
+    Neither depends on which engine runs it, and that is now measured rather
+    than argued: the same real layer loaded into the 1.7.0 HTTP server returns
+    the same nothing (see this module's docstring).
     """
     client, _fleet = real_only
 
@@ -117,13 +191,11 @@ def test_ea10_and_ea12_are_empty_because_the_cost_model_is_generated(
             f"{qid} returns rows from the real layer. Its filter is "
             f"`d.fits = 1` and no real Deployment carries `fits`, so either "
             f"the ETL changed or the engine now matches a comparison against "
-            f"a missing property -- which is exactly the question #114 asks "
-            f"of the 1.7.0 server.")
+            f"a missing property.")
 
     unfiltered = BY_ID["EA12"]["cypher"].replace("WHERE d.fits = 1\n", "")
     assert unfiltered != BY_ID["EA12"]["cypher"], "EA12 no longer carries the filter"
-    rows = client.query(unfiltered, GRAPH).records
-    assert rows, (
+    assert client.query(unfiltered, GRAPH).records, (
         "EA12 without its `fits` filter still returns nothing, so the filter "
         "is not what empties it and the conclusion above does not follow. "
         "Re-measure before trusting the README section this pins.")
@@ -131,11 +203,18 @@ def test_ea10_and_ea12_are_empty_because_the_cost_model_is_generated(
     unfiltered = BY_ID["EA10"]["cypher"].replace("WHERE d.fits = 1\n", "")
     assert unfiltered != BY_ID["EA10"]["cypher"], "EA10 no longer carries the filter"
     rows = client.query(unfiltered, GRAPH).records
-    assert len(rows) == 1 and rows[0][0] is None, (
+    assert len(rows) == 1, (
         f"EA10 without its filter groups the real layer's deployments by "
-        f"`accelerator_kind`, which they do not have, so one all-NULL row is "
-        f"the expected shape. Got {rows[:3]}. If it now groups into real "
-        f"kinds, the real layer has gained the cost model's fields.")
+        f"`accelerator_kind`, which they do not have, so one row is the "
+        f"expected shape. Got {len(rows)}: {rows[:3]}")
+    kind, deployments, *aggregates = rows[0]
+    assert kind is None, (
+        f"EA10 now groups the real layer into accelerator kinds ({kind!r}), "
+        f"so it has gained the cost model's fields")
+    assert deployments, "the row counts no deployments, so the fixture is empty"
+    assert all(value is None for value in aggregates), (
+        f"every aggregate EA10 takes over a cost-model property must be NULL "
+        f"on the real layer; got {aggregates} beside a count of {deployments}")
 
 
 def test_ea08_on_the_real_layer_matches_a_ground_truth_computed_in_python(
@@ -151,6 +230,13 @@ def test_ea08_on_the_real_layer_matches_a_ground_truth_computed_in_python(
     Counts are not pinned here -- they move when ONNX Runtime publishes. Both
     sides are recomputed from the same build, so this stays true across an
     upstream refresh and fails only if the engine and plain Python disagree.
+
+    Compared as a multiset, plus a separate check that the engine's counts do
+    not increase. The three counts are distinct today (296 / 237 / 205), but
+    `EA08` carries one `ORDER BY` key and note 2 says a tie can come back in
+    any order -- so an upstream refresh that made two of them equal would
+    fail an order-sensitive comparison for a reason that has nothing to do
+    with correctness. This test is supposed to survive that.
     """
     client, fleet = real_only
 
@@ -163,6 +249,14 @@ def test_ea08_on_the_real_layer_matches_a_ground_truth_computed_in_python(
         if rel == "RUNS_ON":
             runs_on[src].append(tgt)
         elif rel == "PROVIDED_BY":
+            # One runtime per kernel, asserted rather than assumed: a dict
+            # would keep the last edge silently, and this side of the
+            # comparison would then undercount while the engine's side --
+            # which joins, and so sees both -- did not.
+            assert src not in provided_by, (
+                f"kernel {src} has more than one PROVIDED_BY edge; this "
+                f"recount keeps one runtime per kernel and would disagree "
+                f"with the engine for that reason rather than a real one")
             provided_by[src] = tgt
         elif rel == "IMPLEMENTS":
             implements[src].add(tgt)
@@ -182,18 +276,26 @@ def test_ea08_on_the_real_layer_matches_a_ground_truth_computed_in_python(
     assert expected, "the real layer has no accelerator/runtime pair with kernels"
 
     got = [tuple(row) for row in client.query(BY_ID["EA08"]["cypher"], GRAPH).records]
-    assert got == [tuple(row) for row in expected], (
+    assert sorted(got) == sorted(tuple(row) for row in expected), (
         f"EA08 disagrees with the same question computed in Python:\n"
-        f"  engine: {got}\n"
-        f"  python: {expected}\n"
-        f"#114 records the embedded build returning fewer rows than the "
-        f"server here. While this passes, the embedded rows are the right "
-        f"ones and 'fewer' is not the same as 'wrong'.")
+        f"  engine: {sorted(got)}\n"
+        f"  python: {sorted(expected)}\n"
+        f"#114 recorded the embedded build returning fewer rows than the "
+        f"server here. The 1.7.0 server has since been measured returning "
+        f"these same rows, so while this passes both builds agree with a "
+        f"recount and there is nothing left to reconcile.")
+
+    counts = [row[2] for row in got]
+    assert counts == sorted(counts, reverse=True), (
+        f"EA08 asks for `ORDER BY operators DESC` and returned {counts}. "
+        f"The rows are compared above without order because note 2 lets ties "
+        f"come back either way round; this is the ordering claim itself, "
+        f"which ties do not excuse.")
 
 
 def test_a_comparison_against_a_missing_property_matches_nothing(
         real_only):  # noqa: F811 -- the imported fixture
-    """The half of #114's open question that needs no server.
+    """Embedded 1.7.1's semantics, and the probe that closed #114.
 
     Three-valued logic: a property that is not there is `NULL`, `NULL = 1` is
     `NULL`, and a `WHERE` keeps only rows that are `true`. So both `= 1` and
@@ -203,10 +305,15 @@ def test_a_comparison_against_a_missing_property_matches_nothing(
 
     Run against a probe node rather than a `Deployment`, so it says what the
     engine does rather than what this graph happens to hold, and so the same
-    three lines can be pasted at a 1.7.0 server. If they return a row there,
-    #114 is an engine note with a minimal reproduction; if they do not, the
-    README's paragraph was a measurement error. That is the whole of what is
-    left to measure.
+    lines can be pasted at a server. They were: the 1.7.0 server agrees on
+    `= 1` -- which is what settled #114, since `EA10` and `EA12` could not
+    have returned rows there either -- and **disagrees on `<> 1`**, matching
+    the missing row. That is engine note 8b, which this file's banner had
+    listed as gone; it is gone on embedded and live on the server.
+
+    So the `<> 1` assertion below is not symmetry for its own sake. It is the
+    one that would notice the embedded build regressing to what the server
+    still does.
     """
     client, _fleet = real_only
     client.query('CREATE (:CostModelProbe {id: "probe:1"})', GRAPH)

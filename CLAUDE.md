@@ -207,16 +207,20 @@ raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
 so a downgrade fails loudly.
 
 **An embedded/server divergence was recorded on the real layer** for `EA08`,
-`EA10` and `EA12`, and it is not notes 10 and 11 (README, "What the real layer
-alone can answer"). Two thirds of it turned out not to be a build difference:
-`EA10` and `EA12` filter `WHERE d.fits = 1`, `fits` comes from the cost model
-in `etl/generate.py`, and `etl/real_layer.py` has never written it — so they
-are generated-layer queries and no engine can answer them from the real layer.
-`EA08`'s embedded rows match a Python ground truth. What is left is one
-question for a 1.7.0 server: whether it matches a comparison against a missing
-property. Embedded 1.7.1 does not. `tests/test_real_layer_cost_model.py` pins
-all of this; **#114** carries the rest. Still not an engine note — nothing here
-tells you a shape to avoid until that probe is run.
+`EA10` and `EA12` (README, "What the real layer alone can answer"). **It was a
+measurement error.** Re-measured 2026-09-30 by loading the real layer into
+`ghcr.io/samyama-ai/samyama-graph:1` and running the catalog: the 1.7.0 server
+returns exactly what embedded 1.7.1 returns, `EA08` included. `EA10` and
+`EA12` are empty on both because they filter `WHERE d.fits = 1` and `fits`
+comes from the cost model in `etl/generate.py`, which never runs for the real
+layer. `tests/test_real_layer_cost_model.py` pins that, deriving the pair by
+stripping the predicate rather than naming it — four other queries mention
+`fits` and are empty for other reasons.
+
+The probe that settled it did find a live one: **note 8b is not gone on the
+server.** `n.v <> 1` matches a node with no `v` there and does not on embedded
+1.7.1, where this file's own banner lists 8b among the behaviours that no
+longer reproduce. Write the `IS NOT NULL` guard.
 
 **Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
 13 and 13b return wrong rows rather than erroring; note 12 does both, and which
