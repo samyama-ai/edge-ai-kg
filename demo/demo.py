@@ -36,8 +36,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from benchmarks.catalog.subjects import MAX_STAGE_HOPS
-from benchmarks.queries import BY_ID, EA17_SUBJECT
+from benchmarks.queries import BY_ID, EA17_SUBJECT, MAX_STAGE_HOPS
 from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes

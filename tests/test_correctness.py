@@ -559,7 +559,7 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # Engine note 12: that build does not traverse a variable-length relationship
 # and rejects `size(r)` on one. `docs/engine-notes.md`, `CLAUDE.md` and
 # `README.md` all state which queries these are -- until this test existed
-# that was prose, so a new query with an unbounded walk would have made three
+# that was prose, so a new query walking that shape would have made three
 # pages wrong at once and nothing would have said so. `EA21` is the second
 # member, and this guard is what caught it -- but it is here for a different
 # failure from `EA17`'s. `EA17` calls `size(r)` on the walk and the server
@@ -570,6 +570,16 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # **inferred from note 12, not measured**: nobody has run `EA21` against a
 # 1.7.0 server. Both are embedded-only; only one of them announces itself.
 EMBEDDED_ONLY = {"EA17", "EA21"}
+
+# Queries that walk a variable-length relationship and are **not**
+# embedded-only, each with a reason someone checked. `EA07` is the only one:
+# note 12 measured both builds returning byte-identical rows for it, so the
+# server's zero-length-only answer happens to coincide with the right one on
+# this graph under its `ORDER BY ... LIMIT 10`. That is luck about the data,
+# not a property of the query -- which is why it is written down here rather
+# than left implicit, and why the test below refuses to let a *new* walking
+# query join this list silently.
+VARIABLE_LENGTH_BUT_SERVER_SAFE = {"EA07"}
 
 
 def test_every_embedded_only_query_walks_a_variable_length_relationship():
@@ -582,17 +592,30 @@ def test_every_embedded_only_query_walks_a_variable_length_relationship():
     note-12 victim *without* being embedded-only, because wrong rows and a
     refusal are different failures.
 
-    So the set is hand-maintained now, and this checks the half that a machine
-    can still check: every query in it walks a variable-length relationship,
-    and at least one query outside it does too, so the file cannot pass on a
-    catalog where the distinction has quietly collapsed. Why each entry is in
-    the set is prose, in note 12 and note 14 -- `EA17` calls `size(r)` and the
-    server rejects it outright, `EA21` gets a plausible-looking wrong ranking.
+    So the set is hand-maintained now, and this checks the two halves a
+    machine can still check:
+
+    - every query in `EMBEDDED_ONLY` walks a variable-length relationship;
+    - every query that walks one is *classified* -- either embedded-only, or
+      named in `VARIABLE_LENGTH_BUT_SERVER_SAFE` with a reason. Without the
+      second half this test could only catch a **spurious** entry, never a
+      **missing** one, and a missing one is the dangerous direction: a new
+      query the server would answer wrongly, shipped as server-safe.
+
+    Why each entry is in the set stays prose, in note 12 and note 14 --
+    `EA17` calls `size(r)` and the server rejects it outright, `EA21` gets a
+    plausible-looking wrong ranking. `EA07` gets wrong rows too, in the sense
+    note 12 describes, but they coincide with the right ones on this graph,
+    which is why it sits in the safe list rather than in `EMBEDDED_ONLY`.
     """
     import re
 
+    # Any relationship pattern containing a `*`, rather than a spelling of the
+    # hop range: `[r:NEXT_STAGE*0..8]`, `[:R*]`, `[:R*3]` and a pattern with a
+    # property map or a space before the `]` are all variable-length, and the
+    # earlier `\*\d*\.\.\d*\]` matched only the first.
     variable_length = {qid for qid, spec in BY_ID.items()
-                       if re.search(r"\*\d*\.\.\d*\]", spec["cypher"])}
+                       if re.search(r"\[[^\]]*\*[^\]]*\]", spec["cypher"])}
     missing = EMBEDDED_ONLY - variable_length
     assert not missing, (
         f"{sorted(missing)} are named embedded-only but walk no variable-length "
@@ -600,9 +623,17 @@ def test_every_embedded_only_query_walks_a_variable_length_relationship():
         f"`CLAUDE.md` and `README.md` all name this set in prose and need the "
         f"same edit.")
 
-    outside = variable_length - EMBEDDED_ONLY
-    assert outside, (
-        f"every variable-length walk in the catalog is embedded-only "
-        f"({sorted(variable_length)}), so this test would pass on a catalog "
-        f"where the distinction between a refusal and wrong rows had "
-        f"collapsed. `EA07` is the entry that keeps it honest.")
+    assert "EA07" in variable_length, (
+        "`EA07` no longer walks a variable-length relationship, so the "
+        "anti-vacuity check below is comparing against nothing. It is the "
+        "query that proves walking one does not by itself make a query "
+        "embedded-only.")
+
+    unclassified = variable_length - EMBEDDED_ONLY - VARIABLE_LENGTH_BUT_SERVER_SAFE
+    assert not unclassified, (
+        f"{sorted(unclassified)} walk a variable-length relationship and are "
+        f"neither embedded-only nor listed as server-safe. By note 12 the "
+        f"1.7.0 server matches only the zero-length case for that shape, so "
+        f"somebody has to decide whether the rows it returns are wrong enough "
+        f"to matter, and write the answer into one of the two sets above. "
+        f"Since the walks were bounded (note 14) the Cypher cannot decide it.")

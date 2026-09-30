@@ -906,7 +906,10 @@ its date are written once, beside the constant in
 `benchmarks/catalog/subjects.py`, and are not repeated here so they cannot
 drift apart. The claim that the bound costs no answer is not carried by prose
 in either place: `tests/test_bounded_walks.py` re-measures the fleet against
-the bound and compares both queries bounded against unbounded, row for row.
+the bound and compares each walking query bounded against unbounded --
+`EA17`, `EA21` and `demo/demo.py`'s `TASKS_OVER_BUDGET`. The rows are compared
+as sets, not sequences: `EA21`'s ties have no tiebreaker (note 3b forbids a
+second `ORDER BY` key) and reorder between runs.
 
 On 1.9.0 the bound fixes **`EA21`** — it runs and returns the same ranking.
 It does **not** fix `EA17`:
@@ -919,13 +922,19 @@ It does **not** fix `EA17`:
 
 Five hops is the minimum for a complete answer and three is the most that
 completes in time, so on 1.9.0 `EA17` cannot be both correct and fast. The
-cost is its five `OPTIONAL MATCH` legs, each carrying a walk and then four
-more hops, not the walk length — which makes this a query-shape problem
-rather than a bound to tune. **The `samyama>=1.7.1,<1.8` ceiling therefore
+cost is its shape, not the walk length: `EA17` is five `UNION ALL` legs, and
+**four of them carry two walks each** — one in the main pattern and one in
+its `OPTIONAL MATCH` — over chains that then run up to four further fixed
+hops (`PRECEDES`, `VARIANT_OF`, `OF_VARIANT`, `ON_BOARD`). The fifth,
+`(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`, has no walk at all. Eight
+bounded walks in one statement is what times out, which makes this a
+query-shape problem rather than a bound to tune. **The `samyama>=1.7.1,<1.8` ceiling therefore
 stays**, and reshaping `EA17` is what would lift it.
 
-The bound is still worth carrying at 1.7.1: it removes the failure for `EA21`
-entirely, and it is what any future engine upgrade would have needed anyway.
+The bound is still worth carrying at 1.7.1, where nothing refuses the
+unbounded form: it is what any future engine upgrade needs, it is measured
+not to change either query's answer, and carrying it now means the next
+upgrade attempt starts from `EA17` alone rather than from two queries.
 
 **What a bound costs, for the record.** `pyproject.toml`
 declares `samyama>=1.7.1,<1.8`, which buys reproducibility and fixes nothing.

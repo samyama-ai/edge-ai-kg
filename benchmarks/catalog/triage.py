@@ -216,15 +216,19 @@ ORDER BY on_recalled_board DESC
         # guard and without it, so the guard was inert and note 8b's `<>`
         # behaviour never reached it.
         #
-        # **Cost.** `*0..` over a cyclic graph enumerates paths before
-        # `count(DISTINCT)` reduces them, so the work is bounded by paths and
-        # not by stages. Cheap on this fleet -- 16 stages, 40 `NEXT_STAGE`
-        # edges, 0.1 ms warm at `--scale 1.0` -- and that is a statement about
-        # the fixture, not about the shape: a denser real pipeline could grow
-        # this sharply, and the fix there is a bound on the walk, which costs
-        # the deep chains (`EA07` makes that trade, in
-        # `benchmarks/catalog/core.py`). Measure
-        # before assuming it still holds on real topology.
+        # **Cost.** A variable-length walk over a cyclic graph enumerates
+        # paths before `count(DISTINCT)` reduces them, so the work is bounded
+        # by paths and not by stages. Cheap on this fleet -- 16 stages, 40
+        # `NEXT_STAGE` edges, 0.1 ms warm at `--scale 1.0`, measured before
+        # the walk carried `MAX_STAGE_HOPS` and not re-run since; the bound
+        # can only remove paths, so it is an upper bound on the bounded cost
+        # rather than a stale figure. That is a statement about the fixture,
+        # not about the shape: a denser real pipeline could grow this sharply.
+        # `MAX_STAGE_HOPS` does not protect against that -- it sits above the
+        # deepest chain here precisely so it does not bite, and a bound that
+        # is cheap is one that costs the deep chains (`EA07` makes that trade,
+        # in `benchmarks/catalog/core.py`). Measure before assuming it still
+        # holds on real topology.
         #
         # One `ORDER BY` key (note 3b) and no tiebreaker: ties are alerts
         # reaching the same number of others, and their order among

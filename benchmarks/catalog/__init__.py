@@ -19,7 +19,12 @@ from __future__ import annotations
 from benchmarks.catalog.alerting import ALERTING
 from benchmarks.catalog.core import CORE
 from benchmarks.catalog.real_layer import REAL_LAYER
-from benchmarks.catalog.subjects import EA17_SUBJECT, EA21_ALERTS, alert_list
+from benchmarks.catalog.subjects import (
+    EA17_SUBJECT,
+    EA21_ALERTS,
+    MAX_STAGE_HOPS,
+    alert_list,
+)
 from benchmarks.catalog.triage import TRIAGE
 
 QUERIES: list[dict] = [*CORE, *REAL_LAYER, *ALERTING, *TRIAGE]
@@ -82,4 +87,5 @@ def retargeted_ea21(alert_ids) -> str:
     return original.replace(catalog_set, alert_list(alert_ids))
 
 
-__all__ = ["BY_ID", "EA17_SUBJECT", "EA21_ALERTS", "QUERIES", "retargeted_ea21"]
+__all__ = ["BY_ID", "EA17_SUBJECT", "EA21_ALERTS", "MAX_STAGE_HOPS", "QUERIES",
+           "retargeted_ea21"]

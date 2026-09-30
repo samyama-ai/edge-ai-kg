@@ -189,9 +189,10 @@ resolved 0.6.1, and the notes were measured against a 1.7.0 server.
 
 `pyproject.toml` floors the engine at `samyama>=1.7.1` and caps it below 1.8
 (engine note 14: from 1.8.0 the planner refused `EA17`'s and `EA21`'s
-then-unbounded walks outright. The walks carry `MAX_STAGE_HOPS` now, which is
-enough for `EA21` there; `EA17` times out at every bound deep enough to be
-complete, so the ceiling stays). On 1.7.1 neither
+then-unbounded walks outright. The walks carry `MAX_STAGE_HOPS` now, and
+**measured on 1.9.0** -- the newer of the two releases that refuse the
+unbounded form -- that is enough for `EA21`, while `EA17` times out at every
+bound deep enough to be complete, so the ceiling stays). On 1.7.1 neither
 reproduces embedded -- the same caveat as above: nothing here re-probed the
 server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 `run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.

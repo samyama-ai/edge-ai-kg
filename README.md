@@ -205,10 +205,12 @@ between the two builds.
 describe is the build you get. The ceiling is [engine note
 14](docs/engine-notes.md): from 1.8.0 the planner refused the then-unbounded
 `NEXT_STAGE*0..` walks in `EA17` and `EA21` outright. Both carry an explicit
-bound now (`MAX_STAGE_HOPS`, #126), which is enough for `EA21` on 1.8; `EA17`
-still times out there at every bound deep enough to answer completely, and
-truncates at every bound fast enough to finish. So the ceiling stays, and the
-remaining work on `EA17` is reshaping the query rather than raising it.
+bound now (`MAX_STAGE_HOPS`, #126). **Measured on 1.9.0, not on 1.8.0** —
+each release was installed and run, and 1.9.0 is the newer of the two that
+refuse the unbounded form: the bound is enough for `EA21` there, while `EA17`
+times out at every bound deep enough to answer completely and truncates at
+every bound fast enough to finish. So the ceiling stays, and the remaining
+work on `EA17` is reshaping the query rather than raising it.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.

@@ -158,3 +158,36 @@ def test_bounding_changes_no_answer(loaded_fleet, qid):  # noqa: F811 -- shared 
         f"  unbounded: {got_unbounded}\n"
         f"A chain in this fleet is longer than the bound, so the bounded "
         f"answer is truncated while looking complete.")
+
+
+def test_bounding_changes_no_answer_for_the_demo_query(loaded_fleet):  # noqa: F811
+    """The same check for the one shipped walk that is not in the catalog.
+
+    `demo/demo.py`'s `TASKS_OVER_BUDGET` was bounded in the same change that
+    bounded `EA17` and `EA21`, and a bound that quietly changed the demo's
+    numbers would be worse than one that changed a benchmark's: the demo is
+    the narrated version, and beat 7 reads its result out as a sentence a
+    human is sent.
+
+    Kept separate from the catalog parametrisation rather than folded into it,
+    because the demo query is not in `BY_ID` and reaching it needs an import
+    of a module that pulls in `rich`.
+    """
+    from demo import demo
+
+    client, _fleet = loaded_fleet
+    bounded = demo.TASKS_OVER_BUDGET
+    unbounded = bounded.replace(f"*0..{MAX_STAGE_HOPS}]", "*0..]")
+    assert unbounded != bounded, (
+        "TASKS_OVER_BUDGET no longer carries the bound this test measures")
+
+    got_bounded = sorted(map(str, client.query(bounded, GRAPH).records))
+    got_unbounded = sorted(map(str, client.query(unbounded, GRAPH).records))
+
+    assert got_bounded == got_unbounded, (
+        f"the demo's over-budget counts change once bounded at "
+        f"{MAX_STAGE_HOPS} hops:\n"
+        f"  bounded  : {got_bounded}\n"
+        f"  unbounded: {got_unbounded}\n"
+        f"Beat 7 reads these numbers out in a sentence, so a truncated "
+        f"answer would be narrated as a fact.")

@@ -113,6 +113,15 @@ doubling above and ×2.97 here, `EA08` ×1.83 and ×2.06. Both tables agree that
 | `EA08` | 48 ms | 99 ms | ×2.1 — about linear |
 | catalog total (the 17 queries that existed then, `EA17` included) | 270 ms | 866 ms | ×3.2 — superlinear, but see below |
 
+**Every `EA17` figure on this page was measured before its walks carried
+`MAX_STAGE_HOPS`** (engine note 14, #126). They have not been re-run. The
+bound sits above the deepest chain either fleet has, so it can only remove
+paths the query was already enumerating and never add one — these numbers are
+therefore an upper bound on the bounded cost rather than a stale measurement,
+but they are not a measurement *of* the query as it ships today. Re-running
+`python -m benchmarks.run_benchmark` at both scales is what would replace
+them.
+
 The graph doubles between those columns — 76,303 edges at 1.0 against 152,717
 at 2.0, and 25,150 nodes against 48,907 — so ×2 is the linear line. Everything
 above it is superlinear in the graph, which is what the column is for.
@@ -139,10 +148,10 @@ above and are not comparable with them — the ratio within the one run is what
 "cheap" means here. Neither has been run at 2.0.
 
 **`EA17`'s shape is the candidate explanation** for its growth: **four of its
-five legs** carry a variable-length `*0..` in the main pattern *and* another
-inside an
-`OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
-has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
+five legs** carry a variable-length `NEXT_STAGE` walk in the main pattern
+*and* another inside an `OPTIONAL MATCH` — the fifth,
+`(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`, has no variable-length hop at
+all — over a `NEXT_STAGE` graph that is cyclic:
 `etl/generate.py` samples each sensor's chain from one shared pool in random
 order, so one sensor contributes `s7 -> s1` and another `s1 -> s7`.
 Relationship-uniqueness stops it looping forever. **Why that is expensive is
