@@ -214,11 +214,16 @@ def test_the_bound_truncates_a_chain_longer_than_it(engine_factory):
     of the loss is other sensors' stages reached through the shared-pool
     leakage. The measurement supported the bound as much as it refuted it.
 
-    So the argument for `*0..` is made here instead, on a graph where the chain
-    length is the only variable: 12 stages, one sensor, nothing shared.
+    So the cost is shown here instead, on a graph where the chain length is
+    the only variable: `MAX_STAGE_HOPS + 4` stages, one sensor, nothing
+    shared.
     """
     client = engine_factory()
-    depth = 12
+    # Derived from the constant, not the 12 this fixture used to hard-code:
+    # the whole demonstration is "longer than the bound", so raising
+    # `MAX_STAGE_HOPS` past a literal would have turned this into a confusing
+    # failure about stage counts instead of a fixture that no longer fits.
+    depth = MAX_STAGE_HOPS + 4
     create_nodes(client, GRAPH, "Sensor",
                  [{"id": "sensor:00000", "name": "long-chain", "modality": "ECG"}])
     create_nodes(client, GRAPH, "SignalStage",
@@ -309,9 +314,11 @@ def test_a_task_stops_when_it_loses_the_last_sensor_of_a_modality(engine_factory
 def test_ea07s_fixed_bound_is_lossy_and_that_is_a_known_trade(engine_factory):
     """The argument of this PR, applied to the query it did not change.
 
-    `EA17` uses `*0..` because a fixed bound on a chain of unknown length is
-    wrong -- that is what `test_fixed_depth_misses_the_far_end_of_a_long_chain`
-    above demonstrates. `EA07` walks the same chain and still says `*0..3`.
+    `EA17` walks to `MAX_STAGE_HOPS`, a bound set above the fleet's deepest
+    chain precisely so it does not bite -- a bound that bites truncates the
+    answer, which is what `test_the_bound_truncates_a_chain_longer_than_it`
+    above demonstrates. `EA07` walks the same chain and says `*0..3`, a bound
+    that does bite.
 
     That is a deliberate trade, not an oversight, and the reason is note 12.
     Stated as that note states it: the 1.7.0 server does not *refuse* a
@@ -435,8 +442,8 @@ def ea17_on_a_cyclic_chain_within(seconds):
     return json.loads(out.strip().splitlines()[-1])
 
 
-def test_the_unbounded_walk_terminates_on_a_cyclic_chain():
-    """`EA17` walks `NEXT_STAGE*0..` with no depth cap. The fleet has cycles.
+def test_the_walk_terminates_on_a_cyclic_chain():
+    """`EA17` walks `NEXT_STAGE` variable-length. The fleet has cycles.
 
     Both halves of that are measured, because the pair is what matters.
 
@@ -446,9 +453,12 @@ def test_the_unbounded_walk_terminates_on_a_cyclic_chain():
     `stage:00012 -> stage:00009 -> stage:00010 -> stage:00012`. Nothing pins
     that particular cycle -- it is one seed's -- but the mechanism is in the
     generator, so any reasoning that starts "the stage graph is a DAG" is
-    wrong, and a depth cap on `EA17` cannot be justified that way.
+    wrong, and `MAX_STAGE_HOPS` cannot be justified that way -- it is there
+    because the 1.8 planner requires a bound (note 14), not because the graph
+    is acyclic.
 
-    **It terminates anyway**, because Cypher's variable-length matching does
+    **It terminates anyway**, and would even with no bound at all, because
+    Cypher's variable-length matching does
     not traverse the same relationship twice within one path, so the walk is
     bounded by the number of `NEXT_STAGE` edges rather than by the graph being
     acyclic. That is a property of the engine, not of the data, which is

@@ -12,8 +12,15 @@ when it argued against a cap, and it is why the bound is checked here against
 the fleet rather than asserted in a comment:
 
 - the deepest chain reachable from any sensor must stay clear of the bound;
-- every walk in the catalog must carry the bound, so a new leg cannot be
-  added unbounded and quietly re-break the 1.8 planner.
+- every walk the repo ships -- catalog and demo -- must carry an upper
+  bound, so a new leg cannot be added unbounded and quietly re-break the 1.8
+  planner;
+- and bounding must change no answer, which is asked of the engine rather
+  than argued: each query is run both ways and the rows compared.
+
+An earlier version of this file also asserted `MAX_STAGE_HOPS >= deepest`.
+That is implied by the headroom check below, so it was dropped rather than
+kept as a second name for the same fact.
 """
 from __future__ import annotations
 
@@ -28,6 +35,7 @@ from tests.test_certification_alerts import (
     loaded_fleet,  # noqa: F401 -- shared fixture
 )
 
+GRAPH = "default"
 HEADROOM = 2
 
 
@@ -79,24 +87,74 @@ def test_the_fleet_stays_well_inside_the_bound(stage_depths):
         f"or the blast radius will be truncated without saying so.")
 
 
-def test_every_catalog_walk_carries_the_bound():
-    """No `NEXT_STAGE*0..` may go back in unbounded.
+def test_every_walk_carries_the_bound():
+    """No variable-length pattern anywhere may go back in without an upper bound.
 
-    `EA07` walks the same relationship with its own fixed `*0..3`, which is a
-    different decision documented on that entry, so the check is that no walk
-    is *unbounded* rather than that every walk uses this constant.
+    Three widenings on the first version of this guard, each one a hole the
+    review of #126 pointed at:
+
+    - it matched `NEXT_STAGE` alone. Note 14 is about *any* variable-length
+      pattern producing over a million paths, so a new query walking some
+      other relationship would have slipped past a guard named after the one
+      relationship that broke first;
+    - it matched `*0..]` but not a bare `*]` or `*..]`, which are equally
+      unbounded. What makes a walk legal is an upper limit, however it is
+      spelled -- `*3]`, `*0..3]`, `*..3]` -- so the check is for its absence;
+    - it scanned `BY_ID` only. `demo/demo.py`'s `TASKS_OVER_BUDGET` is not in
+      the catalog and carried the note-14 failure this change exists to
+      remove; the demo is a shipped entry point, so it is scanned by name.
+
+    `EA07` walks the same relationship with its own fixed `*0..3`, a tighter
+    bound chosen for what it answers rather than for the planner, which is why
+    the check is "has an upper bound" and not "uses `MAX_STAGE_HOPS`".
     """
-    unbounded = {qid: entry["cypher"] for qid, entry in BY_ID.items()
-                 if re.search(r"NEXT_STAGE\*\d*\.\.\]", entry["cypher"])}
+    # Deferred: importing the demo pulls in rich, which this test is alone in
+    # needing.
+    from demo import demo
+
+    cyphers = {qid: entry["cypher"] for qid, entry in BY_ID.items()}
+    cyphers["demo.TASKS_OVER_BUDGET"] = demo.TASKS_OVER_BUDGET
+
+    unbounded = {name: m.group(0)
+                 for name, cypher in cyphers.items()
+                 if (m := re.search(r"\*(\d+\.\.|\.\.)?\]", cypher))}
     assert not unbounded, (
-        f"{sorted(unbounded)} walk NEXT_STAGE with no upper hop bound. From "
-        f"samyama 1.8.0 the planner refuses that outright (engine note 14).")
+        f"{unbounded} walk a variable-length relationship with no upper hop "
+        f"bound. From samyama 1.8.0 the planner refuses that outright "
+        f"(engine note 14).")
 
 
-def test_the_bound_is_at_least_the_depth_the_answers_need(stage_depths):
-    """A bound below the real depth would truncate rather than fail."""
-    deepest = max(stage_depths.values())
-    assert MAX_STAGE_HOPS >= deepest, (
-        f"MAX_STAGE_HOPS={MAX_STAGE_HOPS} is below the fleet's deepest chain "
-        f"({deepest} hops), so EA17 would report a blast radius that stops "
-        f"short and looks complete")
+@pytest.mark.parametrize("qid", ["EA17", "EA21"])
+def test_bounding_changes_no_answer(loaded_fleet, qid):  # noqa: F811 -- shared fixture
+    """The claim the whole bound rests on, run rather than remembered.
+
+    Both queries are asked twice against the same graph -- once as the catalog
+    ships them, once with the bound removed -- and the results compared as
+    sets. If a chain in this fleet were longer than `MAX_STAGE_HOPS`, the
+    bounded answer would be a strict subset and this fails.
+
+    Compared as sets, not sequences, deliberately: `EA21` has tied rows and no
+    tiebreaker (note 3b forbids a second `ORDER BY` key), and running the
+    *unbounded* query three times in a row returns those ties in different
+    orders. Comparing sequences would fail on that instability and blame the
+    bound for it.
+
+    An earlier version of this file asserted the depth and left this
+    comparison to a one-off run pasted into a PR description, while two
+    comments claimed the test existed. That is the shape of claim this repo
+    exists not to make.
+    """
+    client, _fleet = loaded_fleet
+    bounded = BY_ID[qid]["cypher"]
+    unbounded = bounded.replace(f"*0..{MAX_STAGE_HOPS}]", "*0..]")
+    assert unbounded != bounded, f"{qid} no longer carries the bound this test measures"
+
+    got_bounded = sorted(map(str, client.query(bounded, GRAPH).records))
+    got_unbounded = sorted(map(str, client.query(unbounded, GRAPH).records))
+
+    assert got_bounded == got_unbounded, (
+        f"{qid} answers differently once bounded at {MAX_STAGE_HOPS} hops:\n"
+        f"  bounded  : {got_bounded}\n"
+        f"  unbounded: {got_unbounded}\n"
+        f"A chain in this fleet is longer than the bound, so the bounded "
+        f"answer is truncated while looking complete.")

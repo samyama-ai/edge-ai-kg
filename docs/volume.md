@@ -139,7 +139,8 @@ above and are not comparable with them — the ratio within the one run is what
 "cheap" means here. Neither has been run at 2.0.
 
 **`EA17`'s shape is the candidate explanation** for its growth: **four of its
-five legs** carry an unbounded `*0..` in the main pattern *and* another inside an
+five legs** carry a variable-length `*0..` in the main pattern *and* another
+inside an
 `OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
 has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
 `etl/generate.py` samples each sensor's chain from one shared pool in random

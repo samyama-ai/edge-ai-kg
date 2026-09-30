@@ -174,9 +174,9 @@ HTTP it is expected, not measured**: the real layer has no `ClinicalTask`, no
 on a `Site`, so none of their opening `MATCH`es binds anything on either
 build. `Site` is generated-layer only by construction, which
 `tests/test_site_spine.py::test_the_real_layer_gets_no_sites` pins. `EA21`
-carries a second reason it cannot be read off the server run: it walks an
-unbounded `NEXT_STAGE*0..`, which the 1.7.0 server does not traverse (engine
-note 12). It would not *raise* the way `EA17` does — `EA17` asks for `size(r)`
+carries a second reason it cannot be read off the server run: it walks
+`NEXT_STAGE` variable-length, which the 1.7.0 server does not traverse at any
+bound (engine note 12). It would not *raise* the way `EA17` does — `EA17` asks for `size(r)`
 and `EA21` does not — so by inference, untested here, it would answer from the
 zero-length match alone and report wrong numbers rather than nothing. The
 distinction between measured and expected is kept rather than smoothed over,
@@ -203,11 +203,12 @@ between the two builds.
 
 `pyproject.toml` declares `samyama>=1.7.1,<1.8`, so the build these pages
 describe is the build you get. The ceiling is [engine note
-14](docs/engine-notes.md): from 1.8.0 the planner refuses the unbounded
-`NEXT_STAGE*0..` walks in `EA17` and `EA21`, so those two queries do not run
-on a newer engine. It buys reproducibility and fixes nothing — bounding the
-walks changes what they answer, which is a query-design decision rather than
-a version bump.
+14](docs/engine-notes.md): from 1.8.0 the planner refused the then-unbounded
+`NEXT_STAGE*0..` walks in `EA17` and `EA21` outright. Both carry an explicit
+bound now (`MAX_STAGE_HOPS`, #126), which is enough for `EA21` on 1.8; `EA17`
+still times out there at every bound deep enough to answer completely, and
+truncates at every bound fast enough to finish. So the ceiling stays, and the
+remaining work on `EA17` is reshaping the query rather than raising it.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.
@@ -219,7 +220,8 @@ something to traverse: with no `Sensor` nodes the opening `MATCH` binds nothing,
 server with `--layers real`: 0 rows, no error. On the **full** graph it raises,
 and is the one catalog query that cannot be asked over HTTP.
 
-`EA07` walks the same `NEXT_STAGE` chain with a fixed bound, `*0..3`, and the
+`EA07` walks the same `NEXT_STAGE` chain with its own fixed `*0..3` — a
+tighter bound than `MAX_STAGE_HOPS`, chosen for what it answers — and the
 bound does not exempt it: note 12 measured the server matching only the
 zero-length case for **every** form, bounded or not. It does not raise, because
 `EA07` never calls `size(r)` — that type error is what makes `EA17` fail loudly.
@@ -407,7 +409,7 @@ follows is arithmetic on the embedded figure, not a sweep result. `EA17` raises
 on the 1.7.0 server, which *is* measured (engine note 12), so it returns
 nothing there: that is the one subtraction anybody has checked, and it gives
 19. `EA21` has never been run against a server at all — it walks the same
-unbounded shape but never calls `size(r)`, so by note 12 it would not raise;
+variable-length shape but never calls `size(r)`, so by note 12 it would not raise;
 the inference is that it would answer from the zero-length match alone and
 return wrong rows that look like an answer. Subtracting `EA21` as well gives
 18, but that second subtraction rests on the inference rather than on a run,
@@ -465,7 +467,7 @@ engine that walks variable-length paths**, which the 1.7.0 server does not
 | **EA14** | **REAL:** MLPerf Tiny v1.2 throughput leaders per benchmark task |
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
-| **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
+| **EA17** | **EMBEDDED-ONLY** (its `size(r)` over a variable-length walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
 | **EA18** | **EMPTY ON THIS FLEET:** which deployments miss a clinical task's latency budget, and which operators have no kernel on their accelerator? |
 | **EA19** | **COMPLIANCE:** this sensor fails — which certifications does that touch, through the tasks that require it? |
 

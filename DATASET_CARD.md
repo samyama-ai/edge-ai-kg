@@ -260,9 +260,12 @@ instead: the 1.7.0 server rejects `size(r)` over a variable-length
 relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19`, `EA20`
 and `EA21` post-date this run and were not part of it; the catalog is larger
 now, and this paragraph reports what was verified then. `EA21` would not have
-raised the way `EA17` did — it walks an **unbounded** `*0..` without
-`size(r)`, and it is the unbounded walk that makes a query embedded-only, not
-variable length as such (`EA07` is bounded and runs on both). What it would
+raised the way `EA17` did — it walks `NEXT_STAGE` variable-length without
+`size(r)`, and `size(r)` is what makes `EA17` fail loudly. Being embedded-only
+is not read off the shape: `EA07` walks the same relationship, gets the same
+zero-length-only answer from the server, and is not embedded-only, because on
+this graph that answer happens to match. Since #126 bounded `EA17` and `EA21`,
+the three are indistinguishable by their Cypher; the set is kept by hand. What it would
 return there is **inferred from engine note 12 and untested**: the zero-length
 match alone, so wrong rows rather than an error. Like `EA17` it should be
 treated as answerable only on the embedded build.

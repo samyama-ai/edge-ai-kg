@@ -681,11 +681,14 @@ query had to change.
 > than server-with-a-caveat.
 >
 > `tests/test_correctness.py`'s `EMBEDDED_ONLY` is a hand-written set,
-> `{"EA17", "EA21"}`. What is derived from the Cypher is the set the test
-> compares it against: every query whose walk is unbounded. So a *new* query
-> with an unbounded walk fails that test until someone adds it here and to
-> the pages, which is the drift it exists to catch. It checks none of the
-> prose above -- what the server actually returns for `EA21` is unmeasured,
+> `{"EA17", "EA21"}`. It used to be checked against a set derived from the
+> Cypher -- every query whose walk was unbounded -- but note 14 bounded both
+> of these, and `EA07` walks the same relationship bounded and is *not*
+> embedded-only, so shape no longer separates them. What the test still
+> derives is the weaker direction: an embedded-only query must at least walk a
+> variable-length relationship. A new query that the server would answer
+> wrongly has to be added here and to the pages by a person. It checks none of
+> the prose above -- what the server actually returns for `EA21` is unmeasured,
 > and no test can settle that without a 1.7.0 server to run it against.
 >
 > **Version labels, because this file carries two vintages.** Notes 1-9 are
@@ -883,8 +886,9 @@ upper hop limit or a more selective start
 ```
 
 **Reproduction:** install `samyama==1.8.0` and run any query with an
-unbounded `*0..` over the shipped fleet — `python -m pytest -q
-tests/test_correctness.py -k EA17` is enough. **11 tests fail on 1.8.0, 11 on
+unbounded `*0..` over the shipped fleet — this was measured before the
+workaround below, when `EA17` still carried one, with `python -m pytest -q
+tests/test_correctness.py -k EA17`. **11 tests fail on 1.8.0, 11 on
 1.9.0, none on 1.7.1.**
 
 **Why it bites here specifically.** The stage graph contains cycles — chains
@@ -897,10 +901,12 @@ Three builds, three behaviours, one pattern.
 
 **Workaround, as of 2026-09-30: the walks are bounded, and it is not enough.**
 `EA17` and `EA21` now walk `NEXT_STAGE*0..8` (`benchmarks/catalog/subjects.py`,
-`MAX_STAGE_HOPS`). 8 is measured: the deepest chain reachable from any sensor
-on the shipped fleet is **5 hops** (median 4, across 14 sensors), so every
-answer is complete well inside it, and `tests/test_bounded_walks.py` compares
-bounded against unbounded row for row rather than trusting that.
+`MAX_STAGE_HOPS`). 8 is measured rather than guessed -- the measurement and
+its date are written once, beside the constant in
+`benchmarks/catalog/subjects.py`, and are not repeated here so they cannot
+drift apart. The claim that the bound costs no answer is not carried by prose
+in either place: `tests/test_bounded_walks.py` re-measures the fleet against
+the bound and compares both queries bounded against unbounded, row for row.
 
 On 1.9.0 the bound fixes **`EA21`** — it runs and returns the same ranking.
 It does **not** fix `EA17`:
@@ -923,11 +929,12 @@ entirely, and it is what any future engine upgrade would have needed anyway.
 
 **What a bound costs, for the record.** `pyproject.toml`
 declares `samyama>=1.7.1,<1.8`, which buys reproducibility and fixes nothing.
-Bounding the walks changes what they answer — `EA17` reports how *deep* the
-blast radius goes, and a cap silently truncates that — so it is a
-query-design decision, not a version bump. Until it is taken, raising the
-ceiling means shipping two queries that cannot run on the engine a new user
-installs.
+The walks are bounded now (the workaround above), and bounding is what made
+that argument testable rather than settling it: a cap silently truncates how
+*deep* `EA17` says the blast radius goes, which is why `MAX_STAGE_HOPS` sits
+above the fleet's deepest chain and a test fails if the fleet grows into it.
+On 1.8+ the bound is still not enough for `EA17`, so raising the ceiling would
+mean shipping a query that times out on the engine a new user installs.
 `tests/test_engine_version.py::test_the_declared_spec_excludes_the_releases_that_refuse_our_queries`
 fails if the ceiling disappears, or is widened to admit 1.8.0 again.
 

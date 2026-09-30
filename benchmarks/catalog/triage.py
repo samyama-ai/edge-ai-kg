@@ -232,7 +232,7 @@ ORDER BY on_recalled_board DESC
         # by design -- the catalog's set is three ids, but the 3am case this
         # is written for is twenty or more, and the rows past the twentieth
         # are the ones nobody pages on.
-        "cypher": """
+        "cypher": ("""
 MATCH (s:Sensor)
 WHERE s.id IN {alerts}
 OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
@@ -242,7 +242,6 @@ WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
 RETURN alert, downstream_alerts, reaches
 ORDER BY downstream_alerts DESC
 LIMIT 20
-""".replace("{alerts}", alert_list(EA21_ALERTS))
-   .replace("{hops}", str(MAX_STAGE_HOPS)),
+""".replace("{alerts}", alert_list(EA21_ALERTS)).replace("{hops}", str(MAX_STAGE_HOPS))),
     },
 ]
