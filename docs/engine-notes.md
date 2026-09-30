@@ -395,6 +395,20 @@ nodes, and after the generator was fixed and the graph reloaded, **every Sensor
 still reported the stale blob** even though the source data no longer contained
 it. It looked like the fix had failed.
 
+**And again, 2026-09-30, as the whole of #114.** Loading `--layers real` onto
+a server that had held the full fleet brought the generated cost model's
+`fits`, `latency_ms` and `accelerator_kind` back onto the 73 MLPerf Tiny
+`Deployment` nodes -- which `etl/real_layer.py` has never written in any
+revision. 27 of 73 then matched `d.fits = 1`, and `EA10` and `EA12` returned
+5 rows each where a fresh server returns none. That was read for three weeks
+as an embedded/server *divergence*; it is this note. The same sequence on
+embedded 1.7.1 stays clean, because this note does not reproduce there.
+Measured in full under "The real-layer sweep, both builds" below.
+
+**That is the severity line above, made concrete:** generated numbers landed
+on nodes stamped `provenance: "real"`, the loader's verification passed, and
+nothing errored. `DATASET_CARD.md` promises the opposite.
+
 **Workaround:** `DETACH DELETE` is not a reset. To genuinely reset a graph,
 stop the server and start it against a fresh data directory:
 
@@ -694,12 +708,18 @@ query had to change.
 
 ## The real-layer sweep, both builds, 2026-09-30 (#114)
 
-Not an engine note -- it is the measurement that **closed** one. #114 recorded
-three queries answering differently on `--layers real` between the builds:
-`EA08` returning fewer rows embedded, `EA10` and `EA12` returning none. Re-run
-against both, they are identical, so there is nothing to write a note about.
-It is recorded here because it overturns a figure that stood in `README.md`
-from 2026-09-09, and a figure that overturns another has to be repeatable.
+#114 recorded three queries answering differently on `--layers real` between
+the builds: `EA08` returning fewer rows embedded, `EA10` and `EA12` returning
+none. On a **freshly started** server the two builds are identical. On a
+server that has previously held the full fleet they are not, and the
+difference is **note 8** -- which is the answer #114 was looking for, and is
+measured below.
+
+> **This sweep assumes a server started from nothing.** `docker run --rm`, or
+> a deleted data directory. `etl/loader.py --reset` is not enough: it issues
+> `MATCH (n) DETACH DELETE n`, and note 8 says the column store survives that
+> on this build. Run the sweep against a reused server and `EA10` and `EA12`
+> return rows.
 
 **How to repeat it.**
 
@@ -742,9 +762,54 @@ in count: `['CPU', 'ONNX Runtime', 296]`, `['GPU-CUDA', 'ONNX Runtime', 237]`,
 true: the real layer has no `Sensor`, so its opening `MATCH` binds nothing and
 `size(r)` is never evaluated. On the **full** graph it raises.
 
+### The reused server, measured 2026-09-30 -- this is what #114 saw
+
+The sweep above starts from `docker run --rm`. Run the same real-layer load
+onto a server that already held the full fleet, which is what a `--url` user
+gets the second time they load:
+
+```bash
+python -m etl.loader --url http://127.0.0.1:18080 --layers all    # 25,162 nodes
+python -m etl.loader --url http://127.0.0.1:18080 --layers real   # resets, then 1,240
+```
+
+The second load verifies 1,240 nodes and 2,478 edges -- the real layer, and
+nothing left over. But its 73 MLPerf `Deployment` nodes come back carrying
+properties `etl/real_layer.py` never wrote:
+
+```
+d.id              d.fits  d.accelerator_kind  d.latency_ms
+tiny:v1.2:0017    1       GPU-Embedded        0.52
+tiny:v1.2:0066    0       NPU-Pro             12.792
+tiny:v1.2:0019    1       GPU-Embedded        0.596
+```
+
+27 of the 73 match `d.fits = 1`. **`EA10` returns 5 rows and `EA12` returns 5
+rows**, where a fresh server returns none of each. That is the 2026-09-09
+figure, reproduced on demand.
+
+**It is note 8**, and the same sequence run against embedded 1.7.1 -- full
+fleet, reset, real layer -- leaves `fits` and `accelerator_kind` `NULL` and
+both queries empty. The 1.7.0 server's column store outlives
+`DETACH DELETE`; the embedded 1.7.1 build's does not.
+
+| | fresh graph | over a previous full fleet |
+|---|---|---|
+| embedded 1.7.1 | `EA10` 0, `EA12` 0 | `EA10` 0, `EA12` 0 |
+| server 1.7.0 | `EA10` 0, `EA12` 0 | **`EA10` 5, `EA12` 5** |
+
+**Why this is worse than a row count.** The resurrected values are the
+generated cost model's -- `fits`, `latency_ms`, `accelerator_kind` -- landing
+on nodes stamped `provenance: "real"` and built from published MLPerf Tiny
+submissions. `DATASET_CARD.md` promises that no generated number is attached
+to a real part. On a reused 1.7.0 server, `--layers real` breaks that promise
+without erroring, and the loader's own verification passes.
+
 **What this does not cover.** Only the real layer, and only rows-vs-empty plus
 the one query compared row for row. The full-graph divergences in note 12
-stand unchanged.
+stand unchanged. Nobody has checked which *other* labels inherit columns this
+way -- `Deployment` is where it was noticed because `EA10` and `EA12` filter
+on one of them.
 
 ---
 

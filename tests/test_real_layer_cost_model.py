@@ -19,18 +19,24 @@ properties the real layer has never had.
 So they are **generated-layer queries**: the same kind of absence the README
 already documents for the six clinical-spine labels, not a divergence.
 
-**The server half is measured too, and there is no divergence.** On
-2026-09-30 the real layer was loaded into `ghcr.io/samyama-ai/samyama-graph:1`
-(the 1.7.0 image the notes describe) and every catalog query run against it.
-It returns exactly what embedded 1.7.1 returns -- the same six queries with
-rows, the same row counts, and `EA08` row-for-row identical. So #114's
-premise was a measurement error: nothing on the real layer disagrees between
-the builds.
+**The server half is measured too, and the divergence is real -- it is
+engine note 8.** On 2026-09-30 the real layer was loaded into
+`ghcr.io/samyama-ai/samyama-graph:1` (the 1.7.0 image the notes describe) two
+ways. Into a *fresh* server it returns exactly what embedded 1.7.1 returns,
+`EA08` row-for-row included. Onto a server that had previously held the full
+fleet, the 73 MLPerf `Deployment` nodes come back carrying the generated cost
+model's `fits`, `latency_ms` and `accelerator_kind` -- note 8, which embedded
+1.7.1 fixed and the server did not -- and `EA10` and `EA12` return 5 rows
+each. That is what #114 recorded, so its figure was right and its diagnosis
+was the thing that was missing.
 
-That measurement cannot live in this suite, because it needs a container. It
-lives in `docs/engine-notes.md` with its reproduction, the way every other
-server measurement here does. What this module pins is the half that runs
-everywhere:
+Everything below is about a graph loaded from nothing, which is what this
+suite builds. The resurrection case cannot be reproduced embedded at all.
+
+Those measurements cannot live in this suite, because they need a container.
+They live in `docs/engine-notes.md` with their reproductions, the way every
+other server measurement here does. What this module pins is the half that
+runs everywhere:
 
 - no real `Deployment` carries a cost-model field, and a generated one
   carries all four (the anti-vacuity half);
@@ -40,11 +46,12 @@ everywhere:
   source files;
 - embedded 1.7.1's semantics for a comparison against a missing property.
 
-That last one is not decoration. The server **agrees** on `= 1` and
-**disagrees** on `<> 1`, which is engine note 8b still being live there after
-the embedded build fixed it -- found by running this probe against both. The
-`= 1` half is why #114 closed as a measurement error rather than as an engine
-defect.
+That last one is not decoration. Run against both builds (with `n.v` rather
+than `n.fits`, on a probe node of its own -- note 8b's section has that
+table), the server **agrees** on `= 1` and **disagrees** on `<> 1`: engine
+note 8b still live there after the embedded build fixed it. The `= 1` half is
+why a *fresh* server answers `EA10` and `EA12` the same way embedded does,
+and note 8 is why a reused one does not.
 """
 from __future__ import annotations
 
@@ -276,8 +283,21 @@ def test_ea08_on_the_real_layer_matches_a_ground_truth_computed_in_python(
 
     expected = sorted(((kind, runtime, len(ops))
                        for (kind, runtime), ops in operators.items()),
-                      key=lambda row: -row[2])[:20]
+                      key=lambda row: -row[2])
     assert expected, "the real layer has no accelerator/runtime pair with kernels"
+    # `EA08` ends `ORDER BY operators DESC LIMIT 20`. While there are fewer
+    # than 20 pairs the limit never bites and both sides are the whole answer.
+    # Once there are 20 or more, a tie at the cutoff lets the engine and this
+    # recount keep *different* rows -- both correct, and the comparison below
+    # would fail for that rather than for a disagreement. So the limit is
+    # asserted away rather than reproduced: upstream growing the real layer
+    # past 20 accelerator/runtime pairs fails here with this message instead
+    # of an unreadable row diff.
+    assert len(expected) < 20, (
+        f"the real layer now has {len(expected)} accelerator/runtime pairs, so "
+        f"EA08's LIMIT 20 bites and a tie at the cutoff would make this "
+        f"comparison unreliable. Compare the top rows by count instead of "
+        f"comparing the whole answer.")
 
     got = [tuple(row) for row in client.query(BY_ID["EA08"]["cypher"], GRAPH).records]
     assert sorted(got) == sorted(tuple(row) for row in expected), (
@@ -309,17 +329,25 @@ def test_a_comparison_against_a_missing_property_matches_nothing(
 
     Run against a probe node rather than a `Deployment`, so it says what the
     engine does rather than what this graph happens to hold, and so the same
-    lines can be pasted at a server. They were: the 1.7.0 server agrees on
-    `= 1` -- which is what settled #114, since `EA10` and `EA12` could not
-    have returned rows there either -- and **disagrees on `<> 1`**, matching
-    the missing row. That is engine note 8b, which this file's banner had
-    listed as gone; it is gone on embedded and live on the server.
+    lines can be pasted at a server. They were, using `n.v` on a probe node of
+    its own: the 1.7.0 server agrees on `= 1` -- which is why a freshly
+    started server answers `EA10` and `EA12` exactly as embedded does -- and
+    **disagrees on `<> 1`**, matching the row whose property is absent. That
+    is engine note 8b, which `docs/engine-notes.md`'s banner had listed as
+    gone; it is gone on embedded and live on the server.
 
     So the `<> 1` assertion below is not symmetry for its own sake. It is the
     one that would notice the embedded build regressing to what the server
     still does.
     """
     client, _fleet = real_only
+    # This writes into the module-scoped graph the other tests read. The
+    # `finally` below removes the node, but by engine note 8 its property
+    # *columns* outlive the delete on some builds -- which is this module's
+    # own subject matter. `CostModelProbe` and `fits` are chosen so that even
+    # a resurrected column lands on a label nothing else here matches; if a
+    # later test in this file starts creating nodes, give it a label of its
+    # own rather than assuming this ran last.
     client.query('CREATE (:CostModelProbe {id: "probe:1"})', GRAPH)
     try:
         def ids(clause):

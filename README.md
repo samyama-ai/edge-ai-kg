@@ -142,18 +142,30 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA20`, `EA21` |
 
-**That table is measured on both**, on 2026-09-30: `tests/test_real_layer_shape.py`
-re-runs every query against the **embedded** build on each test run, and the
-same real layer was loaded into `ghcr.io/samyama-ai/samyama-graph:1` — the
-1.7.0 image [the engine notes](docs/engine-notes.md) describe — and swept
-query by query. The two agree exactly: same six queries with rows, same row
-counts, and `EA08` row-for-row identical (`CPU`/`ONNX Runtime`/296,
-`GPU-CUDA`/237, `GPU-DirectML`/205). The sweep, its command and its digest are
-[in the engine notes](docs/engine-notes.md).
+**That table is measured on both**, on 2026-09-30 — and it assumes a
+**freshly started server**. `tests/test_real_layer_shape.py` re-runs every
+query against the embedded build each test run, and the same real layer was
+loaded into `ghcr.io/samyama-ai/samyama-graph:1` — the 1.7.0 image
+[the engine notes](docs/engine-notes.md) describe, started with
+`docker run --rm` — and swept query by query. The two agree exactly: same six
+queries with rows, same counts, and `EA08` row-for-row identical
+(`CPU`/`ONNX Runtime`/296, `GPU-CUDA`/237, `GPU-DirectML`/205).
 
-That settles **#114**, which doubted an older figure: a 2026-09-09 server
-sweep had put `EA10` and `EA12` in the *returning rows* side, and nothing
-since reproduced it. **Its premise was a measurement error.**
+> **On a reused server it is not this table.** `--reset` is not a reset on the
+> 1.7.0 build: it issues `MATCH (n) DETACH DELETE n`, and
+> [engine note 8](docs/engine-notes.md) says the column store survives that.
+> Load the full fleet and then `--layers real`, and the 73 MLPerf `Deployment`
+> nodes come back carrying the *generated* cost model's `fits`, `latency_ms`
+> and `accelerator_kind`. 27 of 73 then match `d.fits = 1`, and `EA10` and
+> `EA12` return 5 rows each. To get the table above, start the server from an
+> empty data directory. This is measured, not inferred.
+
+**That settles #114**, and not the way this section used to claim. The
+2026-09-09 sweep that put `EA10` and `EA12` in the *returning rows* side was
+not a mistake — it was a server that had held the full fleet, and the
+divergence it recorded is real. It is **engine note 8**, which embedded 1.7.1
+fixed and the 1.7.0 server did not, showing up as two queries that read a
+property the real layer does not have.
 
 Why `EA10` and `EA12` cannot return rows on either build: both filter
 `WHERE d.fits = 1`, and the real layer's 73 `Deployment` nodes are MLPerf Tiny

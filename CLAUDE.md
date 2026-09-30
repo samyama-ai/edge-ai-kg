@@ -207,13 +207,20 @@ raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
 so a downgrade fails loudly.
 
 **An embedded/server divergence was recorded on the real layer** for `EA08`,
-`EA10` and `EA12` (README, "What the real layer alone can answer"). **It was a
-measurement error.** Re-measured 2026-09-30 by loading the real layer into
-`ghcr.io/samyama-ai/samyama-graph:1` and running the catalog: the 1.7.0 server
-returns exactly what embedded 1.7.1 returns, `EA08` included. `EA10` and
-`EA12` are empty on both because they filter `WHERE d.fits = 1` and `fits`
-comes from the cost model in `etl/generate.py`, which never runs for the real
-layer. `tests/test_real_layer_cost_model.py` pins that, deriving the pair by
+`EA10` and `EA12` (README, "What the real layer alone can answer"). **It is
+real, and it is engine note 8.** Measured 2026-09-30: into a *freshly started*
+`ghcr.io/samyama-ai/samyama-graph:1` the server answers the whole catalog
+exactly as embedded 1.7.1 does, `EA08` included. Onto a server that had held
+the full fleet, `--layers real` brings the generated cost model's `fits`,
+`latency_ms` and `accelerator_kind` back onto the 73 MLPerf `Deployment`
+nodes, and `EA10` and `EA12` return 5 rows each. `--reset` issues
+`DETACH DELETE`, which note 8 says the column store survives. **Treat
+`--layers real` over HTTP as needing a fresh data directory**, not a reset.
+
+On a graph loaded from nothing, `EA10` and `EA12` are empty on both builds
+because they filter `WHERE d.fits = 1` and `fits` comes from the cost model in
+`etl/generate.py`, which never runs for the real layer.
+`tests/test_real_layer_cost_model.py` pins that, deriving the pair by
 stripping the predicate rather than naming it — four other queries mention
 `fits` and are empty for other reasons.
 
