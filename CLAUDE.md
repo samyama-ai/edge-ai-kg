@@ -206,11 +206,32 @@ raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
 `tests/test_engine_version.py` checks the floor and re-runs that reproduction,
 so a downgrade fails loudly.
 
-**One embedded/server divergence does survive**, and it is not notes 10 and 11:
-on the real layer the embedded build answers `EA08`, `EA10` and `EA12`
-differently from the server (README, "What the real layer alone can answer").
-Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
-why it is not an engine note — nothing here tells you a shape to avoid.
+**An embedded/server divergence was recorded on the real layer** for `EA08`,
+`EA10` and `EA12` (README, "What the real layer alone can answer"). **The
+`EA10`/`EA12` half is real and is engine note 8. The `EA08` half is
+unexplained** -- it returns the same three rows on a fresh server, a reused
+one and embedded, and note 8 resurrects property columns, which `EA08` does
+not read. Measured 2026-09-30: into a *freshly started*
+`ghcr.io/samyama-ai/samyama-graph:1` the server answers the whole catalog
+exactly as embedded 1.7.1 does, `EA08` included. Onto a server that had held
+the full fleet, `--layers real` brings the generated cost model's `fits`,
+`latency_ms` and `accelerator_kind` back onto the 73 MLPerf `Deployment`
+nodes, and `EA10` and `EA12` return 5 rows each. `--reset` issues
+`DETACH DELETE`, which note 8 says the column store survives. **Treat
+`--layers real` over HTTP as needing a fresh data directory**, not a reset.
+
+On a graph loaded from nothing, `EA10` and `EA12` are empty on both builds
+because they filter `WHERE d.fits = 1` and `fits` comes from the cost model in
+`etl/generate.py`, which never runs for the real layer.
+`tests/test_real_layer_cost_model.py` pins that, deriving the pair by
+stripping the predicate rather than naming it — four other queries mention
+`fits` and are empty for other reasons.
+
+The probe that settled it did find a live one: **note 8b is not gone on the
+server.** `n.v <> 1` matches a node with no `v` there and does not on embedded
+1.7.1, where `docs/engine-notes.md`'s banner lists 8b among the behaviours
+that no longer reproduce. Keep writing the `IS NOT NULL` guard -- `EA17`
+already has it and it is load-bearing, not leftover.
 
 **Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
 13 and 13b return wrong rows rather than erroring; note 12 does both, and which

@@ -120,7 +120,12 @@ def verify_edges(client, graph: str, edges) -> list[tuple[str, int, int]]:
                    "populated graph --no-reset mints every id twice; ids are not "
                    "unique-constrained so the write is accepted, but the "
                    "duplicates then multiply edges and the load does not "
-                   "complete.")
+                   "complete. NOTE: over --url on samyama 1.7.0 this is not a "
+                   "real reset -- engine note 8, the property columns survive "
+                   "DETACH DELETE, so a --layers real load onto a server that "
+                   "held the full fleet puts generated cost-model values on "
+                   "MLPerf nodes and --verify still passes. Start the server "
+                   "from an empty data directory instead.")
 @click.option("--layers", type=click.Choice(["all", "real", "synthetic"]),
               default="all", show_default=True,
               help="Load the real public-source subgraph, the generated fleet, or both.")

@@ -134,7 +134,7 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 6 of the 21 catalog queries return rows**, 15 come
+**On both builds, 6 of the 21 catalog queries return rows**, 15 come
 back empty, none error:
 
 | | Queries |
@@ -142,22 +142,75 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA20`, `EA21` |
 
-**The embedded build still answers three of them differently** on the same
-data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
-6 and 10. That is a divergence beyond
-[engine notes 10 and 11](docs/engine-notes.md),
-and **it is the one thing the 1.7.1 upgrade did not fix**: re-measured on
-2026-09-08 against `samyama` 1.7.1, the embedded split is unchanged at
-`EA05, EA08, EA13, EA14, EA15, EA16` returning rows and the other ten empty,
-none erroring. The table above is the server's answer, which is the one a
-`--url` user sees.
+**That table is measured on both**, on 2026-09-30 — and it assumes a
+**freshly started server**. `tests/test_real_layer_shape.py` re-runs every
+query against the embedded build each test run, and the same real layer was
+loaded into `ghcr.io/samyama-ai/samyama-graph:1` — the 1.7.0 image
+[the engine notes](docs/engine-notes.md) describe, started with
+`docker run --rm` — and swept query by query. The two agree exactly: same six
+queries with rows, same counts, and `EA08` row-for-row identical
+(`CPU`/`ONNX Runtime`/296, `GPU-CUDA`/237, `GPU-DirectML`/205).
 
-So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
-divergence remains open behind them. It is tracked in **#114**, which carries
-the measurement and what would close it. It is not written up as an engine
-note because it has **no minimal reproduction yet** — only the whole real
-layer and a different row count — and a note without one would imply a shape
-someone could avoid.
+> **On a reused server it is not this table.** `--reset` is not a reset on the
+> 1.7.0 build: it issues `MATCH (n) DETACH DELETE n`, and
+> [engine note 8](docs/engine-notes.md) says the column store survives that.
+> Load the full fleet and then `--layers real`, and the 73 MLPerf `Deployment`
+> nodes come back carrying the *generated* cost model's `fits`, `latency_ms`
+> and `accelerator_kind`. 27 of 73 then match `d.fits = 1`, and `EA10` and
+> `EA12` return 5 rows each. To get the table above, start the server from an
+> empty data directory. This is measured, not inferred.
+
+**That accounts for the `EA10` and `EA12` half of #114**, and not the way
+this section used to claim. The older sweep that put them in the *returning
+rows* side was not a mistake — it was a server that had held the full fleet.
+The divergence is real, and it is **engine note 8**, which embedded 1.7.1
+fixed and the 1.7.0 server did not, showing up as two queries that read a
+property the real layer does not have.
+
+Two records of that sweep disagreed, so this says which is trusted: this
+README listed `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16`
+as returning rows at `578171d` (2026-09-02), and a later edit cut the table to
+six while leaving the server heading on it. The reused-server run above
+returns rows for exactly those eight ids, so the `578171d` table is the one
+that matches a measurement and the later table was the embedded set under the
+wrong heading.
+
+**`EA08` is the part that stays unexplained.** #114 also recorded it returning
+fewer rows embedded than over HTTP. It returns the same three rows on a fresh
+server, a reused one and embedded, and note 8 gives no mechanism — it brings
+back property columns, and `EA08` reads none. That half has no reproduction.
+
+**Nothing re-runs the server half of the table above.** The embedded column is
+re-measured by `tests/test_real_layer_shape.py` on every test run; the server
+column was measured once, by hand, with its command recorded in the engine
+notes. Read the heading as "measured on both", not as "checked on both by
+CI".
+
+Why `EA10` and `EA12` cannot return rows on either build: both filter
+`WHERE d.fits = 1`, and the real layer's 73 `Deployment` nodes are MLPerf Tiny
+submission rows carrying `round`, `division`, `availability`,
+`throughput_inf_s`, `accuracy` and `energy_uj_per_inf`. `fits` is written by
+the cost model in `etl/generate.py` and nowhere else — no revision of
+`etl/real_layer.py` has ever written it — and `EA10` reads four more of the
+same cost-model properties. Four other queries mention `fits` as well, but
+they are empty for a different reason; `EA10` and `EA12` are the only two that
+**start returning rows once the filter is removed**, which
+`tests/test_real_layer_cost_model.py` derives rather than asserts. **They are
+generated-layer queries**, the same kind of absence as the six empty
+clinical-spine labels above.
+
+`EA08` was the third query #114 named, and neither build is wrong about it:
+both return the rows a recount in Python produces from the same source files.
+Only ONNX Runtime registers kernels in the real layer and no `NPU`
+accelerator has any, so three pairs is the whole answer.
+
+The probe that settled this found something else, which **is** an engine note:
+the 1.7.0 server agrees with embedded on `n.fits = 1` and **disagrees on
+`n.fits <> 1`**, matching the row whose property is absent.
+[Engine note 8b](docs/engine-notes.md) is live on the server and fixed on
+embedded 1.7.1, where that file's banner had listed it as gone. The rule it
+prescribes still has to be **followed** — `EA17` already carries the
+`IS NOT NULL` guard, and it is load-bearing rather than leftover.
 
 `EA01` and `EA02` are empty rather than erroring here, on both builds — and were
 before the upgrade too. Note 10 made them raise on the old embedded build, but

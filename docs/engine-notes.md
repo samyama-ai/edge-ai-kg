@@ -22,7 +22,10 @@ rest. The banner below gives what has been re-measured since, and when.
 >   would return 90,000 rows instead of 300. The sub-behaviours the rules
 >   below depend on -- 3b (only the first `ORDER BY` key), 4b (an int
 >   property against a float literal) and 8b (`<>` matching nulls) -- are
->   separate probes and are gone too.
+>   separate probes and are gone too. **8b with one correction, added
+>   2026-09-30: it is gone on the embedded build and still live on the 1.7.0
+>   server.** The probe runs embedded; `--url` is a documented path, so the
+>   rule under 8b still has to be followed. See the note itself.
 >
 > **Newer than the re-measurement above, and not part of it:** notes 12, 13
 > and 13b, section **3c** (`ORDER BY` after `UNION ALL`) and the
@@ -392,6 +395,20 @@ nodes, and after the generator was fixed and the graph reloaded, **every Sensor
 still reported the stale blob** even though the source data no longer contained
 it. It looked like the fix had failed.
 
+**And again, 2026-09-30, as the whole of #114.** Loading `--layers real` onto
+a server that had held the full fleet brought the generated cost model's
+`fits`, `latency_ms` and `accelerator_kind` back onto the 73 MLPerf Tiny
+`Deployment` nodes -- which `etl/real_layer.py` has never written in any
+revision. 27 of 73 then matched `d.fits = 1`, and `EA10` and `EA12` returned
+5 rows each where a fresh server returns none. That was read for three weeks
+as an embedded/server *divergence*; it is this note. The same sequence on
+embedded 1.7.1 stays clean, because this note does not reproduce there.
+Measured in full under "The real-layer sweep, both builds" below.
+
+**That is the severity line above, made concrete:** generated numbers landed
+on nodes stamped `provenance: "real"`, the loader's verification passed, and
+nothing errored. `DATASET_CARD.md` promises the opposite.
+
 **Workaround:** `DETACH DELETE` is not a reset. To genuinely reset a graph,
 stop the server and start it against a fresh data directory:
 
@@ -406,10 +423,48 @@ node's property *schema*. Changing values is fine; removing a property is not.
 
 ### 8b. `<>` against a null property matches
 
+> **Live on the 1.7.0 server, fixed on embedded 1.7.1.** The banner at the top
+> of this file lists 8b among the sub-behaviours that "are gone too". That is
+> true of the embedded build and **not** of the server, measured 2026-09-30
+> while closing #114. `--url` is a documented first-class path, so the rule
+> below still has to be followed.
+
 `WHERE s._chain <> ""` returns rows where `s._chain` is null. Standard Cypher
 would treat `null <> ""` as null and filter the row out. Use an explicit
 `IS NULL` / `IS NOT NULL` check instead of inequality when a property may be
 absent.
+
+**Measured on both builds**, three nodes — `{id: "has", v: 1}`,
+`{id: "other", v: 2}` and `{id: "missing"}` with no `v`:
+
+| `MATCH (n:P) WHERE …` | embedded 1.7.1 | server 1.7.0 |
+|---|---|---|
+| `n.v = 1` | `has` | `has` |
+| `n.v <> 1` | `other` | **`missing`, `other`** |
+| `n.v <> 2` | `has` | **`has`, `missing`** |
+| `n.v IS NOT NULL AND n.v <> 1` | `other` | `other` |
+| `NOT n.v = 1` | `other` | **`Type error: NOT requires boolean`** |
+
+Three things worth separating. The `=` half is correct on both, which is why
+#114 closed the way it did — a query filtering `d.fits = 1` returns nothing on
+either build when `fits` is absent. The **workaround works on both**, so
+`EA17`'s `o.id IS NOT NULL AND o.id <> {subject}` guard
+(`benchmarks/catalog/alerting.py`) is not decoration. `EA21` is the query that
+does *not* carry that guard and does not need it: it writes
+`o.id IN {alerts} AND o.id <> s.id`, and `benchmarks/catalog/triage.py`
+records why — membership in the alert list already excludes a null id, so the
+guard was measured inert there. Whether `IN` behaves the same way on the
+server is **unmeasured**; `EA21` is embedded-only for note 12's reasons
+anyway, so nothing turns on it today. And `NOT x = y` is not a substitute on
+the server, which rejects it outright rather than treating the null as false —
+the server's `NOT` requires a boolean, and `null` is not one.
+
+```python
+c.query('CREATE (:P {id: "missing"})', "default")
+c.query("MATCH (n:P) WHERE n.v <> 1 RETURN n.id", "default")
+# server 1.7.0:   [["missing"]]
+# embedded 1.7.1: []
+```
 
 ---
 
@@ -648,6 +703,128 @@ never needed. The distinction was the useful part: *fix deferred* and *no fix
 known* are different states, and recording which one this was is what let #56
 weigh "rewrite the query" against "reconcile the builds" instead of assuming the
 query had to change.
+
+---
+
+## The real-layer sweep, both builds, 2026-09-30 (#114)
+
+#114 recorded three queries answering differently on `--layers real` between
+the builds: `EA08` returning fewer rows embedded, `EA10` and `EA12` returning
+none. On a **freshly started** server the two builds are identical. On a
+server that has previously held the full fleet they are not, and the
+difference is **note 8** -- which is the answer #114 was looking for, and is
+measured below.
+
+> **This sweep assumes a server started from nothing.** `docker run --rm`, or
+> a deleted data directory. `etl/loader.py --reset` is not enough: it issues
+> `MATCH (n) DETACH DELETE n`, and note 8 says the column store survives that
+> on this build. Run the sweep against a reused server and `EA10` and `EA12`
+> return rows.
+
+**How to repeat it.**
+
+```bash
+docker run -d --rm -p 18080:8080 ghcr.io/samyama-ai/samyama-graph:1
+python -m etl.loader --url http://127.0.0.1:18080 --layers real
+python - <<'EOF'
+from samyama import SamyamaClient
+from benchmarks.queries import BY_ID
+c = SamyamaClient.connect("http://127.0.0.1:18080")
+for qid in sorted(BY_ID):
+    print(qid, len(c.query(BY_ID[qid]["cypher"], "default").records))
+EOF
+```
+
+Image `ghcr.io/samyama-ai/samyama-graph:1`, digest
+`sha256:dbfb918ed723888ff36e5ae9979450ec7a5a8785ce140a7a02ef69ec54b78b39`
+(the same layer as the `1.7` tag), which reports itself as 1.7.0. The loader
+verified 1,240 nodes and 2,478 of 2,478 intended edges across 11 types.
+Embedded side: `samyama` 1.7.1, the graph built by
+`tests/test_real_layer_shape.py`'s `real_only` fixture.
+
+**Row counts, all 21 queries, both builds:**
+
+| | server 1.7.0 | embedded 1.7.1 |
+|---|---:|---:|
+| `EA05` | 3 | 3 |
+| `EA08` | 3 | 3 |
+| `EA13` | 20 | 20 |
+| `EA14` | 12 | 12 |
+| `EA15` | 20 | 20 |
+| `EA16` | 1 | 1 |
+| `EA01`-`EA04`, `EA06`, `EA07`, `EA09`-`EA12`, `EA17`-`EA21` | 0 | 0 |
+
+Nothing errored on either build. `EA08`'s rows are identical, not merely equal
+in count: `['CPU', 'ONNX Runtime', 296]`, `['GPU-CUDA', 'ONNX Runtime', 237]`,
+`['GPU-DirectML', 'ONNX Runtime', 205]`.
+
+`EA17` does not raise here, which note 12 says it does on the server. Both are
+true: the real layer has no `Sensor`, so its opening `MATCH` binds nothing and
+`size(r)` is never evaluated. On the **full** graph it raises.
+
+### The reused server, measured 2026-09-30 -- this is what #114 saw
+
+The sweep above starts from `docker run --rm`. Run the same real-layer load
+onto a server that already held the full fleet, which is what a `--url` user
+gets the second time they load:
+
+```bash
+python -m etl.loader --url http://127.0.0.1:18080 --layers all    # 25,162 nodes
+python -m etl.loader --url http://127.0.0.1:18080 --layers real   # resets, then 1,240
+```
+
+The second load verifies 1,240 nodes and 2,478 edges -- the real layer, and
+nothing left over. But its 73 MLPerf `Deployment` nodes come back carrying
+properties `etl/real_layer.py` never wrote:
+
+```
+d.id              d.fits  d.accelerator_kind  d.latency_ms
+tiny:v1.2:0017    1       GPU-Embedded        0.52
+tiny:v1.2:0066    0       NPU-Pro             12.792
+tiny:v1.2:0019    1       GPU-Embedded        0.596
+```
+
+27 of the 73 match `d.fits = 1`. **`EA10` returns 5 rows and `EA12` returns 5
+rows**, where a fresh server returns none of each.
+
+The whole catalog was run in that state. Exactly eight queries return rows --
+`EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` -- which is the
+set `README.md` carried at `578171d` (2026-09-02) under "Against the HTTP
+server", query for query. The reconstruction is not an argument that this is
+what happened; it is the same eight ids.
+
+**`EA08` is not explained by this, and is not explained at all.** It returns
+the same three rows -- `CPU`/296, `GPU-CUDA`/237, `GPU-DirectML`/205 -- on a
+fresh server, on a reused one, and embedded. Note 8 resurrects property
+*columns*, not edges, and `EA08` reads `Accelerator.kind` and `Runtime.name`,
+which real-layer nodes carry anyway, so there is no mechanism here for it to
+bite. #114's record of "`EA08` returns fewer rows embedded" has no
+reproduction and no explanation. One candidate, **unmeasured**: `ORT_REF` was
+unpinned until #124 and kernel registrations drifted (734, 738, 743), so two
+runs taken weeks apart read different upstream data. Nothing here tests that.
+
+**It is note 8**, and the same sequence run against embedded 1.7.1 -- full
+fleet, reset, real layer -- leaves `fits` and `accelerator_kind` `NULL` and
+both queries empty. The 1.7.0 server's column store outlives
+`DETACH DELETE`; the embedded 1.7.1 build's does not.
+
+| | fresh graph | over a previous full fleet |
+|---|---|---|
+| embedded 1.7.1 | `EA10` 0, `EA12` 0 | `EA10` 0, `EA12` 0 |
+| server 1.7.0 | `EA10` 0, `EA12` 0 | **`EA10` 5, `EA12` 5** |
+
+**Why this is worse than a row count.** The resurrected values are the
+generated cost model's -- `fits`, `latency_ms`, `accelerator_kind` -- landing
+on nodes stamped `provenance: "real"` and built from published MLPerf Tiny
+submissions. `DATASET_CARD.md` promises that no generated number is attached
+to a real part. On a reused 1.7.0 server, `--layers real` breaks that promise
+without erroring, and the loader's own verification passes.
+
+**What this does not cover.** Only the real layer, and only rows-vs-empty plus
+the one query compared row for row. The full-graph divergences in note 12
+stand unchanged. Nobody has checked which *other* labels inherit columns this
+way -- `Deployment` is where it was noticed because `EA10` and `EA12` filter
+on one of them.
 
 ---
 
