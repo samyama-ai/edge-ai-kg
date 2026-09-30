@@ -23,8 +23,10 @@ from benchmarks.catalog import (
     BY_ID,
     EA17_SUBJECT,
     EA21_ALERTS,
+    MAX_STAGE_HOPS,
     QUERIES,
     retargeted_ea21,
 )
 
-__all__ = ["BY_ID", "EA17_SUBJECT", "EA21_ALERTS", "QUERIES", "retargeted_ea21"]
+__all__ = ["BY_ID", "EA17_SUBJECT", "EA21_ALERTS", "MAX_STAGE_HOPS", "QUERIES",
+           "retargeted_ea21"]

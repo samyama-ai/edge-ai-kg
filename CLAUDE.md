@@ -188,8 +188,11 @@ another: `pyproject.toml` then asked for `samyama>=0.6.0` (the old floor), pip
 resolved 0.6.1, and the notes were measured against a 1.7.0 server.
 
 `pyproject.toml` floors the engine at `samyama>=1.7.1` and caps it below 1.8
-(engine note 14: from 1.8.0 the planner refuses `EA17`'s and `EA21`'s
-unbounded walks, so they do not run at all). On 1.7.1 neither
+(engine note 14: from 1.8.0 the planner refused `EA17`'s and `EA21`'s
+then-unbounded walks outright. The walks carry `MAX_STAGE_HOPS` now, and
+**measured on 1.9.0** -- the newer of the two releases that refuse the
+unbounded form -- that is enough for `EA21`, while `EA17` times out at every
+bound deep enough to be complete, so the ceiling stays). On 1.7.1 neither
 reproduces embedded -- the same caveat as above: nothing here re-probed the
 server. `EA01`, `EA02` and `EA04` are correct under `pytest` and under
 `run_benchmark`, no test carries a #56 `xfail`, and #56's code half is closed.
@@ -240,22 +243,26 @@ variable-length relationship the embedded 1.7.1 build walks: it matches only
 the zero-length case, silently, and it *rejects* `size(r)` over such a
 relationship outright. `EA17` asks for `size(r)`, so on the server it **raises**
 -- which is why it is embedded-only rather than reshaped. **`EA21` is
-embedded-only for the other half of the same note**: it walks `NEXT_STAGE*0..`
-and never calls `size(r)`, so the server has nothing to reject. What it would
+embedded-only for the other half of the same note**: it walks `NEXT_STAGE`
+variable-length and never calls `size(r)`, so the server has nothing to reject. What it would
 return instead is **inferred from note 12, not measured** -- nobody has run
 `EA21` against a 1.7.0 server -- and the inference is that the walk matches
 only the zero-length case, making `x` the alerting sensor's own entry stage,
 so the count reads "other alerts feeding that same stage" rather than "other
 alerts downstream": wrong numbers that look like an answer. That is the
-dangerous half, and it is why the set is derived from the Cypher rather than
-from which queries happen to error. `EA07` walks a
+dangerous half, and it is why the set turns on how wrong the server's answer
+would be rather than on which queries happen to error. `EA07` walks a
 bounded `*0..3` without `size(r)`, so it runs; note 12 measured both builds
 returning byte-identical rows for it, which its `ORDER BY ... LIMIT 10` makes
-true on this graph and nothing enforces. That set is derived rather than asserted:
-`tests/test_correctness.py::test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk`
-fails if a new query carries an unbounded `*0..`, because this sentence,
-`README.md` and note 12 all name the same set -- it is what caught `EA21`
-joining it. Notes 13 and 13b were measured on embedded
+true on this graph and nothing enforces. That set is maintained by hand. It was
+derived from the Cypher until the walks were bounded (#126): the rule was
+"unbounded `*0..`", and with `EA17` and `EA21` now bounded, shape no longer
+separates them from `EA07`. What survives is the half that is still derivable
+-- `tests/test_correctness.py::test_every_embedded_only_query_walks_a_variable_length_relationship`
+fails if a query is called embedded-only without walking one at all -- plus
+this sentence, `README.md` and note 12 naming the same set, which is what
+caught `EA21` joining it. A new query that answers wrongly on the server has
+to be added here by a person. Notes 13 and 13b were measured on embedded
 1.7.1 while writing `EA18`: a `WHERE` on an `OPTIONAL MATCH` mentioning a
 **`WITH`-introduced** alias drops the unmatched rows, and an expression mixing
 a grouping key with an aggregate in one projection returns `NULL`. Note 13 has

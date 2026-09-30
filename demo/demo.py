@@ -15,11 +15,19 @@ The story, in seven beats:
 
 Beat 7 needs the embedded engine, for **two** reasons rather than one. It
 walks `EA17`, which the 1.7.0 server under-traverses and whose `size(r)` it
-rejects (engine note 12) -- and `TASKS_OVER_BUDGET`, below, has an unbounded
-`NEXT_STAGE*0..` walk of its own with the same problem. The guard that keeps
-the embedded-only set honest scans `QUERIES`, and this query is not in the
-catalog, so it cannot see it. If `EA17` is ever reshaped for the server, the
-`--url` skip still has to stay until this query is too.
+rejects (engine note 12) -- and `TASKS_OVER_BUDGET`, below, walks
+`NEXT_STAGE` variable-length too, which the server under-traverses the same
+way. If `EA17` is ever reshaped for the server, the `--url` skip still has to
+stay until this query is too.
+
+`TASKS_OVER_BUDGET` carries `MAX_STAGE_HOPS` like the catalog walks do, for
+engine note 14's reason. It is not in `QUERIES`, so the guard that keeps the
+walks bounded -- `tests/test_bounded_walks.py::test_every_walk_carries_the_bound`
+-- covers it by parsing this file's source and reading every Cypher-looking
+string literal out of the AST, `TASKS_OVER_BUDGET` among them. That scan also
+covers `mcp_server/server.py`, which builds its queries inside functions where
+nothing module-level holds them. The guard used to scan the catalog alone, and
+this query is exactly what that blind spot would have hidden.
 """
 from __future__ import annotations
 
@@ -31,7 +39,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from benchmarks.queries import BY_ID, EA17_SUBJECT
+from benchmarks.queries import BY_ID, EA17_SUBJECT, MAX_STAGE_HOPS
 from etl import generate as gen
 from etl import onnx_catalog as oc
 from etl.helpers import create_edges, create_nodes
@@ -104,14 +112,14 @@ def run(client, title: str, cypher: str, note: str = "") -> list:
 # over. `alert_sentence` reads a missing row as zero, which is why the
 # no-breach case has a test of its own.
 TASKS_OVER_BUDGET = """
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)
       -[:PRECEDES]->(m:Model)-[:SOLVES]->(t:ClinicalTask)-[:REQUIRES_SENSOR]->(s),
       (m)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
 WHERE s.id = "{subject}" AND d.latency_ms > t.latency_budget_ms
 WITH count(DISTINCT t.id) AS tasks_over_budget,
      count(DISTINCT d.id) AS deployments_over_budget
 RETURN tasks_over_budget, deployments_over_budget
-""".replace("{subject}", EA17_SUBJECT)
+""".replace("{subject}", EA17_SUBJECT).replace("{hops}", str(MAX_STAGE_HOPS))
 
 
 def _plural(count: int, noun: str) -> str:

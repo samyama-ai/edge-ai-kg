@@ -559,7 +559,7 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # Engine note 12: that build does not traverse a variable-length relationship
 # and rejects `size(r)` on one. `docs/engine-notes.md`, `CLAUDE.md` and
 # `README.md` all state which queries these are -- until this test existed
-# that was prose, so a new query with an unbounded walk would have made three
+# that was prose, so a new query walking that shape would have made three
 # pages wrong at once and nothing would have said so. `EA21` is the second
 # member, and this guard is what caught it -- but it is here for a different
 # failure from `EA17`'s. `EA17` calls `size(r)` on the walk and the server
@@ -571,31 +571,69 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 # 1.7.0 server. Both are embedded-only; only one of them announces itself.
 EMBEDDED_ONLY = {"EA17", "EA21"}
 
+# Queries that walk a variable-length relationship and are **not**
+# embedded-only, each with a reason someone checked. `EA07` is the only one:
+# note 12 measured both builds returning byte-identical rows for it, so the
+# server's zero-length-only answer happens to coincide with the right one on
+# this graph under its `ORDER BY ... LIMIT 10`. That is luck about the data,
+# not a property of the query -- which is why it is written down here rather
+# than left implicit, and why the test below refuses to let a *new* walking
+# query join this list silently.
+VARIABLE_LENGTH_BUT_SERVER_SAFE = {"EA07"}
 
-def test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk():
-    """Derived from the Cypher, not copied from the docs.
 
-    An unbounded `*0..` is the shape note 12 says the server will not walk, and
-    `size(r)` over one is the shape it rejects outright. A bounded walk is not
-    the same thing: `EA07`'s `*0..3` runs on the server and returns only the
-    zero-length match -- wrong rows, not an error -- so it is a note-12 victim
-    without being embedded-only, and the distinction is the one the pages get
-    wrong when they are edited by hand.
+def test_every_embedded_only_query_walks_a_variable_length_relationship():
+    """What is still derivable once the walks are bounded.
+
+    This test used to derive `EMBEDDED_ONLY` from the Cypher: an unbounded
+    `*0..` was the shape note 12 says the server will not walk. Bounding
+    `EA17` and `EA21` for the 1.8 planner (engine note 14) took that
+    derivation away -- they now look exactly like `EA07`'s `*0..3`, which is a
+    note-12 victim *without* being embedded-only, because wrong rows and a
+    refusal are different failures.
+
+    So the set is hand-maintained now, and this checks the two halves a
+    machine can still check:
+
+    - every query in `EMBEDDED_ONLY` walks a variable-length relationship;
+    - every query that walks one is *classified* -- either embedded-only, or
+      named in `VARIABLE_LENGTH_BUT_SERVER_SAFE` with a reason. Without the
+      second half this test could only catch a **spurious** entry, never a
+      **missing** one, and a missing one is the dangerous direction: a new
+      query the server would answer wrongly, shipped as server-safe.
+
+    Why each entry is in the set stays prose, in note 12 and note 14 --
+    `EA17` calls `size(r)` and the server rejects it outright, `EA21` gets a
+    plausible-looking wrong ranking. `EA07` gets wrong rows too, in the sense
+    note 12 describes, but they coincide with the right ones on this graph,
+    which is why it sits in the safe list rather than in `EMBEDDED_ONLY`.
     """
     import re
 
-    unbounded = {qid for qid, spec in BY_ID.items()
-                 if re.search(r"\*\d*\.\.(?!\d)", spec["cypher"])}
-    assert unbounded == EMBEDDED_ONLY, (
-        f"queries with an unbounded variable-length walk are {sorted(unbounded)}, "
-        f"but EMBEDDED_ONLY says {sorted(EMBEDDED_ONLY)}. Whichever moved, "
-        f"`docs/engine-notes.md` note 12, `CLAUDE.md` and `README.md` all name "
-        f"this set in prose and need the same edit.")
+    # Any relationship pattern containing a `*`, rather than a spelling of the
+    # hop range: `[r:NEXT_STAGE*0..8]`, `[:R*]`, `[:R*3]` and a pattern with a
+    # property map or a space before the `]` are all variable-length, and the
+    # earlier `\*\d*\.\.\d*\]` matched only the first.
+    variable_length = {qid for qid, spec in BY_ID.items()
+                       if re.search(r"\[[^\]]*\*[^\]]*\]", spec["cypher"])}
+    missing = EMBEDDED_ONLY - variable_length
+    assert not missing, (
+        f"{sorted(missing)} are named embedded-only but walk no variable-length "
+        f"relationship. If a query stopped walking one, note 12, note 14, "
+        f"`CLAUDE.md` and `README.md` all name this set in prose and need the "
+        f"same edit.")
 
-    bounded = {qid for qid, spec in BY_ID.items()
-               if re.search(r"\*\d*\.\.\d", spec["cypher"])}
-    assert bounded and not (bounded & EMBEDDED_ONLY), (
-        f"expected at least one bounded walk outside the embedded-only set "
-        f"(EA07 today); got bounded={sorted(bounded)}. Without one, this test "
-        f"would pass on a catalog where every walk is unbounded and the "
-        f"distinction it exists to hold had collapsed.")
+    assert "EA07" in variable_length, (
+        "`EA07` no longer walks a variable-length relationship, so the "
+        "anti-vacuity check below is comparing against nothing. It is the "
+        "query that proves walking one does not by itself make a query "
+        "embedded-only.")
+
+    unclassified = variable_length - EMBEDDED_ONLY - VARIABLE_LENGTH_BUT_SERVER_SAFE
+    assert not unclassified, (
+        f"{sorted(unclassified)} walk a variable-length relationship and are "
+        f"neither embedded-only nor listed as server-safe. By note 12 the "
+        f"1.7.0 server matches only the zero-length case for that shape, so "
+        f"somebody has to decide whether the rows it returns are wrong enough "
+        f"to matter, and write the answer into one of the two sets above. "
+        f"Since the walks were bounded (note 14) the Cypher cannot decide it.")

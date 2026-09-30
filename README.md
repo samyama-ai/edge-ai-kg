@@ -227,9 +227,9 @@ HTTP it is expected, not measured**: the real layer has no `ClinicalTask`, no
 on a `Site`, so none of their opening `MATCH`es binds anything on either
 build. `Site` is generated-layer only by construction, which
 `tests/test_site_spine.py::test_the_real_layer_gets_no_sites` pins. `EA21`
-carries a second reason it cannot be read off the server run: it walks an
-unbounded `NEXT_STAGE*0..`, which the 1.7.0 server does not traverse (engine
-note 12). It would not *raise* the way `EA17` does — `EA17` asks for `size(r)`
+carries a second reason it cannot be read off the server run: it walks
+`NEXT_STAGE` variable-length, which the 1.7.0 server does not traverse at any
+bound (engine note 12). It would not *raise* the way `EA17` does — `EA17` asks for `size(r)`
 and `EA21` does not — so by inference, untested here, it would answer from the
 zero-length match alone and report wrong numbers rather than nothing. The
 distinction between measured and expected is kept rather than smoothed over,
@@ -256,11 +256,19 @@ between the two builds.
 
 `pyproject.toml` declares `samyama>=1.7.1,<1.8`, so the build these pages
 describe is the build you get. The ceiling is [engine note
-14](docs/engine-notes.md): from 1.8.0 the planner refuses the unbounded
-`NEXT_STAGE*0..` walks in `EA17` and `EA21`, so those two queries do not run
-on a newer engine. It buys reproducibility and fixes nothing — bounding the
-walks changes what they answer, which is a query-design decision rather than
-a version bump.
+14](docs/engine-notes.md): from 1.8.0 the planner refused the then-unbounded
+`NEXT_STAGE*0..` walks in `EA17` and `EA21` outright. Both carry an explicit
+bound now (`MAX_STAGE_HOPS`, #126). **What the bound buys was measured on
+1.9.0 only**: 1.8.0 was installed and run at the time the refusal was found,
+but the bounded queries have been tried on 1.9.0 alone, so what follows is
+1.9.0's behaviour and 1.8.0's is inferred from the two releases refusing the
+unbounded form identically. On 1.9.0 the bound is enough for `EA21`. `EA17`
+times out at all three bounds deep enough to answer completely that were
+tried — 5, 6 and 8 hops — and the one shallower bound tried, 3 hops,
+completed but returned 12 of 16 stages. Nothing between 3 and 5 was tried, so
+"fast enough means truncated" is the pattern those four points show rather
+than a boundary anyone located. So the ceiling stays: lifting it needs `EA17`
+**reshaped**, not a different hop count.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.
@@ -272,7 +280,8 @@ something to traverse: with no `Sensor` nodes the opening `MATCH` binds nothing,
 server with `--layers real`: 0 rows, no error. On the **full** graph it raises,
 and is the one catalog query that cannot be asked over HTTP.
 
-`EA07` walks the same `NEXT_STAGE` chain with a fixed bound, `*0..3`, and the
+`EA07` walks the same `NEXT_STAGE` chain with its own fixed `*0..3` — a
+tighter bound than `MAX_STAGE_HOPS`, chosen for what it answers — and the
 bound does not exempt it: note 12 measured the server matching only the
 zero-length case for **every** form, bounded or not. It does not raise, because
 `EA07` never calls `size(r)` — that type error is what makes `EA17` fail loudly.
@@ -460,7 +469,7 @@ follows is arithmetic on the embedded figure, not a sweep result. `EA17` raises
 on the 1.7.0 server, which *is* measured (engine note 12), so it returns
 nothing there: that is the one subtraction anybody has checked, and it gives
 19. `EA21` has never been run against a server at all — it walks the same
-unbounded shape but never calls `size(r)`, so by note 12 it would not raise;
+variable-length shape but never calls `size(r)`, so by note 12 it would not raise;
 the inference is that it would answer from the zero-length match alone and
 return wrong rows that look like an answer. Subtracting `EA21` as well gives
 18, but that second subtraction rests on the inference rather than on a run,
@@ -518,7 +527,7 @@ engine that walks variable-length paths**, which the 1.7.0 server does not
 | **EA14** | **REAL:** MLPerf Tiny v1.2 throughput leaders per benchmark task |
 | **EA15** | **REAL:** which operators are registered on only one execution provider? |
 | **EA16** | **REAL vs SYNTHETIC:** what is measured and what is generated |
-| **EA17** | **EMBEDDED-ONLY** (its `*0..` walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
+| **EA17** | **EMBEDDED-ONLY** (its `size(r)` over a variable-length walk; note 12): this sensor stops — what stops with it, and what stops *only* because of it? |
 | **EA18** | **EMPTY ON THIS FLEET:** which deployments miss a clinical task's latency budget, and which operators have no kernel on their accelerator? |
 | **EA19** | **COMPLIANCE:** this sensor fails — which certifications does that touch, through the tasks that require it? |
 
@@ -556,9 +565,12 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
   bounded or not — it matches only the zero-length case, silently — and it
   *rejects* `size(r)` over one, where the embedded 1.7.1 build walks it
   ([note 12](docs/engine-notes.md)). `EA17` asks for `size(r)`, so it **raises**
-  on the server and is embedded-only; `EA07` walks a bounded `*0..3` without
-  `size(r)`, and note 12 measured both builds returning byte-identical rows for
-  it — true of this graph and this `LIMIT`, not enforced. `EA17` needs the
+  on the server; `EA21` walks the same relationship without `size(r)`, so
+  nothing raises and it would answer from the zero-length match alone — wrong
+  numbers that look like an answer. Both are embedded-only, for those two
+  different failures. `EA07` walks a bounded `*0..3` without `size(r)` and is
+  *not*: note 12 measured both builds returning byte-identical rows for it —
+  true of this graph and this `LIMIT`, not enforced. `EA17` needs the
   `samyama>=1.7.1` floor (written in #105, reaching `main` inside #104);
 - an `OPTIONAL MATCH` whose `WHERE` mentions a `WITH`-introduced alias drops
   the unmatched rows, turning it into an inner join
@@ -569,9 +581,12 @@ version gap rather than a defect, and notes 13 and 13b were found on embedded
 
 Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
-workaround either, and one is not possible: there is no way to write "walk a
-chain of unknown length" that the 1.7.0 server executes, so `EA17` and `EA21`
-are embedded-only rather than reshaped.
+workaround either, and bounding the walks did not become one: the server
+matches only the zero-length case for **every** form of a variable-length
+pattern, bounded or not, so a walk bounded at `MAX_STAGE_HOPS` is no more
+executable there than the unbounded one was. `EA17` and `EA21` stay embedded-only. What a bound did change is which
+*newer* engines accept the pattern at all — a different problem, engine note
+14.
 
 `EA01`, `EA02` and `EA04` used to carry `xfail` marks for notes 10 and 11 —
 four test functions, six reported outcomes, since two of them are parametrised

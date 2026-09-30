@@ -260,12 +260,22 @@ instead: the 1.7.0 server rejects `size(r)` over a variable-length
 relationship ([engine note 12](docs/engine-notes.md)). `EA18`, `EA19`, `EA20`
 and `EA21` post-date this run and were not part of it; the catalog is larger
 now, and this paragraph reports what was verified then. `EA21` would not have
-raised the way `EA17` did — it walks an **unbounded** `*0..` without
-`size(r)`, and it is the unbounded walk that makes a query embedded-only, not
-variable length as such (`EA07` is bounded and runs on both). What it would
-return there is **inferred from engine note 12 and untested**: the zero-length
-match alone, so wrong rows rather than an error. Like `EA17` it should be
-treated as answerable only on the embedded build.
+raised the way `EA17` did — it walks `NEXT_STAGE` variable-length without
+`size(r)`, and `size(r)` is what makes `EA17` fail loudly. What `EA21` would
+have returned is **inferred from engine note 12 and untested**: the
+zero-length match alone, so wrong rows rather than an error. Like `EA17` it
+should be treated as answerable only on the embedded build.
+
+**Which queries are embedded-only is not read off the shape.** `EA07` walks
+the same relationship and is not embedded-only: by note 12 the server matches
+only its zero-length case too, but the rows that come back were measured
+byte-identical to the embedded ones on this graph, under that query's
+`ORDER BY ... LIMIT 10`. `EA21`'s would not be. Since #126 bounded `EA17` and
+`EA21`, the three carry the same kind of bounded walk — `EA07` a tighter
+`*0..3`, the other two `MAX_STAGE_HOPS` — so a reader cannot tell them apart
+by hop count either, and the difference is which wrong answer matters. The
+set is kept by hand in `tests/test_correctness.py`, alongside a list of the
+walking queries deliberately left out of it.
 
 **The published snapshot predates the `Site` spine and does not carry it.**
 That snapshot holds **25,145 nodes / 76,291 edges**, against a fresh build's

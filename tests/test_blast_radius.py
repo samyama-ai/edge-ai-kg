@@ -50,7 +50,9 @@ answer to the question. The first version of `EA17` reported plain reachability
 and matched this BFS exactly for all 14 sensors, and both were wrong together:
 `etl/generate.py` samples each sensor's chain (`rng.sample(stages, ...)`)
 from one shared 16-stage pool,
-so an unbounded walk leaves the sensor's own 3-5 stages and reaches 15 of 16.
+so the walk leaves the sensor's own 3-5 stages and reaches 15 of 16 -- which
+holds at `MAX_STAGE_HOPS` because the bound sits above the deepest chain, and
+would stop being true if the bound were ever tightened below it.
 "What stops when this sensor fails" came back as the whole fleet.
 
 The fix is a second number, `only_via_me`, and the check for it is deliberately
@@ -60,15 +62,24 @@ Python. `test_a_shared_stage_is_a_firebreak`
 (`tests/test_blast_radius_semantics.py`) then pins the case the shipped
 graph cannot show.
 
-**A fixed bound is wrong, on a graph built to show it.**
-`test_fixed_depth_misses_the_far_end_of_a_long_chain`
+**A bound has a cost, on a graph built to show it.**
+`test_the_bound_truncates_a_chain_longer_than_it`
 (`tests/test_blast_radius_semantics.py`)
-builds a chain longer than any bound a person would guess and asserts `*0..3`
-misses the far end while `*0..` finds it. Without that, "unbounded" is a style
-choice; with it, it is a requirement. It is a purpose-built fixture because the
-shipped graph is a weak witness: `*0..3` loses stages for 9 of its 14 sensors
-but happens to lose no *model*, so a test that only walked the shipped graph
-could pass with a bound in place.
+builds a chain longer than the bound and asserts that the bounded query stops
+short of the far end while the unbounded one reaches it. Engine note 14 made
+an unbounded walk illegal from `samyama` 1.8.0, so the conclusion is no longer
+"never bound" but "the bound has to stay above the data": what keeps
+`MAX_STAGE_HOPS` honest is `tests/test_bounded_walks.py`, which measures the
+fleet against it.
+
+It is a purpose-built fixture because the shipped graph cannot show the cost
+at all. `*0..3` loses stages for 9 of its 14 sensors but happens to lose no
+*model*, and at `MAX_STAGE_HOPS` it loses nothing whatever -- the bound sits
+above the deepest chain by design. A truncation test that walked only the
+shipped graph would therefore pass no matter what the bound did, which is a
+test that cannot fail rather than one that agrees. The sibling test's own
+docstring retracts the argument this paragraph used to end with ("a fixed
+bound is wrong"); what survives is the demonstration, not the conclusion.
 """
 from __future__ import annotations
 

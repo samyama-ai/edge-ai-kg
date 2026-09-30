@@ -3,15 +3,16 @@
 The blast radius of a failing sensor, and the deployments that miss a
 clinical task's latency budget while nothing is down at all.
 
-Only `EA17` is embedded-only: it walks `NEXT_STAGE*0..` unbounded and calls
-`size(r)` on the result, which the 1.7.0 server rejects
-(`docs/engine-notes.md` note 12). `EA18`'s walk is bounded, so it runs on
-both builds, and `tests/test_correctness.py::EMBEDDED_ONLY` -- derived from
-the Cypher rather than from prose -- holds `EA17` and `EA21`, not `EA18`.
+Only `EA17` is embedded-only: it calls `size(r)` over a variable-length
+`NEXT_STAGE` walk, which the 1.7.0 server rejects (`docs/engine-notes.md`
+note 12). `EA18` does not walk one at all, so it runs on both builds.
+`tests/test_correctness.py::EMBEDDED_ONLY` holds `EA17` and `EA21`, not
+`EA18`; it is a hand-kept set since the walks were bounded, because a bound
+no longer tells the three walking queries apart.
 """
 from __future__ import annotations
 
-from benchmarks.catalog.subjects import EA17_SUBJECT
+from benchmarks.catalog.subjects import EA17_SUBJECT, MAX_STAGE_HOPS
 
 ALERTING: list[dict] = [
     {
@@ -25,11 +26,13 @@ ALERTING: list[dict] = [
             "with no other live feeder -- the part that actually goes dark. A "
             "stage fed by three sensors is a firebreak, not a casualty, and a "
             "reachability query alone reports it as one. The `NEXT_STAGE` chain "
-            "is of unknown length, so both need `*0..`."),
+            "is of unknown length, so both walk it variable-length, bounded at "
+            "`MAX_STAGE_HOPS` -- above the deepest chain any sensor reaches, "
+            "so the bound costs no answer (engine note 14)."),
         # `only_via_me` is the second number because reachability is not the
         # answer: `etl/generate.py`'s sensor-pipeline section (`chain =
         # rng.sample(stages, ...)`) samples every sensor's chain from one
-        # shared 16-stage pool, so an unbounded walk reaches most of the fleet.
+        # shared 16-stage pool, so the walk reaches most of the fleet.
         # The ClinicalTask leg matches `o.modality = s.modality` for the same
         # reason -- a task's other sensors replace this one only if they supply
         # the same modality.
@@ -52,14 +55,16 @@ ALERTING: list[dict] = [
         #      a per-leg second `WITH`, which 0.6.x rejects).
         #   3. `+1/+2/+4/+5` are schema-fixed hops, not a depth bound. The
         #      variable part is `size(r)`, which is what `*0..` is for.
-        #      **The walk has no cost bound, by design and not by oversight.**
-        #      A depth cap would cap the answer -- the chain's length is what
-        #      is being asked -- so what exists instead is a measurement:
-        #      `docs/volume.md` puts `EA17` at 95 ms at `--scale 1.0` and
-        #      431 ms at 2.0, x4.5 per doubling, the steepest in the catalog.
-        #      Relationship-uniqueness is what stops it looping on the cyclic
-        #      `NEXT_STAGE` graph, pinned by
-        #      `test_the_unbounded_walk_terminates_on_a_cyclic_chain`.
+        #      **The walk's bound is `MAX_STAGE_HOPS`, and it is a legality
+        #      bound rather than a cost bound.** A depth cap that bit would cap
+        #      the answer -- the chain's length is what is being asked -- so it
+        #      sits above the deepest chain the fleet has, and
+        #      `tests/test_bounded_walks.py` fails if the fleet grows into it.
+        #      Cost is a measurement, not a cap: `docs/volume.md` puts `EA17`
+        #      at 95 ms at `--scale 1.0` and 431 ms at 2.0, x4.5 per doubling,
+        #      the steepest in the catalog. Relationship-uniqueness is what
+        #      stops it looping on the cyclic `NEXT_STAGE` graph, pinned by
+        #      `test_the_walk_terminates_on_a_cyclic_chain`.
         #   4. The ClinicalTask leg's `depth` is 1 by construction, not a
         #      measured hop count like the other legs': a task points *at* the
         #      sensor, so it is adjacent. `nearest` is therefore comparable
@@ -83,37 +88,37 @@ ALERTING: list[dict] = [
         # reader of that output is sent to. Constraint 2 means embedded 0.6.1
         # rejects it too, and `pyproject.toml`'s `samyama>=1.7.1` floor (#104)
         # is what excludes that build.
-        "cypher": """
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(x:SignalStage)
+        "cypher": ("""
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(x:SignalStage)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(x)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH x.id AS thing, min(size(r)) + 1 AS depth, count(DISTINCT o.id) AS others
 WITH "SignalStage" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m:Model)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(m:Model)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(m)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH m.id AS thing, min(size(r)) + 2 AS depth, count(DISTINCT o.id) AS others
 WITH "Model" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH d.id AS thing, min(size(r)) + 4 AS depth, count(DISTINCT o.id) AS others
 WITH "Deployment" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH b.id AS thing, min(size(r)) + 5 AS depth, count(DISTINCT o.id) AS others
 WITH "Board" AS kind, count(thing) AS affected,
@@ -128,7 +133,7 @@ WITH t.id AS thing, 1 AS depth, count(DISTINCT o.id) AS others
 WITH "ClinicalTask" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
-""".replace("{subject}", f'"{EA17_SUBJECT}"'),
+""".replace("{subject}", f'"{EA17_SUBJECT}"').replace("{hops}", str(MAX_STAGE_HOPS))),
     },
     {
         "id": "EA18",

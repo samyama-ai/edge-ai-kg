@@ -858,11 +858,18 @@ on one of them.
 > than server-with-a-caveat.
 >
 > `tests/test_correctness.py`'s `EMBEDDED_ONLY` is a hand-written set,
-> `{"EA17", "EA21"}`. What is derived from the Cypher is the set the test
-> compares it against: every query whose walk is unbounded. So a *new* query
-> with an unbounded walk fails that test until someone adds it here and to
-> the pages, which is the drift it exists to catch. It checks none of the
-> prose above -- what the server actually returns for `EA21` is unmeasured,
+> `{"EA17", "EA21"}`. It used to be checked against a set derived from the
+> Cypher -- every query whose walk was unbounded -- but note 14 bounded both
+> of these, and `EA07` walks the same relationship bounded and is *not*
+> embedded-only, so shape no longer separates them. The test derives two
+> things from the Cypher instead. An embedded-only query must at least walk a
+> variable-length relationship -- which catches a spurious entry. And every
+> query that walks one must be *classified*: either in `EMBEDDED_ONLY`, or in
+> `VARIABLE_LENGTH_BUT_SERVER_SAFE`, which holds `EA07` with the reason
+> written beside it. A new walking query fails that test until somebody
+> decides, which is the missing-entry direction and the dangerous one. Which
+> set it belongs in is still a person's judgement. It checks none of
+> the prose above -- what the server actually returns for `EA21` is unmeasured,
 > and no test can settle that without a 1.7.0 server to run it against.
 >
 > **Version labels, because this file carries two vintages.** Notes 1-9 are
@@ -1045,13 +1052,16 @@ does for `over_by_ms`.
 ## 14. From 1.8.0, an unbounded variable-length walk is refused outright
 
 > **Measured on 2026-09-29, embedded, on each release rather than inferred
-> from the newest: 1.7.1 runs these queries, 1.8.0 and 1.9.0 refuse them.**
-> This is the only note here about a *newer* engine being stricter, and the
-> only one the repo currently works around with a version ceiling rather than
-> with Cypher.
+> from the newest: 1.7.1 ran these queries as they were then written, and
+> 1.8.0 and 1.9.0 refused them.** Both queries carry an upper bound now (the
+> workaround below), so "refuse" describes the shape they had, not the shape
+> they have: on 1.9.0 the bounded `EA21` runs and the bounded `EA17` times
+> out instead. 1.8.0 has not been re-tried since the bound. This is the only
+> note here about a *newer* engine being stricter, and the only one the repo
+> works around with a version ceiling rather than with Cypher.
 
-`EA17` and `EA21` both walk `NEXT_STAGE*0..` with no upper hop bound. From
-1.8.0 the planner refuses that outright:
+`EA17` and `EA21` both walked `NEXT_STAGE*0..` with no upper hop bound when
+this note was written. From 1.8.0 the planner refuses that outright:
 
 ```
 Query error: [Samyama.ClientError.Statement.PlanningFailed] Planning error:
@@ -1060,8 +1070,9 @@ upper hop limit or a more selective start
 ```
 
 **Reproduction:** install `samyama==1.8.0` and run any query with an
-unbounded `*0..` over the shipped fleet — `python -m pytest -q
-tests/test_correctness.py -k EA17` is enough. **11 tests fail on 1.8.0, 11 on
+unbounded `*0..` over the shipped fleet — this was measured before the
+workaround below, when `EA17` still carried one, with `python -m pytest -q
+tests/test_correctness.py -k EA17`. **11 tests fail on 1.8.0, 11 on
 1.9.0, none on 1.7.1.**
 
 **Why it bites here specifically.** The stage graph contains cycles — chains
@@ -1072,13 +1083,55 @@ mirror image of this: the 1.7.0 *server* returns only the zero-length match
 for the same pattern, where 1.8.0 refuses it and 1.7.1 embedded walks it.
 Three builds, three behaviours, one pattern.
 
-**Workaround used here: none, and that is the point.** `pyproject.toml`
+**Workaround, as of 2026-09-30: the walks are bounded, and it is not enough.**
+`EA17` and `EA21` now walk `NEXT_STAGE*0..8` (`benchmarks/catalog/subjects.py`,
+`MAX_STAGE_HOPS`). 8 is measured rather than guessed -- the measurement and
+its date are written once, beside the constant in
+`benchmarks/catalog/subjects.py`, and are not repeated here so they cannot
+drift apart. The claim that the bound costs no answer is not carried by prose
+in either place: `tests/test_bounded_walks.py` re-measures the fleet against
+the bound and compares each walking query bounded against unbounded --
+`EA17`, `EA21` and `demo/demo.py`'s `TASKS_OVER_BUDGET`. The rows are compared
+as sets, not sequences: `EA21`'s ties have no tiebreaker (note 3b forbids a
+second `ORDER BY` key) and reorder between runs.
+
+On 1.9.0 the bound fixes **`EA21`** — it runs and returns the same ranking.
+It does **not** fix `EA17`:
+
+| bound | `EA17` on 1.9.0 |
+|---|---|
+| unbounded | `PlanningFailed`, over a million paths |
+| `*0..8`, `*0..6`, `*0..5` | **`Query timed out after 1 row`** |
+| `*0..3` | runs, and truncates — 12 stages instead of 16 |
+
+Five hops is the minimum for a complete answer and three is the most that
+completes in time, so on 1.9.0 `EA17` cannot be both correct and fast. The
+**candidate** explanation is its shape rather than the walk length, and it
+is a candidate because nothing here isolated it: `EA17` is five `UNION ALL`
+legs, and **four of them carry two walks each** — one in the main pattern and
+one in its `OPTIONAL MATCH` — over chains that then run up to four further
+fixed hops (`PRECEDES`, `VARIANT_OF`, `OF_VARIANT`, `ON_BOARD`); the fifth,
+`(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`, has no walk at all. Eight
+bounded walks in one statement is consistent with the timeout, and no leg was
+run on its own to confirm it — the engine exposes no `EXPLAIN` (see
+`docs/volume.md`, which reaches the same unconfirmed conclusion about the
+same query at `--scale 2.0`). **The `samyama>=1.7.1,<1.8` ceiling therefore
+stays**, and reshaping `EA17` is what would lift it — starting by running one
+leg at a time, which is the measurement neither page has.
+
+The bound is still worth carrying at 1.7.1, where nothing refuses the
+unbounded form: it is what any future engine upgrade needs, it is measured
+not to change either query's answer, and carrying it now means the next
+upgrade attempt starts from `EA17` alone rather than from two queries.
+
+**What a bound costs, for the record.** `pyproject.toml`
 declares `samyama>=1.7.1,<1.8`, which buys reproducibility and fixes nothing.
-Bounding the walks changes what they answer — `EA17` reports how *deep* the
-blast radius goes, and a cap silently truncates that — so it is a
-query-design decision, not a version bump. Until it is taken, raising the
-ceiling means shipping two queries that cannot run on the engine a new user
-installs.
+The walks are bounded now (the workaround above), and bounding is what made
+that argument testable rather than settling it: a cap silently truncates how
+*deep* `EA17` says the blast radius goes, which is why `MAX_STAGE_HOPS` sits
+above the fleet's deepest chain and a test fails if the fleet grows into it.
+On 1.8+ the bound is still not enough for `EA17`, so raising the ceiling would
+mean shipping a query that times out on the engine a new user installs.
 `tests/test_engine_version.py::test_the_declared_spec_excludes_the_releases_that_refuse_our_queries`
 fails if the ceiling disappears, or is widened to admit 1.8.0 again.
 

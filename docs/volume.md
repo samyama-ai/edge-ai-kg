@@ -79,6 +79,29 @@ while `EA08` stays in seconds.
 
 ### `EA17` is the most expensive query in this table, and grows faster than `EA11`
 
+> **Everything in this section predates the bound.** `EA17`'s walks carried
+> no upper hop limit when these were taken; they carry `MAX_STAGE_HOPS` now
+> (engine note 14, #126) and have not been re-timed. That covers the table
+> below, the ×4.5 per-doubling rate, and everything derived from it — the
+> "passes a second just under scale 3" and "reaches `EA11`'s figure near
+> scale 6" extrapolations, and `EA17`'s share of the catalog total.
+>
+> What the bound does to these numbers is **not** measured. The argument that
+> it can only remove paths rests on depth, and depth was measured at both of
+> this table's scales: **5 hops at `--scale 1.0`, 4 at 2.0** — so 5 is the
+> deepest either column reaches, well inside a bound of 8. It does not grow
+> with `--scale`, because the stage pool does not: 16 stages and 14 sensors at
+> 0.3, 1.0 and 2.0 alike.
+>
+> That says the *answers* are unchanged. It does not say what the planner does
+> with a bounded pattern, and one that takes a different strategy when given an
+> upper limit would make these figures wrong in either direction.
+> `tests/test_bounded_walks.py::test_bounding_changes_no_answer` checks the
+> answers, but on a `--scale 0.3` fleet — **not** the fleets timed here — so it
+> is evidence about the shape of the claim, not about these two columns.
+> Re-running `python -m benchmarks.run_benchmark` at both scales is what would
+> settle the timings.
+
 Added with `EA17` (issue #35, PR #96) and measured separately, because the run
 above predates it. Same machine, **embedded**, schema applied, catalog warmed,
 median of 5, 2026-09-10.
@@ -139,9 +162,10 @@ above and are not comparable with them — the ratio within the one run is what
 "cheap" means here. Neither has been run at 2.0.
 
 **`EA17`'s shape is the candidate explanation** for its growth: **four of its
-five legs** carry an unbounded `*0..` in the main pattern *and* another inside an
-`OPTIONAL MATCH` — the fifth, `(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`,
-has no variable-length hop at all — over a `NEXT_STAGE` graph that is cyclic:
+five legs** carry a variable-length `NEXT_STAGE` walk in the main pattern
+*and* another inside an `OPTIONAL MATCH` — the fifth,
+`(:ClinicalTask)-[:REQUIRES_SENSOR]->(:Sensor)`, has no variable-length hop at
+all — over a `NEXT_STAGE` graph that is cyclic:
 `etl/generate.py` samples each sensor's chain from one shared pool in random
 order, so one sensor contributes `s7 -> s1` and another `s1 -> s7`.
 Relationship-uniqueness stops it looping forever. **Why that is expensive is

@@ -26,6 +26,42 @@ EA17_SUBJECT = "sensor:00000"
 # from `benchmarks.queries`, is how a caller asks about a different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
+# The upper hop bound on every `NEXT_STAGE` walk in `EA17` and `EA21`.
+#
+# It is what makes the pattern *legal* on an engine newer than 1.7.1, which is
+# not the same as making both queries run there: `EA21` does, `EA17` still
+# times out on 1.9.0 at every bound deep enough to answer completely (engine
+# note 14 has the table). The ceiling stays at `<1.8` because of that.
+#
+# From `samyama` 1.8.0 the planner refuses an unbounded variable-length
+# pattern that produces over a million paths (engine note 14). `EA17` and
+# `EA21` walk a stage graph that contains cycles, so the *path* count explodes
+# even though the graph is tiny -- 16 stages, and a sensor reaches all of
+# them.
+#
+# 8 is measured, not guessed. Two fleets, because they are not the same
+# graph and the numbers differ:
+#
+#   - the **shipped** fleet (`data/fleet/fleet.json`, seed 20260814,
+#     `--scale 1.0`): deepest chain from any sensor **5 hops**, median 4,
+#     distribution 1:1, 3:4, 4:8, 5:1 across 14 sensors;
+#   - the fleet `tests/test_bounded_walks.py` loads (same seed, `--scale 0.3`,
+#     shared with `tests/test_certification_alerts.py`): deepest **4**,
+#     median 4, distribution 3:6, 4:8.
+#
+# Both sit well inside 8. Neither figure is what the guard trusts: the test
+# re-runs the BFS against whatever fleet it loads and fails if that fleet
+# grows a chain within two hops of the bound, so these numbers are the record
+# of when the constant was chosen, not the check. The claim that bounding
+# changes no answer is separately measured -- `test_bounding_changes_no_answer`
+# runs `EA17` and `EA21` bounded and unbounded and compares the rows, as sets
+# rather than sequences because `EA21`'s ties have no tiebreaker.
+#
+# It is a real limit, not decoration: a graph whose chains passed 8 hops would
+# have its blast radius silently truncated, which is why #110 argued against a
+# cap. The guard is what makes the cap safe to carry.
+MAX_STAGE_HOPS = 8
+
 
 def alert_list(alert_ids) -> str:
     """The Cypher list literal for an alert set, escaped.
