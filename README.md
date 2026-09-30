@@ -134,7 +134,7 @@ kernel spine plus the MLPerf submissions; the clinical spine is entirely
 generated, so `ModelVariant`, `Sensor`, `SignalStage`, `ClinicalTask`, `Dataset`
 and `Certification` are empty.
 
-**Against the HTTP server, 6 of the 21 catalog queries return rows**, 15 come
+**On both builds, 6 of the 21 catalog queries return rows**, 15 come
 back empty, none error:
 
 | | Queries |
@@ -142,21 +142,18 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA20`, `EA21` |
 
-**Which build the table is.** Its rows are what
-`tests/test_real_layer_shape.py` measures against the **embedded** build,
-query by query, every run. It is headed with the server because a 2026-09-09
-server sweep put the same queries in the same two rows — with one exception,
-now resolved: that sweep recorded `EA10` and `EA12` as *returning rows*, and
-it is that figure #114 doubted.
+**That table is measured on both**, on 2026-09-30: `tests/test_real_layer_shape.py`
+re-runs every query against the **embedded** build on each test run, and the
+same real layer was loaded into `ghcr.io/samyama-ai/samyama-graph:1` — the
+1.7.0 image [the engine notes](docs/engine-notes.md) describe — and swept
+query by query. The two agree exactly: same six queries with rows, same row
+counts, and `EA08` row-for-row identical (`CPU`/`ONNX Runtime`/296,
+`GPU-CUDA`/237, `GPU-DirectML`/205). The sweep, its command and its digest are
+[in the engine notes](docs/engine-notes.md).
 
-**Re-measured on 2026-09-30, and the two builds do not disagree at all.** The
-real layer was loaded into `ghcr.io/samyama-ai/samyama-graph:1` — the 1.7.0
-image [the engine notes](docs/engine-notes.md) describe — and every catalog
-query run against it. The 1.7.0 server returns exactly what embedded 1.7.1
-returns: the same six queries with rows, the same row counts, and `EA08`
-row-for-row identical (`CPU`/`ONNX Runtime`/296, `GPU-CUDA`/237,
-`GPU-DirectML`/205). **#114's premise was a measurement error**, and the table
-above is now both builds' answer.
+That settles **#114**, which doubted an older figure: a 2026-09-09 server
+sweep had put `EA10` and `EA12` in the *returning rows* side, and nothing
+since reproduced it. **Its premise was a measurement error.**
 
 Why `EA10` and `EA12` cannot return rows on either build: both filter
 `WHERE d.fits = 1`, and the real layer's 73 `Deployment` nodes are MLPerf Tiny
@@ -180,8 +177,9 @@ The probe that settled this found something else, which **is** an engine note:
 the 1.7.0 server agrees with embedded on `n.fits = 1` and **disagrees on
 `n.fits <> 1`**, matching the row whose property is absent.
 [Engine note 8b](docs/engine-notes.md) is live on the server and fixed on
-embedded 1.7.1, where that file's banner had listed it as gone. The
-`IS NOT NULL` guard it prescribes still has to be written.
+embedded 1.7.1, where that file's banner had listed it as gone. The rule it
+prescribes still has to be **followed** — `EA17` already carries the
+`IS NOT NULL` guard, and it is load-bearing rather than leftover.
 
 `EA01` and `EA02` are empty rather than erroring here, on both builds — and were
 before the upgrade too. Note 10 made them raise on the old embedded build, but

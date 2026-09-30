@@ -219,8 +219,9 @@ stripping the predicate rather than naming it — four other queries mention
 
 The probe that settled it did find a live one: **note 8b is not gone on the
 server.** `n.v <> 1` matches a node with no `v` there and does not on embedded
-1.7.1, where this file's own banner lists 8b among the behaviours that no
-longer reproduce. Write the `IS NOT NULL` guard.
+1.7.1, where `docs/engine-notes.md`'s banner lists 8b among the behaviours
+that no longer reproduce. Keep writing the `IS NOT NULL` guard -- `EA17`
+already has it and it is load-bearing, not leftover.
 
 **Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
 13 and 13b return wrong rows rather than erroring; note 12 does both, and which

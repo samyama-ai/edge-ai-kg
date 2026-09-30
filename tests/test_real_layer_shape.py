@@ -199,7 +199,7 @@ README_PARTITION = re.compile(
 # sentence unfindable and the test failed with "could not find the sentence"
 # rather than with anything about the numbers.
 README_PROSE = re.compile(
-    r"\*\*Against\s+the\s+HTTP\s+server,\s+(\d+)\s+of\s+the\s+(\d+)\s+catalog"
+    r"\*\*On\s+both\s+builds,\s+(\d+)\s+of\s+the\s+(\d+)\s+catalog"
     r"\s+queries\s+return\s+rows\*\*,\s+(\d+)\s+come\s+back\s+empty")
 
 
@@ -284,10 +284,13 @@ def test_the_readme_catalog_partition_is_true(real_only):
     Parsed from the README rather than restated here, so the two cannot drift:
     a claim edited in the document is a claim this test starts checking.
 
-    **One coupling to know about.** The table is headed "Against the HTTP
-    server"; this fixture is **embedded**. That is sound only while the two
-    builds partition the catalog the same way, which was measured on 2026-09-09
-    against server 1.7.0: identical rows-vs-empty on the real layer.
+    **One coupling to know about.** The table says "On both builds"; this
+    fixture is **embedded**, so only half of that claim is re-run here. The
+    server half was measured on 2026-09-30 against 1.7.0, all 21 queries,
+    with its command and image digest recorded in `docs/engine-notes.md`
+    ("The real-layer sweep, both builds"). Nothing re-runs it, so a server
+    that changed would not fail this test -- it would need that sweep run
+    again.
 
     It is a narrower guarantee than it sounds. On the *full* graph the same two
     builds return the same number of *different* rows for seven queries -- ties

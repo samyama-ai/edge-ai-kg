@@ -433,11 +433,17 @@ absent.
 
 Three things worth separating. The `=` half is correct on both, which is why
 #114 closed the way it did — a query filtering `d.fits = 1` returns nothing on
-either build when `fits` is absent. The **workaround works on both**, so the
-`o.id IS NOT NULL AND o.id <> ...` guard in `EA17` and `EA21` is not
-decoration; it is what makes those queries portable. And `NOT x = y` is not a
-substitute on the server, which rejects it outright rather than treating the
-null as false — the server's `NOT` requires a boolean, and `null` is not one.
+either build when `fits` is absent. The **workaround works on both**, so
+`EA17`'s `o.id IS NOT NULL AND o.id <> {subject}` guard
+(`benchmarks/catalog/alerting.py`) is not decoration. `EA21` is the query that
+does *not* carry that guard and does not need it: it writes
+`o.id IN {alerts} AND o.id <> s.id`, and `benchmarks/catalog/triage.py`
+records why — membership in the alert list already excludes a null id, so the
+guard was measured inert there. Whether `IN` behaves the same way on the
+server is **unmeasured**; `EA21` is embedded-only for note 12's reasons
+anyway, so nothing turns on it today. And `NOT x = y` is not a substitute on
+the server, which rejects it outright rather than treating the null as false —
+the server's `NOT` requires a boolean, and `null` is not one.
 
 ```python
 c.query('CREATE (:P {id: "missing"})', "default")
@@ -683,6 +689,62 @@ never needed. The distinction was the useful part: *fix deferred* and *no fix
 known* are different states, and recording which one this was is what let #56
 weigh "rewrite the query" against "reconcile the builds" instead of assuming the
 query had to change.
+
+---
+
+## The real-layer sweep, both builds, 2026-09-30 (#114)
+
+Not an engine note -- it is the measurement that **closed** one. #114 recorded
+three queries answering differently on `--layers real` between the builds:
+`EA08` returning fewer rows embedded, `EA10` and `EA12` returning none. Re-run
+against both, they are identical, so there is nothing to write a note about.
+It is recorded here because it overturns a figure that stood in `README.md`
+from 2026-09-09, and a figure that overturns another has to be repeatable.
+
+**How to repeat it.**
+
+```bash
+docker run -d --rm -p 18080:8080 ghcr.io/samyama-ai/samyama-graph:1
+python -m etl.loader --url http://127.0.0.1:18080 --layers real
+python - <<'EOF'
+from samyama import SamyamaClient
+from benchmarks.queries import BY_ID
+c = SamyamaClient.connect("http://127.0.0.1:18080")
+for qid in sorted(BY_ID):
+    print(qid, len(c.query(BY_ID[qid]["cypher"], "default").records))
+EOF
+```
+
+Image `ghcr.io/samyama-ai/samyama-graph:1`, digest
+`sha256:dbfb918ed723888ff36e5ae9979450ec7a5a8785ce140a7a02ef69ec54b78b39`
+(the same layer as the `1.7` tag), which reports itself as 1.7.0. The loader
+verified 1,240 nodes and 2,478 of 2,478 intended edges across 11 types.
+Embedded side: `samyama` 1.7.1, the graph built by
+`tests/test_real_layer_shape.py`'s `real_only` fixture.
+
+**Row counts, all 21 queries, both builds:**
+
+| | server 1.7.0 | embedded 1.7.1 |
+|---|---:|---:|
+| `EA05` | 3 | 3 |
+| `EA08` | 3 | 3 |
+| `EA13` | 20 | 20 |
+| `EA14` | 12 | 12 |
+| `EA15` | 20 | 20 |
+| `EA16` | 1 | 1 |
+| `EA01`-`EA04`, `EA06`, `EA07`, `EA09`-`EA12`, `EA17`-`EA21` | 0 | 0 |
+
+Nothing errored on either build. `EA08`'s rows are identical, not merely equal
+in count: `['CPU', 'ONNX Runtime', 296]`, `['GPU-CUDA', 'ONNX Runtime', 237]`,
+`['GPU-DirectML', 'ONNX Runtime', 205]`.
+
+`EA17` does not raise here, which note 12 says it does on the server. Both are
+true: the real layer has no `Sensor`, so its opening `MATCH` binds nothing and
+`size(r)` is never evaluated. On the **full** graph it raises.
+
+**What this does not cover.** Only the real layer, and only rows-vs-empty plus
+the one query compared row for row. The full-graph divergences in note 12
+stand unchanged.
 
 ---
 

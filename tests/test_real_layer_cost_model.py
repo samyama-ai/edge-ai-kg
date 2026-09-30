@@ -5,12 +5,16 @@ the embedded build and the 1.7.0 server: `EA08` returning fewer rows embedded,
 `EA10` and `EA12` returning none. Two of those three are not a build
 disagreement at all, and this module is the measurement that says so.
 
-`EA10` and `EA12` are the catalog's only entries that filter
-`WHERE d.fits = 1`. `fits` is written by the cost model in `etl/generate.py`
-and by nothing else -- `git log -S"fits" -- etl/real_layer.py` is empty across
-every revision -- so the real layer's `Deployment` nodes, which are MLPerf Tiny
-submission rows, do not carry it. The filter cannot match, on any engine, and
-`EA10` also selects four more properties the real layer has never had.
+Six catalog queries mention `fits`, and `EA10` and `EA12` are the only two
+that `fits` **alone** empties -- derived below by stripping the predicate,
+not claimed here. (`EA03`, `EA06` and `EA07` filter on it too and `EA04`
+reads it inside a `CASE`; all four are empty for a different reason, their
+opening patterns binding nothing on the real layer.) `fits` is written by the
+cost model in `etl/generate.py` and by nothing else -- `git log -S"fits" --
+etl/real_layer.py` is empty across every revision -- so the real layer's
+`Deployment` nodes, which are MLPerf Tiny submission rows, do not carry it.
+The filter cannot match, on any engine, and `EA10` also selects four more
+properties the real layer has never had.
 
 So they are **generated-layer queries**: the same kind of absence the README
 already documents for the six clinical-spine labels, not a divergence.

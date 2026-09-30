@@ -285,6 +285,14 @@ def note_8b(client, scale: int):
     The CLAUDE.md rule is "use `IS NULL` / `IS NOT NULL`". Load-bearing: `EA11`
     filtered on `kind <> "MCU-CPU"` until #69, and a null `kind` matching would
     have counted a node the query meant to exclude.
+
+    **A FIXED here is about the embedded build only, and for this probe that
+    is not a formality.** Measured 2026-09-30 while closing #114: the 1.7.0
+    server still matches `<>` against a missing property, where embedded
+    1.7.1 does not. So this probe reports FIXED and the rule still has to be
+    followed by anything a `--url` user runs. `docs/engine-notes.md`'s 8b
+    section carries both builds; supporting `--url` here is what would let
+    this probe say so itself.
     """
     reset(client)
     rows(client, 'CREATE (:Q8b {id:"has", kind:"NPU"})')
