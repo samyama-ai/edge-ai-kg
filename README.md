@@ -142,22 +142,41 @@ back empty, none error:
 | Return rows | `EA05`, `EA08`, `EA13`, `EA14`, `EA15`, `EA16` |
 | Empty | `EA01`, `EA02`, `EA03`, `EA04`, `EA06`, `EA07`, `EA09`, `EA10`, `EA11`, `EA12`, `EA17`, `EA18`, `EA19`, `EA20`, `EA21` |
 
-**The embedded build still answers three of them differently** on the same
-data — `EA08` returns fewer rows, `EA10` and `EA12` return none — so it reports
-6 and 10. That is a divergence beyond
-[engine notes 10 and 11](docs/engine-notes.md),
-and **it is the one thing the 1.7.1 upgrade did not fix**: re-measured on
-2026-09-08 against `samyama` 1.7.1, the embedded split is unchanged at
-`EA05, EA08, EA13, EA14, EA15, EA16` returning rows and the other ten empty,
-none erroring. The table above is the server's answer, which is the one a
-`--url` user sees.
+An earlier server run recorded `EA10` and `EA12` returning rows here and the
+embedded build returning none, which is why the table above is headed with the
+server. **Two of those three disagreements are not a build difference**,
+measured on 2026-09-30:
 
-So #56 reconciled notes 10 and 11 by raising the embedded floor, and this
-divergence remains open behind them. It is tracked in **#114**, which carries
-the measurement and what would close it. It is not written up as an engine
-note because it has **no minimal reproduction yet** — only the whole real
-layer and a different row count — and a note without one would imply a shape
-someone could avoid.
+`EA10` and `EA12` are the catalog's only entries that filter
+`WHERE d.fits = 1`, and **no engine can match that on the real layer**. The
+real layer's 73 `Deployment` nodes are MLPerf Tiny submission rows carrying
+`round`, `division`, `availability`, `throughput_inf_s`, `accuracy` and
+`energy_uj_per_inf`. `fits` is written by the cost model in `etl/generate.py`
+and nowhere else — no revision of `etl/real_layer.py` has ever written it —
+and `EA10` reads four more of the same cost-model properties. Drop the filter
+and `EA12` returns rows, so its join traverses the real layer perfectly well;
+`EA10` returns one row of `NULL`s. **They are generated-layer queries**, the
+same kind of absence as the six empty clinical-spine labels above, and they
+belong in the Empty row on any build.
+
+`EA08` is the remaining one, and the embedded build is not the one that is
+wrong: its three rows match the same question recomputed in Python from the
+same source files. Only ONNX Runtime registers kernels in the real layer and
+no `NPU` accelerator has any, so three pairs is the whole answer.
+
+`tests/test_real_layer_cost_model.py` pins all of that, including the
+anti-vacuity half — the cost-model fields must exist on a *generated*
+deployment, or the check compares against property names nothing writes.
+
+What is still open is narrow, and it is **#114**: for the server to have
+returned rows for `EA10` and `EA12`, it would have had to match a comparison
+against a property that is not there. Embedded 1.7.1 does not — `n.fits = 1`
+and `n.fits <> 1` both match nothing, which is correct three-valued logic, and
+that probe is pinned too. Three lines against a 1.7.0 server settle it: a row
+makes it an engine note with a minimal reproduction, no row makes the original
+server figure a measurement error. It is not written up as an engine note
+before that, because a note without a reproduction implies a shape someone
+could avoid.
 
 `EA01` and `EA02` are empty rather than erroring here, on both builds — and were
 before the upgrade too. Note 10 made them raise on the old embedded build, but

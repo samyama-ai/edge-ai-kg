@@ -206,11 +206,17 @@ raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
 `tests/test_engine_version.py` checks the floor and re-runs that reproduction,
 so a downgrade fails loudly.
 
-**One embedded/server divergence does survive**, and it is not notes 10 and 11:
-on the real layer the embedded build answers `EA08`, `EA10` and `EA12`
-differently from the server (README, "What the real layer alone can answer").
-Re-measured on 1.7.1 and unchanged. It has no minimal reproduction yet, which is
-why it is not an engine note — nothing here tells you a shape to avoid.
+**An embedded/server divergence was recorded on the real layer** for `EA08`,
+`EA10` and `EA12`, and it is not notes 10 and 11 (README, "What the real layer
+alone can answer"). Two thirds of it turned out not to be a build difference:
+`EA10` and `EA12` filter `WHERE d.fits = 1`, `fits` comes from the cost model
+in `etl/generate.py`, and `etl/real_layer.py` has never written it — so they
+are generated-layer queries and no engine can answer them from the real layer.
+`EA08`'s embedded rows match a Python ground truth. What is left is one
+question for a 1.7.0 server: whether it matches a comparison against a missing
+property. Embedded 1.7.1 does not. `tests/test_real_layer_cost_model.py` pins
+all of this; **#114** carries the rest. Still not an engine note — nothing here
+tells you a shape to avoid until that probe is run.
 
 **Notes 12, 13 and 13b belong with 1-9, not with the carve-out above.** Notes
 13 and 13b return wrong rows rather than erroring; note 12 does both, and which
