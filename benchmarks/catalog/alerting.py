@@ -11,7 +11,7 @@ the Cypher rather than from prose -- holds `EA17` and `EA21`, not `EA18`.
 """
 from __future__ import annotations
 
-from benchmarks.catalog.subjects import EA17_SUBJECT
+from benchmarks.catalog.subjects import EA17_SUBJECT, MAX_STAGE_HOPS
 
 ALERTING: list[dict] = [
     {
@@ -84,36 +84,36 @@ ALERTING: list[dict] = [
         # rejects it too, and `pyproject.toml`'s `samyama>=1.7.1` floor (#104)
         # is what excludes that build.
         "cypher": """
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(x:SignalStage)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(x:SignalStage)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(x)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH x.id AS thing, min(size(r)) + 1 AS depth, count(DISTINCT o.id) AS others
 WITH "SignalStage" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m:Model)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(m:Model)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(m)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(m)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH m.id AS thing, min(size(r)) + 2 AS depth, count(DISTINCT o.id) AS others
 WITH "Model" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d:Deployment)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(d)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH d.id AS thing, min(size(r)) + 4 AS depth, count(DISTINCT o.id) AS others
 WITH "Deployment" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
 UNION ALL
-MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
+MATCH (s:Sensor)-[:FEEDS]->(:SignalStage)-[r:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b:Board)
 WHERE s.id = {subject}
-OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
+OPTIONAL MATCH (o:Sensor)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(:SignalStage)-[:PRECEDES]->(:Model)<-[:VARIANT_OF]-(:ModelVariant)<-[:OF_VARIANT]-(:Deployment)-[:ON_BOARD]->(b)
 WHERE o.id IS NOT NULL AND o.id <> {subject}
 WITH b.id AS thing, min(size(r)) + 5 AS depth, count(DISTINCT o.id) AS others
 WITH "Board" AS kind, count(thing) AS affected,
@@ -128,7 +128,8 @@ WITH t.id AS thing, 1 AS depth, count(DISTINCT o.id) AS others
 WITH "ClinicalTask" AS kind, count(thing) AS affected,
      sum(CASE WHEN others = 0 THEN 1 ELSE 0 END) AS only_via_me, min(depth) AS nearest
 RETURN kind, affected, only_via_me, nearest
-""".replace("{subject}", f'"{EA17_SUBJECT}"'),
+""".replace("{subject}", f'"{EA17_SUBJECT}"')
+   .replace("{hops}", str(MAX_STAGE_HOPS)),
     },
     {
         "id": "EA18",

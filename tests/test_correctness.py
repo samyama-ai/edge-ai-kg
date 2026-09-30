@@ -572,30 +572,37 @@ def test_no_query_is_excused_that_actually_returns_rows(loaded):
 EMBEDDED_ONLY = {"EA17", "EA21"}
 
 
-def test_the_embedded_only_set_is_exactly_the_queries_with_an_unbounded_walk():
-    """Derived from the Cypher, not copied from the docs.
+def test_every_embedded_only_query_walks_a_variable_length_relationship():
+    """What is still derivable once the walks are bounded.
 
-    An unbounded `*0..` is the shape note 12 says the server will not walk, and
-    `size(r)` over one is the shape it rejects outright. A bounded walk is not
-    the same thing: `EA07`'s `*0..3` runs on the server and returns only the
-    zero-length match -- wrong rows, not an error -- so it is a note-12 victim
-    without being embedded-only, and the distinction is the one the pages get
-    wrong when they are edited by hand.
+    This test used to derive `EMBEDDED_ONLY` from the Cypher: an unbounded
+    `*0..` was the shape note 12 says the server will not walk. Bounding
+    `EA17` and `EA21` for the 1.8 planner (engine note 14) took that
+    derivation away -- they now look exactly like `EA07`'s `*0..3`, which is a
+    note-12 victim *without* being embedded-only, because wrong rows and a
+    refusal are different failures.
+
+    So the set is hand-maintained now, and this checks the half that a machine
+    can still check: every query in it walks a variable-length relationship,
+    and at least one query outside it does too, so the file cannot pass on a
+    catalog where the distinction has quietly collapsed. Why each entry is in
+    the set is prose, in note 12 and note 14 -- `EA17` calls `size(r)` and the
+    server rejects it outright, `EA21` gets a plausible-looking wrong ranking.
     """
     import re
 
-    unbounded = {qid for qid, spec in BY_ID.items()
-                 if re.search(r"\*\d*\.\.(?!\d)", spec["cypher"])}
-    assert unbounded == EMBEDDED_ONLY, (
-        f"queries with an unbounded variable-length walk are {sorted(unbounded)}, "
-        f"but EMBEDDED_ONLY says {sorted(EMBEDDED_ONLY)}. Whichever moved, "
-        f"`docs/engine-notes.md` note 12, `CLAUDE.md` and `README.md` all name "
-        f"this set in prose and need the same edit.")
+    variable_length = {qid for qid, spec in BY_ID.items()
+                       if re.search(r"\*\d*\.\.\d*\]", spec["cypher"])}
+    missing = EMBEDDED_ONLY - variable_length
+    assert not missing, (
+        f"{sorted(missing)} are named embedded-only but walk no variable-length "
+        f"relationship. If a query stopped walking one, note 12, note 14, "
+        f"`CLAUDE.md` and `README.md` all name this set in prose and need the "
+        f"same edit.")
 
-    bounded = {qid for qid, spec in BY_ID.items()
-               if re.search(r"\*\d*\.\.\d", spec["cypher"])}
-    assert bounded and not (bounded & EMBEDDED_ONLY), (
-        f"expected at least one bounded walk outside the embedded-only set "
-        f"(EA07 today); got bounded={sorted(bounded)}. Without one, this test "
-        f"would pass on a catalog where every walk is unbounded and the "
-        f"distinction it exists to hold had collapsed.")
+    outside = variable_length - EMBEDDED_ONLY
+    assert outside, (
+        f"every variable-length walk in the catalog is embedded-only "
+        f"({sorted(variable_length)}), so this test would pass on a catalog "
+        f"where the distinction between a refusal and wrong rows had "
+        f"collapsed. `EA07` is the entry that keeps it honest.")

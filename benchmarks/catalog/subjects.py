@@ -26,6 +26,28 @@ EA17_SUBJECT = "sensor:00000"
 # from `benchmarks.queries`, is how a caller asks about a different set.
 EA21_ALERTS = ("sensor:00000", "sensor:00003", "sensor:00007")
 
+# The upper hop bound on every `NEXT_STAGE` walk in `EA17` and `EA21`, and the
+# reason they run on an engine newer than 1.7.1 at all.
+#
+# From `samyama` 1.8.0 the planner refuses an unbounded variable-length
+# pattern that produces over a million paths (engine note 14). `EA17` and
+# `EA21` walk a stage graph that contains cycles, so the *path* count explodes
+# even though the graph is tiny -- 16 stages, and a sensor reaches all of
+# them.
+#
+# 8 is measured, not guessed. On the shipped fleet at `--scale 1.0` the
+# deepest chain reachable from any sensor is **5 hops** (median 4,
+# distribution 1:1, 3:4, 4:8, 5:1 across the 14 sensors), so every answer is
+# complete well inside this bound and bounding changes no result --
+# `tests/test_bounded_walks.py` compares bounded against unbounded row for row
+# rather than taking that on trust, and fails if the fleet ever grows a chain
+# within two hops of the bound.
+#
+# It is a real limit, not decoration: a graph whose chains passed 8 hops would
+# have its blast radius silently truncated, which is why #110 argued against a
+# cap. The guard is what makes the cap safe to carry.
+MAX_STAGE_HOPS = 8
+
 
 def alert_list(alert_ids) -> str:
     """The Cypher list literal for an alert set, escaped.

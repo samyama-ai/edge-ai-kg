@@ -895,7 +895,33 @@ mirror image of this: the 1.7.0 *server* returns only the zero-length match
 for the same pattern, where 1.8.0 refuses it and 1.7.1 embedded walks it.
 Three builds, three behaviours, one pattern.
 
-**Workaround used here: none, and that is the point.** `pyproject.toml`
+**Workaround, as of 2026-09-30: the walks are bounded, and it is not enough.**
+`EA17` and `EA21` now walk `NEXT_STAGE*0..8` (`benchmarks/catalog/subjects.py`,
+`MAX_STAGE_HOPS`). 8 is measured: the deepest chain reachable from any sensor
+on the shipped fleet is **5 hops** (median 4, across 14 sensors), so every
+answer is complete well inside it, and `tests/test_bounded_walks.py` compares
+bounded against unbounded row for row rather than trusting that.
+
+On 1.9.0 the bound fixes **`EA21`** — it runs and returns the same ranking.
+It does **not** fix `EA17`:
+
+| bound | `EA17` on 1.9.0 |
+|---|---|
+| unbounded | `PlanningFailed`, over a million paths |
+| `*0..8`, `*0..6`, `*0..5` | **`Query timed out after 1 row`** |
+| `*0..3` | runs, and truncates — 12 stages instead of 16 |
+
+Five hops is the minimum for a complete answer and three is the most that
+completes in time, so on 1.9.0 `EA17` cannot be both correct and fast. The
+cost is its five `OPTIONAL MATCH` legs, each carrying a walk and then four
+more hops, not the walk length — which makes this a query-shape problem
+rather than a bound to tune. **The `samyama>=1.7.1,<1.8` ceiling therefore
+stays**, and reshaping `EA17` is what would lift it.
+
+The bound is still worth carrying at 1.7.1: it removes the failure for `EA21`
+entirely, and it is what any future engine upgrade would have needed anyway.
+
+**What a bound costs, for the record.** `pyproject.toml`
 declares `samyama>=1.7.1,<1.8`, which buys reproducibility and fixes nothing.
 Bounding the walks changes what they answer — `EA17` reports how *deep* the
 blast radius goes, and a cap silently truncates that — so it is a

@@ -6,7 +6,12 @@ simultaneous alerts is upstream of the others.
 """
 from __future__ import annotations
 
-from benchmarks.catalog.subjects import EA17_SUBJECT, EA21_ALERTS, alert_list
+from benchmarks.catalog.subjects import (
+    EA17_SUBJECT,
+    EA21_ALERTS,
+    MAX_STAGE_HOPS,
+    alert_list,
+)
 
 TRIAGE: list[dict] = [
     {
@@ -230,13 +235,14 @@ ORDER BY on_recalled_board DESC
         "cypher": """
 MATCH (s:Sensor)
 WHERE s.id IN {alerts}
-OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
+OPTIONAL MATCH (s)-[:FEEDS]->(:SignalStage)-[:NEXT_STAGE*0..{hops}]->(x:SignalStage)<-[:FEEDS]-(o:Sensor)
 WHERE o.id IN {alerts} AND o.id <> s.id
 WITH s.id AS alert, count(DISTINCT o.id) AS downstream_alerts,
      collect(DISTINCT o.id) AS reaches
 RETURN alert, downstream_alerts, reaches
 ORDER BY downstream_alerts DESC
 LIMIT 20
-""".replace("{alerts}", alert_list(EA21_ALERTS)),
+""".replace("{alerts}", alert_list(EA21_ALERTS))
+   .replace("{hops}", str(MAX_STAGE_HOPS)),
     },
 ]

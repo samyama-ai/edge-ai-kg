@@ -24,6 +24,7 @@ import pathlib
 
 import pytest
 
+from benchmarks.catalog.subjects import MAX_STAGE_HOPS
 from benchmarks.queries import BY_ID, EA17_SUBJECT
 from etl.helpers import create_edges, create_nodes
 from tests.test_blast_radius import (
@@ -190,13 +191,20 @@ def one_row_per_kind(records):
     return {row[0]: (row[1], row[2]) for row in records}
 
 
-def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
-    """The reason `EA17` is `*0..` and not `*0..N`.
+def test_the_bound_truncates_a_chain_longer_than_it(engine_factory):
+    """What `MAX_STAGE_HOPS` costs, kept visible rather than argued away.
 
-    A chain of 12 stages, longer than any bound someone would write by hand. The
-    bounded query finds the near end and stops; the unbounded one reaches the
-    model at the far end. This is the assertion that makes "unbounded" a
-    requirement rather than a preference.
+    A chain of 12 stages, longer than the bound. The bounded query finds the
+    near end and stops; the unbounded one reaches the model at the far end.
+
+    This test argued for `*0..` until engine note 14 made unbounded
+    impossible: from `samyama` 1.8.0 the planner refuses it outright. The
+    demonstration is kept, with its conclusion changed from "a bound is
+    unacceptable" to "a bound has a cost, and this is exactly what it is".
+    What makes the cost tolerable is not this fixture but
+    `tests/test_bounded_walks.py`, which fails if the shipped fleet ever grows
+    a chain within two hops of `MAX_STAGE_HOPS` -- today the deepest is 5
+    against a bound of 8.
 
     Purpose-built rather than taken from the shipped graph, and the reason is
     not the one an earlier version of this comment gave. That version cited
@@ -224,16 +232,18 @@ def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
                   "far-model", None))
     create_edges(client, GRAPH, edges)
 
-    unbounded = BY_ID["EA17"]["cypher"]
-    bounded = unbounded.replace("*0..]", "*0..3]")
+    bounded = BY_ID["EA17"]["cypher"]
+    unbounded = bounded.replace(f"*0..{MAX_STAGE_HOPS}]", "*0..]")
+    assert unbounded != bounded, "EA17 no longer carries the bound this test measures"
 
     got_unbounded = one_row_per_kind(client.query(unbounded, GRAPH).records)
     got_bounded = one_row_per_kind(client.query(bounded, GRAPH).records)
 
     assert got_unbounded["SignalStage"][0] == depth, (
         f"unbounded should reach all {depth} stages, got {got_unbounded}")
-    assert got_bounded["SignalStage"][0] == 4, (
-        f"*0..3 reaches the first four stages only, got {got_bounded}")
+    assert got_bounded["SignalStage"][0] == MAX_STAGE_HOPS + 1, (
+        f"a bound of {MAX_STAGE_HOPS} reaches the first {MAX_STAGE_HOPS + 1} "
+        f"stages only, got {got_bounded}")
     assert got_unbounded["Model"][0] == 1, (
         f"the model at the far end is downstream and must be reported: "
         f"{got_unbounded}")
@@ -242,7 +252,7 @@ def test_fixed_depth_misses_the_far_end_of_a_long_chain(engine_factory):
     assert got_unbounded["SignalStage"][1] == depth, (
         f"with a single sensor every stage stops with it: {got_unbounded}")
     assert got_bounded.get("Model", (0, 0, 0))[0] == 0, (
-        f"a bound of 3 cannot reach a model {depth} stages away, yet the bounded "
+        f"a bound of {MAX_STAGE_HOPS} cannot reach a model {depth} stages away, yet the bounded "
         f"query reported {got_bounded.get('Model')}. If this fails, the bound is "
         f"no longer doing what the test assumes and the comparison is void.")
 
