@@ -160,12 +160,31 @@ queries with rows, same counts, and `EA08` row-for-row identical
 > `EA12` return 5 rows each. To get the table above, start the server from an
 > empty data directory. This is measured, not inferred.
 
-**That settles #114**, and not the way this section used to claim. The
-2026-09-09 sweep that put `EA10` and `EA12` in the *returning rows* side was
-not a mistake — it was a server that had held the full fleet, and the
-divergence it recorded is real. It is **engine note 8**, which embedded 1.7.1
+**That accounts for the `EA10` and `EA12` half of #114**, and not the way
+this section used to claim. The older sweep that put them in the *returning
+rows* side was not a mistake — it was a server that had held the full fleet.
+The divergence is real, and it is **engine note 8**, which embedded 1.7.1
 fixed and the 1.7.0 server did not, showing up as two queries that read a
 property the real layer does not have.
+
+Two records of that sweep disagreed, so this says which is trusted: this
+README listed `EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16`
+as returning rows at `578171d` (2026-09-02), and a later edit cut the table to
+six while leaving the server heading on it. The reused-server run above
+returns rows for exactly those eight ids, so the `578171d` table is the one
+that matches a measurement and the later table was the embedded set under the
+wrong heading.
+
+**`EA08` is the part that stays unexplained.** #114 also recorded it returning
+fewer rows embedded than over HTTP. It returns the same three rows on a fresh
+server, a reused one and embedded, and note 8 gives no mechanism — it brings
+back property columns, and `EA08` reads none. That half has no reproduction.
+
+**Nothing re-runs the server half of the table above.** The embedded column is
+re-measured by `tests/test_real_layer_shape.py` on every test run; the server
+column was measured once, by hand, with its command recorded in the engine
+notes. Read the heading as "measured on both", not as "checked on both by
+CI".
 
 Why `EA10` and `EA12` cannot return rows on either build: both filter
 `WHERE d.fits = 1`, and the real layer's 73 `Deployment` nodes are MLPerf Tiny

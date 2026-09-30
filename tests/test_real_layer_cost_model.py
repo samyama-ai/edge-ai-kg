@@ -1,4 +1,4 @@
-"""Why `EA10` and `EA12` are empty on the real layer, and why no engine changes it.
+"""Why `EA10` and `EA12` are empty on a freshly loaded real layer.
 
 #114 recorded three queries answering differently on the real layer between
 the embedded build and the 1.7.0 server: `EA08` returning fewer rows embedded,
@@ -191,9 +191,12 @@ def test_ea10_and_ea12_are_empty_because_the_cost_model_is_generated(
       needs no property -- which is the shape that says the deployments are
       there and their cost-model columns are not.
 
-    Neither depends on which engine runs it, and that is now measured rather
-    than argued: the same real layer loaded into the 1.7.0 HTTP server returns
-    the same nothing (see this module's docstring).
+    Neither depends on which engine runs it **on a graph loaded from
+    nothing**, and that is measured rather than argued: the same real layer
+    loaded into a freshly started 1.7.0 HTTP server returns the same nothing.
+    It does depend on the graph's history -- loaded over a previous full
+    fleet, the server returns 5 rows for each, which is engine note 8 and is
+    what #114 recorded. This module's docstring has both.
     """
     client, _fleet = real_only
 
@@ -363,8 +366,11 @@ def test_a_comparison_against_a_missing_property_matches_nothing(
             "EA10 and EA12 would then return rows from the real layer, and "
             "#114's server-side reading is this build's behaviour too.")
         assert ids("n.fits <> 1") == [], (
-            "this build matches `<> 1` against a missing property, so it "
-            "treats the comparison as false rather than NULL. That is a "
-            "finding worth an engine note in its own right.")
+            "this build matches `<> 1` against a missing property, treating "
+            "the comparison as false rather than NULL. That is engine note "
+            "8b, which the 1.7.0 server still shows and embedded 1.7.1 does "
+            "not -- so if this fires, the embedded build has regressed to the "
+            "server's behaviour and every `<>` in the catalog needs its "
+            "`IS NOT NULL` guard re-checked.")
     finally:
         client.query("MATCH (n:CostModelProbe) DETACH DELETE n", GRAPH)

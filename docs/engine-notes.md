@@ -785,8 +785,23 @@ tiny:v1.2:0019    1       GPU-Embedded        0.596
 ```
 
 27 of the 73 match `d.fits = 1`. **`EA10` returns 5 rows and `EA12` returns 5
-rows**, where a fresh server returns none of each. That is the 2026-09-09
-figure, reproduced on demand.
+rows**, where a fresh server returns none of each.
+
+The whole catalog was run in that state. Exactly eight queries return rows --
+`EA05`, `EA08`, `EA10`, `EA12`, `EA13`, `EA14`, `EA15`, `EA16` -- which is the
+set `README.md` carried at `578171d` (2026-09-02) under "Against the HTTP
+server", query for query. The reconstruction is not an argument that this is
+what happened; it is the same eight ids.
+
+**`EA08` is not explained by this, and is not explained at all.** It returns
+the same three rows -- `CPU`/296, `GPU-CUDA`/237, `GPU-DirectML`/205 -- on a
+fresh server, on a reused one, and embedded. Note 8 resurrects property
+*columns*, not edges, and `EA08` reads `Accelerator.kind` and `Runtime.name`,
+which real-layer nodes carry anyway, so there is no mechanism here for it to
+bite. #114's record of "`EA08` returns fewer rows embedded" has no
+reproduction and no explanation. One candidate, **unmeasured**: `ORT_REF` was
+unpinned until #124 and kernel registrations drifted (734, 738, 743), so two
+runs taken weeks apart read different upstream data. Nothing here tests that.
 
 **It is note 8**, and the same sequence run against embedded 1.7.1 -- full
 fleet, reset, real layer -- leaves `fits` and `accelerator_kind` `NULL` and

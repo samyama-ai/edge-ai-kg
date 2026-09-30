@@ -207,8 +207,11 @@ raise -- it silently drops a `WHERE` on `sum(CASE ...)` and returns extra rows.
 so a downgrade fails loudly.
 
 **An embedded/server divergence was recorded on the real layer** for `EA08`,
-`EA10` and `EA12` (README, "What the real layer alone can answer"). **It is
-real, and it is engine note 8.** Measured 2026-09-30: into a *freshly started*
+`EA10` and `EA12` (README, "What the real layer alone can answer"). **The
+`EA10`/`EA12` half is real and is engine note 8. The `EA08` half is
+unexplained** -- it returns the same three rows on a fresh server, a reused
+one and embedded, and note 8 resurrects property columns, which `EA08` does
+not read. Measured 2026-09-30: into a *freshly started*
 `ghcr.io/samyama-ai/samyama-graph:1` the server answers the whole catalog
 exactly as embedded 1.7.1 does, `EA08` included. Onto a server that had held
 the full fleet, `--layers real` brings the generated cost model's `fits`,
