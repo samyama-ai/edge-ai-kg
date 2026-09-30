@@ -21,10 +21,13 @@ way. If `EA17` is ever reshaped for the server, the `--url` skip still has to
 stay until this query is too.
 
 `TASKS_OVER_BUDGET` carries `MAX_STAGE_HOPS` like the catalog walks do, for
-engine note 14's reason. It is not in `QUERIES`, so
-`tests/test_bounded_walks.py::test_every_walk_carries_the_bound` reaches into
-this module by name to check it -- the guard used to scan the catalog alone,
-and this query is exactly what that blind spot would have hidden.
+engine note 14's reason. It is not in `QUERIES`, so the guard that keeps the
+walks bounded -- `tests/test_bounded_walks.py::test_every_walk_carries_the_bound`
+-- covers it by parsing this file's source and reading every Cypher-looking
+string literal out of the AST, `TASKS_OVER_BUDGET` among them. That scan also
+covers `mcp_server/server.py`, which builds its queries inside functions where
+nothing module-level holds them. The guard used to scan the catalog alone, and
+this query is exactly what that blind spot would have hidden.
 """
 from __future__ import annotations
 
