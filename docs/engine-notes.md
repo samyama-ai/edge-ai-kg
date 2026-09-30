@@ -684,10 +684,14 @@ query had to change.
 > `{"EA17", "EA21"}`. It used to be checked against a set derived from the
 > Cypher -- every query whose walk was unbounded -- but note 14 bounded both
 > of these, and `EA07` walks the same relationship bounded and is *not*
-> embedded-only, so shape no longer separates them. What the test still
-> derives is the weaker direction: an embedded-only query must at least walk a
-> variable-length relationship. A new query that the server would answer
-> wrongly has to be added here and to the pages by a person. It checks none of
+> embedded-only, so shape no longer separates them. The test derives two
+> things from the Cypher instead. An embedded-only query must at least walk a
+> variable-length relationship -- which catches a spurious entry. And every
+> query that walks one must be *classified*: either in `EMBEDDED_ONLY`, or in
+> `VARIABLE_LENGTH_BUT_SERVER_SAFE`, which holds `EA07` with the reason
+> written beside it. A new walking query fails that test until somebody
+> decides, which is the missing-entry direction and the dangerous one. Which
+> set it belongs in is still a person's judgement. It checks none of
 > the prose above -- what the server actually returns for `EA21` is unmeasured,
 > and no test can settle that without a 1.7.0 server to run it against.
 >

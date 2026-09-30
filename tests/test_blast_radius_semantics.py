@@ -202,9 +202,11 @@ def test_the_bound_truncates_a_chain_longer_than_it(engine_factory):
     demonstration is kept, with its conclusion changed from "a bound is
     unacceptable" to "a bound has a cost, and this is exactly what it is".
     What makes the cost tolerable is not this fixture but
-    `tests/test_bounded_walks.py`, which fails if the shipped fleet ever grows
-    a chain within two hops of `MAX_STAGE_HOPS` -- today the deepest is 5
-    against a bound of 8.
+    `tests/test_bounded_walks.py`, which re-measures the fleet's deepest
+    chain against `MAX_STAGE_HOPS` on every run and fails while there is
+    still headroom. The figures live beside the constant in
+    `benchmarks/catalog/subjects.py`; repeating them here is how the last
+    copy went stale.
 
     Purpose-built rather than taken from the shipped graph, and the reason is
     not the one an earlier version of this comment gave. That version cited
@@ -386,6 +388,7 @@ CYCLIC_PROBE = """
 import json, sys
 from samyama import SamyamaClient
 from etl.helpers import create_edges, create_nodes
+from benchmarks.catalog.subjects import MAX_STAGE_HOPS
 from tests.test_blast_radius import retargeted_ea17
 
 GRAPH = "default"
@@ -398,7 +401,15 @@ create_edges(client, GRAPH, [
     ("SignalStage", "stage:a", "NEXT_STAGE", "SignalStage", "stage:b", None),
     ("SignalStage", "stage:b", "NEXT_STAGE", "SignalStage", "stage:a", None),
 ])
-rows = client.query(retargeted_ea17("sensor:cycle"), GRAPH).records
+# The **unbounded** variant, deliberately. `MAX_STAGE_HOPS` would stop this
+# walk after 8 hops whatever the engine did with cycles, so the bounded query
+# cannot measure the claim this probe exists for -- that relationship
+# uniqueness is what terminates the walk. Legal on 1.7.1; note 14's planner
+# refusal starts at 1.8.0.
+cypher = retargeted_ea17("sensor:cycle").replace(
+    "*0..%d]" % MAX_STAGE_HOPS, "*0..]")
+assert "*0..]" in cypher, "EA17 no longer carries the bound this probe removes"
+rows = client.query(cypher, GRAPH).records
 print(json.dumps([list(row) for row in rows]))
 """
 
@@ -433,9 +444,10 @@ def ea17_on_a_cyclic_chain_within(seconds):
         proc.communicate()
         pytest.fail(
             f"EA17 did not return within {seconds}s on a cyclic NEXT_STAGE "
-            f"chain. The walk is `*0..` with no depth cap, so this is the "
-            f"query failing to terminate -- in `run_benchmark` it would read "
-            f"as a hung sweep. The probe process was killed.")
+            f"chain. The probe runs the walk with its bound removed, so "
+            f"nothing but relationship uniqueness can stop it -- this is that "
+            f"guarantee failing, and in `run_benchmark` on an engine without "
+            f"it a sweep would hang. The probe process was killed.")
     assert proc.returncode == 0, (
         f"the cyclic-chain probe exited {proc.returncode} rather than "
         f"answering:\n{err[-600:]}")
@@ -457,14 +469,22 @@ def test_the_walk_terminates_on_a_cyclic_chain():
     because the 1.8 planner requires a bound (note 14), not because the graph
     is acyclic.
 
-    **It terminates anyway**, and would even with no bound at all, because
-    Cypher's variable-length matching does
+    **It terminates anyway**, because Cypher's variable-length matching does
     not traverse the same relationship twice within one path, so the walk is
     bounded by the number of `NEXT_STAGE` edges rather than by the graph being
     acyclic. That is a property of the engine, not of the data, which is
     exactly the kind of thing this repo does not take on trust: this builds the
     smallest cyclic chain -- two stages pointing at each other -- and runs the
     real catalog query against it.
+
+    **With the bound removed**, which is the only way to measure that.
+    `MAX_STAGE_HOPS` would stop this walk after 8 hops whatever the engine did
+    with cycles, so running the query as it ships would prove the bound works
+    and say nothing about relationship uniqueness -- a test that cannot fail.
+    The unbounded form is legal on the 1.7.1 floor; note 14's planner refusal
+    begins at 1.8.0, which is what the `<1.8` ceiling holds off. If that
+    ceiling is ever lifted, this probe is one of the things that has to be
+    re-thought rather than re-run.
 
     A hang here is a hang in `run_benchmark`, so if this ever stops returning,
     that is the finding.

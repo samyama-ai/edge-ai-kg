@@ -209,10 +209,13 @@ bound now (`MAX_STAGE_HOPS`, #126). **What the bound buys was measured on
 1.9.0 only**: 1.8.0 was installed and run at the time the refusal was found,
 but the bounded queries have been tried on 1.9.0 alone, so what follows is
 1.9.0's behaviour and 1.8.0's is inferred from the two releases refusing the
-unbounded form identically. On 1.9.0 the bound is enough for `EA21`, while
-`EA17` times out at every bound deep enough to answer completely and
-truncates at every bound fast enough to finish. So the ceiling stays, and the remaining
-work on `EA17` is reshaping the query rather than raising it.
+unbounded form identically. On 1.9.0 the bound is enough for `EA21`. `EA17`
+times out at all three bounds deep enough to answer completely that were
+tried — 5, 6 and 8 hops — and the one shallower bound tried, 3 hops,
+completed but returned 12 of 16 stages. Nothing between 3 and 5 was tried, so
+"fast enough means truncated" is the pattern those four points show rather
+than a boundary anyone located. So the ceiling stays: lifting it needs `EA17`
+**reshaped**, not a different hop count.
 
 `EA17` is empty here because the real layer has no `Sensor` — the clinical spine
 is entirely generated.
@@ -527,8 +530,8 @@ Notes 10 and 11 need no workaround in the catalog: #56 resolved both by
 raising the floor, and neither reproduces on `samyama>=1.7.1`. Note 12 has no
 workaround either, and bounding the walks did not become one: the server
 matches only the zero-length case for **every** form of a variable-length
-pattern, bounded or not, so `*0..8` is no more executable there than `*0..`
-was. `EA17` and `EA21` stay embedded-only. What a bound did change is which
+pattern, bounded or not, so a walk bounded at `MAX_STAGE_HOPS` is no more
+executable there than the unbounded one was. `EA17` and `EA21` stay embedded-only. What a bound did change is which
 *newer* engines accept the pattern at all — a different problem, engine note
 14.
 
